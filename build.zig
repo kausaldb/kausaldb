@@ -1,60 +1,18 @@
 const std = @import("std");
 
-const TestCategory = enum {
-    unit,
-    integration,
-    ingestion,
-    simulation,
-    stress,
-    performance,
-    fault_injection,
-    recovery,
-    safety,
-    defensive,
+const TestType = enum {
+    unit,        // Unit tests in src files
+    integration, // Integration tests in src/tests/
+    e2e,        // End-to-end tests in tests/
 
-    fn description(self: TestCategory) []const u8 {
+    fn description(self: TestType) []const u8 {
         return switch (self) {
-            .unit => "unit tests from src/ modules",
-            .integration => "integration and server tests",
-            .ingestion => "ingestion pipeline and backpressure tests",
-            .simulation => "deterministic simulation tests",
-            .stress => "stress and memory pressure tests",
-            .performance => "performance benchmarks and validations",
-            .fault_injection => "fault injection and error handling tests",
-            .recovery => "WAL recovery and corruption tests",
-            .safety => "memory safety and ownership tests",
-            .defensive => "defensive programming validation tests",
+            .unit => "unit tests from source modules",
+            .integration => "integration tests with full API access",
+            .e2e => "end-to-end binary interface tests",
         };
     }
 };
-
-const TestGroup = struct {
-    category: TestCategory,
-    patterns: []const []const u8,
-};
-
-const test_groups = [_]TestGroup{
-    .{ .category = .integration, .patterns = &.{ "integration_", "server_", "cli_" } },
-    .{ .category = .ingestion, .patterns = &.{"ingestion_"} },
-    .{ .category = .simulation, .patterns = &.{"simulation_"} },
-    .{ .category = .stress, .patterns = &.{"stress_"} },
-    .{ .category = .performance, .patterns = &.{"performance_"} },
-    .{ .category = .fault_injection, .patterns = &.{"fault_injection_"} },
-    .{ .category = .recovery, .patterns = &.{"recovery_"} },
-    .{ .category = .safety, .patterns = &.{"safety_"} },
-    .{ .category = .defensive, .patterns = &.{"defensive_"} },
-};
-
-fn categorize_test(test_name: []const u8) TestCategory {
-    for (test_groups) |group| {
-        for (group.patterns) |pattern| {
-            if (std.mem.startsWith(u8, test_name, pattern)) {
-                return group.category;
-            }
-        }
-    }
-    return .integration;
-}
 
 fn component_needs_libc(name: []const u8) bool {
     const libc_components = [_][]const u8{
@@ -156,14 +114,15 @@ const TestFile = struct {
 fn discover_test_files(allocator: std.mem.Allocator) !std.array_list.Managed(TestFile) {
     var discovered_tests = std.array_list.Managed(TestFile).init(allocator);
 
-    var tests_dir = std.fs.cwd().openDir("tests", .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => return discovered_tests,
+    // Discover integration tests in src/tests/
+    var src_tests_dir = std.fs.cwd().openDir("src/tests", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => {},
         else => return err,
     };
-    defer tests_dir.close();
-
-    var walker = try tests_dir.walk(allocator);
-    defer walker.deinit();
+    if (src_tests_dir) |*dir| {
+        defer dir.close();
+        var walker = try dir.walk(allocator);
+        defer walker.deinit();
 
     while (try walker.next()) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".zig")) continue;
@@ -276,45 +235,24 @@ fn create_test_executable(
     return test_exe;
 }
 
-const CategorizedTests = struct {
+const TestSuite = struct {
     unit: std.array_list.Managed(*std.Build.Step.Run),
     integration: std.array_list.Managed(*std.Build.Step.Run),
-    ingestion: std.array_list.Managed(*std.Build.Step.Run),
-    simulation: std.array_list.Managed(*std.Build.Step.Run),
-    stress: std.array_list.Managed(*std.Build.Step.Run),
-    performance: std.array_list.Managed(*std.Build.Step.Run),
-    fault_injection: std.array_list.Managed(*std.Build.Step.Run),
-    recovery: std.array_list.Managed(*std.Build.Step.Run),
-    safety: std.array_list.Managed(*std.Build.Step.Run),
-    defensive: std.array_list.Managed(*std.Build.Step.Run),
+    e2e: std.array_list.Managed(*std.Build.Step.Run),
 
-    fn get_category_tests(self: *CategorizedTests, category: TestCategory) *std.array_list.Managed(*std.Build.Step.Run) {
-        return switch (category) {
-            .unit => &self.unit,
-            .integration => &self.integration,
-            .ingestion => &self.ingestion,
-            .simulation => &self.simulation,
-            .stress => &self.stress,
-            .performance => &self.performance,
-            .fault_injection => &self.fault_injection,
-            .recovery => &self.recovery,
-            .safety => &self.safety,
-            .defensive => &self.defensive,
+    fn init(allocator: std.mem.Allocator) TestSuite {
+        return TestSuite{
+            .unit = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
+            .integration = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
+            .e2e = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
         };
     }
 
-    fn init(allocator: std.mem.Allocator) CategorizedTests {
-        return CategorizedTests{
-            .unit = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .integration = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .ingestion = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .simulation = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .stress = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .performance = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .fault_injection = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .recovery = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .safety = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .defensive = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
+    fn get_tests(self: *TestSuite, test_type: TestType) *std.array_list.Managed(*std.Build.Step.Run) {
+        return switch (test_type) {
+            .unit => &self.unit,
+            .integration => &self.integration,
+            .e2e => &self.e2e,
         };
     }
 };

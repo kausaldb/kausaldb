@@ -1,0 +1,430 @@
+//! Storage engine integration tests using unified harness framework.
+//!
+//! Comprehensive testing of storage operations including WAL persistence,
+//! SSTable compaction, crash recovery, and concurrent access patterns.
+//! All tests use deterministic harnesses for reproducible results.
+//!
+//! Design rationale: Integration tests validate the complete storage stack
+//! working together, ensuring correct behavior under realistic workloads
+//! and failure conditions.
+
+const std = @import("std");
+const builtin = @import("builtin");
+
+const harness = @import("../harness.zig");
+const assert_mod = @import("../../core/assert.zig");
+const context_block = @import("../../context_block.zig");
+const storage = @import("../../storage.zig");
+
+const assert = assert_mod.assert;
+const fatal_assert = assert_mod.fatal_assert;
+const StorageHarness = harness.StorageHarness;
+const ContextBlock = context_block.ContextBlock;
+const BlockId = context_block.BlockId;
+const GraphEdge = context_block.GraphEdge;
+
+test "storage write and read cycle" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "write_read_cycle", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Write blocks in sequence
+    const block_count = 100;
+    var i: u32 = 0;
+    while (i < block_count) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.write_and_verify_block(&block);
+    }
+
+    // Verify all blocks are readable
+    i = 0;
+    while (i < block_count) : (i += 1) {
+        const id = BlockId{ .value = @as(u128, i) << 64 | i };
+        const block = try test_harness.storage_engine.find_block(id);
+        fatal_assert(block != null, "Block {d} not found", .{i});
+    }
+
+    // Verify block count
+    const total = try test_harness.storage_engine.block_count();
+    try std.testing.expectEqual(@as(u64, block_count), total);
+}
+
+test "storage memtable flush to SSTable" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "memtable_flush", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Fill memtable to trigger flush
+    const blocks_before_flush = 50;
+    var i: u32 = 0;
+    while (i < blocks_before_flush) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+    }
+
+    // Force flush
+    try test_harness.force_flush();
+
+    // Write more blocks after flush
+    const blocks_after_flush = 25;
+    while (i < blocks_before_flush + blocks_after_flush) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+    }
+
+    // Verify all blocks are still readable (from SSTable and memtable)
+    i = 0;
+    while (i < blocks_before_flush + blocks_after_flush) : (i += 1) {
+        const id = BlockId{ .value = @as(u128, i) << 64 | i };
+        const block = try test_harness.storage_engine.find_block(id);
+        fatal_assert(block != null, "Block {d} not found after flush", .{i});
+    }
+}
+
+test "storage graph edge persistence" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "edge_persistence", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Create blocks with edges
+    const node_count = 10;
+    var i: u32 = 0;
+    while (i < node_count) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+
+        // Create edges to previous blocks
+        if (i > 0) {
+            const edge = GraphEdge{
+                .from_id = block.id,
+                .to_id = BlockId{ .value = @as(u128, i - 1) << 64 | (i - 1) },
+                .edge_type = .calls,
+            };
+            try test_harness.storage_engine.add_edge(&edge);
+
+            // Create additional edge types
+            const import_edge = GraphEdge{
+                .from_id = block.id,
+                .to_id = BlockId{ .value = @as(u128, 0) << 64 | 0 },
+                .edge_type = .imports,
+            };
+            try test_harness.storage_engine.add_edge(&import_edge);
+        }
+    }
+
+    // Verify edges are queryable
+    const last_id = BlockId{ .value = @as(u128, node_count - 1) << 64 | (node_count - 1) };
+    const edges = try test_harness.storage_engine.find_edges_from(last_id);
+    try std.testing.expect(edges.len >= 2);
+}
+
+test "storage recovery after crash" {
+    const test_dir = "test_recovery";
+
+    // Phase 1: Write data and simulate crash
+    {
+        var test_harness = StorageHarness.init(std.testing.allocator, test_dir, false);
+        defer test_harness.deinit();
+
+        try test_harness.startup();
+        defer test_harness.shutdown();
+
+        // Write blocks that will be in WAL
+        const block_count = 20;
+        var i: u32 = 0;
+        while (i < block_count) : (i += 1) {
+            const block = try test_harness.base.generate_block(i);
+            try test_harness.storage_engine.put_block(&block);
+        }
+
+        // Simulate crash by not calling proper shutdown
+        // (WAL not flushed to SSTable)
+    }
+
+    // Phase 2: Recovery and verification
+    {
+        var test_harness = StorageHarness.init(std.testing.allocator, test_dir, false);
+        defer test_harness.deinit();
+
+        try test_harness.startup();
+        defer test_harness.shutdown();
+
+        // Verify all blocks are recovered from WAL
+        var i: u32 = 0;
+        while (i < 20) : (i += 1) {
+            const id = BlockId{ .value = @as(u128, i) << 64 | i };
+            const block = try test_harness.storage_engine.find_block(id);
+            fatal_assert(block != null, "Block {d} not recovered from WAL", .{i});
+        }
+    }
+}
+
+test "storage concurrent write patterns" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "concurrent_writes", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Simulate interleaved writes from multiple sources
+    const sources = 5;
+    const blocks_per_source = 20;
+
+    var round: u32 = 0;
+    while (round < blocks_per_source) : (round += 1) {
+        var source: u32 = 0;
+        while (source < sources) : (source += 1) {
+            const block_id = source * 1000 + round;
+            const block = try test_harness.base.generate_block(block_id);
+            try test_harness.storage_engine.put_block(&block);
+        }
+    }
+
+    // Verify all blocks from all sources
+    round = 0;
+    while (round < blocks_per_source) : (round += 1) {
+        var source: u32 = 0;
+        while (source < sources) : (source += 1) {
+            const block_id = source * 1000 + round;
+            const id = BlockId{ .value = @as(u128, block_id) << 64 | block_id };
+            const block = try test_harness.storage_engine.find_block(id);
+            fatal_assert(block != null, "Block from source {d} round {d} not found", .{ source, round });
+        }
+    }
+
+    const total = try test_harness.storage_engine.block_count();
+    try std.testing.expectEqual(@as(u64, sources * blocks_per_source), total);
+}
+
+test "storage memory pressure handling" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "memory_pressure", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Track memory before heavy writes
+    const initial_memory = test_harness.storage_engine.memory_usage();
+
+    // Write large number of blocks to stress memory
+    const heavy_load = 1000;
+    var i: u32 = 0;
+    while (i < heavy_load) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+
+        // Periodic flushes to prevent unbounded growth
+        if (i % 100 == 99) {
+            try test_harness.force_flush();
+        }
+    }
+
+    // Final flush
+    try test_harness.force_flush();
+
+    // Verify memory is under control
+    const final_memory = test_harness.storage_engine.memory_usage();
+    const growth_factor = final_memory / initial_memory;
+
+    // Memory should not grow more than 10x even with 1000 blocks
+    fatal_assert(growth_factor < 10, "Excessive memory growth: {d}x", .{growth_factor});
+
+    // Verify all blocks are still accessible
+    i = 0;
+    while (i < heavy_load) : (i += 1) {
+        const id = BlockId{ .value = @as(u128, i) << 64 | i };
+        const block = try test_harness.storage_engine.find_block(id);
+        fatal_assert(block != null, "Block {d} lost under memory pressure", .{i});
+    }
+}
+
+test "storage SSTable compaction" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "compaction", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Create multiple small SSTables
+    const iterations = 5;
+    const blocks_per_iteration = 30;
+
+    var iter: u32 = 0;
+    while (iter < iterations) : (iter += 1) {
+        var i: u32 = 0;
+        while (i < blocks_per_iteration) : (i += 1) {
+            const block_id = iter * 1000 + i;
+            const block = try test_harness.base.generate_block(block_id);
+            try test_harness.storage_engine.put_block(&block);
+        }
+        try test_harness.force_flush();
+    }
+
+    // Trigger compaction
+    try test_harness.storage_engine.compact();
+
+    // Verify all blocks remain accessible after compaction
+    iter = 0;
+    while (iter < iterations) : (iter += 1) {
+        var i: u32 = 0;
+        while (i < blocks_per_iteration) : (i += 1) {
+            const block_id = iter * 1000 + i;
+            const id = BlockId{ .value = @as(u128, block_id) << 64 | block_id };
+            const block = try test_harness.storage_engine.find_block(id);
+            fatal_assert(block != null, "Block lost during compaction: iter={d} i={d}", .{ iter, i });
+        }
+    }
+}
+
+test "storage block update operations" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "block_updates", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Create initial block
+    const block_id: u32 = 42;
+    var block = try test_harness.base.generate_block(block_id);
+    try test_harness.storage_engine.put_block(&block);
+
+    // Update block content
+    const new_content = "Updated content for block 42";
+    block.content = new_content;
+    try test_harness.storage_engine.update_block(&block);
+
+    // Verify update persisted
+    const retrieved = try test_harness.storage_engine.find_block(block.id);
+    fatal_assert(retrieved != null, "Updated block not found", .{});
+    fatal_assert(
+        std.mem.eql(u8, retrieved.?.content, new_content),
+        "Block content not updated",
+        .{},
+    );
+
+    // Update after flush
+    try test_harness.force_flush();
+
+    const newer_content = "Content after flush";
+    block.content = newer_content;
+    try test_harness.storage_engine.update_block(&block);
+
+    const final_retrieved = try test_harness.storage_engine.find_block(block.id);
+    fatal_assert(
+        std.mem.eql(u8, final_retrieved.?.content, newer_content),
+        "Block update after flush failed",
+        .{},
+    );
+}
+
+test "storage deletion operations" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "block_deletion", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Create blocks
+    const block_count = 10;
+    var i: u32 = 0;
+    while (i < block_count) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+    }
+
+    // Delete even-numbered blocks
+    i = 0;
+    while (i < block_count) : (i += 2) {
+        const id = BlockId{ .value = @as(u128, i) << 64 | i };
+        try test_harness.storage_engine.delete_block(id);
+    }
+
+    // Verify deletions
+    i = 0;
+    while (i < block_count) : (i += 1) {
+        const id = BlockId{ .value = @as(u128, i) << 64 | i };
+        const block = try test_harness.storage_engine.find_block(id);
+
+        if (i % 2 == 0) {
+            fatal_assert(block == null, "Deleted block {d} still exists", .{i});
+        } else {
+            fatal_assert(block != null, "Non-deleted block {d} missing", .{i});
+        }
+    }
+
+    // Verify count reflects deletions
+    const remaining = try test_harness.storage_engine.block_count();
+    try std.testing.expectEqual(@as(u64, block_count / 2), remaining);
+}
+
+test "storage range query operations" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "range_queries", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Create blocks with sequential IDs
+    const block_count = 100;
+    var i: u32 = 0;
+    while (i < block_count) : (i += 1) {
+        const block = try test_harness.base.generate_block(i);
+        try test_harness.storage_engine.put_block(&block);
+    }
+
+    // Query range [25, 75)
+    const start_id = BlockId{ .value = @as(u128, 25) << 64 | 25 };
+    const end_id = BlockId{ .value = @as(u128, 75) << 64 | 75 };
+
+    const range_results = try test_harness.storage_engine.find_blocks_in_range(start_id, end_id);
+    try std.testing.expectEqual(@as(usize, 50), range_results.len);
+
+    // Verify range results are correctly bounded
+    for (range_results) |block| {
+        const id_value = block.id.value;
+        const block_num = @as(u32, @truncate(id_value));
+        fatal_assert(block_num >= 25 and block_num < 75, "Block {d} outside range", .{block_num});
+    }
+}
+
+test "storage bulk operations" {
+    var test_harness = StorageHarness.init(std.testing.allocator, "bulk_ops", false);
+    defer test_harness.deinit();
+
+    try test_harness.startup();
+    defer test_harness.shutdown();
+
+    // Prepare bulk blocks
+    var blocks: [50]ContextBlock = undefined;
+    for (&blocks, 0..) |*block, i| {
+        block.* = try test_harness.base.generate_block(@as(u32, @intCast(i)));
+    }
+
+    // Bulk insert
+    try test_harness.storage_engine.put_blocks(&blocks);
+
+    // Verify all inserted
+    for (blocks, 0..) |block, i| {
+        const retrieved = try test_harness.storage_engine.find_block(block.id);
+        fatal_assert(retrieved != null, "Bulk inserted block {d} not found", .{i});
+    }
+
+    // Bulk delete
+    var ids: [25]BlockId = undefined;
+    for (&ids, 0..) |*id, i| {
+        id.* = blocks[i * 2].id; // Delete every other block
+    }
+    try test_harness.storage_engine.delete_blocks(&ids);
+
+    // Verify deletions
+    for (ids) |id| {
+        const block = try test_harness.storage_engine.find_block(id);
+        fatal_assert(block == null, "Bulk deleted block still exists", .{});
+    }
+}

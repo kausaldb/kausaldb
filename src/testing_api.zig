@@ -98,6 +98,18 @@ pub const ownership = @import("core/ownership.zig");
 pub const state_machines = @import("core/state_machines.zig");
 pub const file_handle = @import("core/file_handle.zig");
 pub const bounded = @import("core/bounded.zig");
+
+// Test harness framework for consistent testing patterns
+pub const test_harness = @import("tests/harness.zig");
+pub const TestHarness = test_harness.TestHarness;
+pub const StorageHarness = test_harness.StorageHarness;
+pub const QueryHarness = test_harness.QueryHarness;
+pub const SimulationHarness = test_harness.SimulationHarness;
+pub const BenchmarkHarness = test_harness.BenchmarkHarness;
+
+// Memory safety utilities
+pub const memory_guard = @import("core/memory_guard.zig");
+pub const MemoryGuard = memory_guard.MemoryGuard;
 pub const core_types = @import("core/types.zig");
 
 // Test utilities and frameworks
