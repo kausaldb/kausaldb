@@ -679,6 +679,55 @@ pub const QueryEngine = struct {
         self.total_query_time_ns.add(duration);
     }
 
+    // === Workspace-Scoped Semantic Query API ===
+
+    /// Find entities of a specific type by name within a linked codebase
+    pub fn find_by_name(
+        self: *QueryEngine,
+        codebase: []const u8,
+        entity_type: []const u8,
+        name: []const u8,
+    ) !SemanticQueryResult {
+        const search_text = try std.fmt.allocPrint(self.allocator, "{s} {s} codebase:{s}", .{ entity_type, name, codebase });
+        defer self.allocator.free(search_text);
+
+        const semantic_query = SemanticQuery.init(search_text);
+        return self.execute_semantic_query(semantic_query);
+    }
+
+    /// Find all functions, methods, etc., that call a target function (incoming traversal)
+    pub fn find_callers(
+        self: *QueryEngine,
+        codebase: []const u8,
+        target_id: BlockId,
+        max_depth: u32,
+    ) !TraversalResult {
+        _ = codebase; // TODO: Filter by codebase in traversal
+        return self.traverse_incoming(target_id, max_depth);
+    }
+
+    /// Find all functions and methods called by a given function (outgoing traversal)
+    pub fn find_callees(
+        self: *QueryEngine,
+        codebase: []const u8,
+        caller_id: BlockId,
+        max_depth: u32,
+    ) !TraversalResult {
+        _ = codebase; // TODO: Filter by codebase in traversal
+        return self.traverse_outgoing(caller_id, max_depth);
+    }
+
+    /// Find all references to a given symbol
+    pub fn find_references(
+        self: *QueryEngine,
+        codebase: []const u8,
+        symbol_id: BlockId,
+        max_depth: u32,
+    ) !TraversalResult {
+        _ = codebase; // TODO: Filter by codebase in traversal
+        return self.traverse_bidirectional(symbol_id, max_depth);
+    }
+
     /// Execute a semantic search query
     /// Execute a semantic query to find related blocks
     pub fn execute_semantic_query(

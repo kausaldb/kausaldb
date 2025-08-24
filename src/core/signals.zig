@@ -49,6 +49,20 @@ pub fn reset_shutdown_state() void {
     shutdown_requested = false;
 }
 
+/// Setup signal handlers for graceful shutdown
+pub fn setup_signal_handlers() void {
+    const act = std.posix.Sigaction{
+        .handler = .{ .handler = signal_handler },
+        .mask = std.mem.zeroes(std.posix.sigset_t),
+        .flags = 0,
+    };
+
+    _ = std.posix.sigaction(std.posix.SIG.INT, &act, null);
+    _ = std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+
+    log.info("Signal handlers registered for SIGINT and SIGTERM", .{});
+}
+
 test "signal handling state management" {
     const testing = std.testing;
 

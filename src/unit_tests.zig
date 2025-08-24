@@ -2,6 +2,7 @@
 //! Automatically discovers and includes all .zig files with tests
 
 comptime {
+    _ = @import("cli/natural_commands.zig");
     _ = @import("core/arena.zig");
     _ = @import("core/assert.zig");
     _ = @import("core/bounded.zig");

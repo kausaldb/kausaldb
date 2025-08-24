@@ -106,6 +106,12 @@ pub const performance_assertions = @import("testing/performance_assertions.zig")
 pub const PerformanceAssertion = performance_assertions.PerformanceAssertion;
 pub const PerformanceThresholds = performance_assertions.PerformanceThresholds;
 
+// Natural language CLI components for testing
+pub const natural_commands = @import("cli/natural_commands.zig");
+pub const natural_executor = @import("cli/natural_executor.zig");
+pub const NaturalCommand = natural_commands.NaturalCommand;
+pub const NaturalExecutionContext = natural_executor.NaturalExecutionContext;
+
 // Simple test configuration - use build_options.debug_tests for conditional output
 pub const test_config = struct {
     /// Simple test configuration using build-level control
