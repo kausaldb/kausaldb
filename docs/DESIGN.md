@@ -26,9 +26,9 @@ We run production code against simulated disk corruption, network partitions, an
 
 No data races by design. Async I/O handles concurrency. State transitions are trivial to reason about.
 
-### Arena Memory Model
+### Memory Safety Architecture
 
-Coordinators own arenas. Submodules use coordinator interfaces. When a subsystem resets, all its memory vanishes in O(1).
+**Arena Coordinator Pattern**: Stable interfaces survive arena operations.
 
 ```zig
 pub const StorageEngine = struct {
@@ -37,10 +37,44 @@ pub const StorageEngine = struct {
 
     pub fn flush_memtable(self: *StorageEngine) !void {
         // ... flush to disk ...
-        self.coordinator.reset();  // All memtable memory gone
+        self.coordinator.reset();  // All memtable memory gone in O(1)
     }
 };
 ```
+
+**Memory Guard System**: Debug builds include comprehensive protection:
+
+- Canary values detect buffer overflows
+- Poison patterns catch use-after-free
+- Allocation tracking finds leaks
+- Zero overhead in release builds
+
+**Validation Layer**: Systematic corruption detection:
+
+- Block validation with CRC64 checksums
+- WAL entry integrity checks
+- SSTable header validation
+- Graph edge consistency verification
+
+### Three-Tier Test Architecture
+
+**Unit Tests** (in source files):
+
+- Test individual functions
+- No I/O or external dependencies
+- Sub-second execution
+
+**Integration Tests** (`src/tests/`):
+
+- Test module interactions
+- Full API access via testing harness
+- Deterministic simulation support
+
+**E2E Tests** (`tests/`):
+
+- Binary interface only
+- Subprocess execution
+- Real-world scenarios
 
 ### LSM-Tree Storage
 
@@ -54,6 +88,20 @@ Write-optimized architecture:
 ### Virtual File System
 
 All I/O through VFS abstraction. Production uses real filesystem. Tests use deterministic simulation at memory speed.
+
+### Defensive Programming
+
+**Assertion Levels**:
+
+- `assert()`: Debug-only checks
+- `fatal_assert()`: Always-active safety checks
+- `comptime_assert()`: Compile-time validation
+
+**Invariant Enforcement**:
+
+- Pre/post condition validation
+- State machine verification
+- Bounds checking on all operations
 
 ## Data Model
 
@@ -73,6 +121,54 @@ This captures causal relationships, not just text similarity.
 
 These are production-achievable targets. Current implementation meets or exceeds all thresholds.
 
+## Development Infrastructure
+
+**Unified Developer Tool** (`tools/dev.zig`):
+
+- Cross-platform development commands
+- Test filtering and safety options
+- Local CI pipeline simulation
+- Performance benchmarking
+- Code quality checks
+
+**Test Harness Framework**:
+
+- `TestHarness`: Base functionality
+- `StorageHarness`: Storage with VFS
+- `QueryHarness`: Query with storage
+- `SimulationHarness`: Failure injection
+- `BenchmarkHarness`: Performance measurement
+
+**Build System**:
+
+- Simple three-tier test organization
+- Flexible filtering with `--filter` flag
+- Automatic test discovery
+- Memory safety validation
+
 ## Why Zig
 
 No hidden control flow. No hidden allocations. Compile-time metaprogramming. The language philosophy aligns with ours: explicit over magical.
+
+## v0.1.0 Readiness
+
+**Robustness**:
+
+- Memory guard catches corruption
+- Validation layer detects invariant violations
+- Deterministic tests cover failure scenarios
+- Arena pattern prevents leaks
+
+**Developer Experience**:
+
+- Unified tooling via `tools/dev.zig`
+- Comprehensive test harnesses
+- Clear three-tier test architecture
+- Detailed development documentation
+
+**Production Quality**:
+
+- Performance targets exceeded
+- Memory safety validated
+- Crash recovery tested
+- CI/CD pipeline automated
