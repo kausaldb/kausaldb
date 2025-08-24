@@ -94,7 +94,7 @@ pub const TestHarness = struct {
     /// Generate deterministic test data with static content to avoid memory leaks.
     pub fn generate_block(self: *TestHarness, index: u32) !ContextBlock {
         _ = self; // Static content doesn't need allocator
-        
+
         // Use static strings to prevent memory leaks in tests
         const content = "Test block content";
         const metadata = "{\"test\":true}";
@@ -164,12 +164,24 @@ pub const StorageHarness = struct {
         self.base.deinit();
     }
 
+    /// Convenience method combining init and startup phases.
+    pub fn init_and_startup(allocator: std.mem.Allocator, name: []const u8) !StorageHarness {
+        var harness = try init(allocator, name, false);
+        try harness.startup();
+        return harness;
+    }
+
     /// Helper to write and verify a block.
     pub fn write_and_verify_block(self: *StorageHarness, block: *const ContextBlock) !void {
         try self.storage_engine.put_block(block.*);
 
-        const retrieved = try self.storage_engine.find_block_with_ownership(block.id, .temporary);
+        var retrieved = try self.storage_engine.find_block_with_ownership(block.id, .temporary);
         fatal_assert(retrieved != null, "Block not found after write", .{});
+
+        defer if (retrieved) |*owned_block| {
+            owned_block.deinit();
+        };
+
         fatal_assert(
             std.mem.eql(u8, retrieved.?.block.content, block.content),
             "Block content mismatch",
@@ -226,6 +238,13 @@ pub const QueryHarness = struct {
     pub fn deinit(self: *QueryHarness) void {
         self.query_engine.deinit();
         self.storage_harness.deinit();
+    }
+
+    /// Convenience method combining init and startup phases.
+    pub fn init_and_startup(allocator: std.mem.Allocator, name: []const u8) !QueryHarness {
+        var harness = try init(allocator, name);
+        try harness.startup();
+        return harness;
     }
 
     /// Helper to create and index a graph of blocks.

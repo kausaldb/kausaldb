@@ -6,22 +6,17 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const harness = @import("../harness.zig");
+const context_block = @import("../../core/types.zig");
+const query_engine = @import("../../query/engine.zig");
 
-const query_engine = kausaldb.query_engine;
-const query_traversal = kausaldb.query_traversal;
 const testing = std.testing;
-const types = kausaldb.types;
-const execute_traversal = kausaldb.query.traversal.execute_traversal;
 
-const ContextBlock = types.ContextBlock;
-const BlockId = types.BlockId;
-const GraphEdge = types.GraphEdge;
-const EdgeType = types.EdgeType;
-const TraversalQuery = query_traversal.TraversalQuery;
-const TraversalDirection = query_traversal.TraversalDirection;
-const TestData = kausaldb.TestData;
-const QueryHarness = kausaldb.QueryHarness;
+const ContextBlock = context_block.ContextBlock;
+const BlockId = context_block.BlockId;
+const GraphEdge = context_block.GraphEdge;
+const EdgeType = context_block.EdgeType;
+const QueryHarness = harness.QueryHarness;
 
 // Helper for creating disconnected graph components
 fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) !struct {

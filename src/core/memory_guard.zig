@@ -79,9 +79,9 @@ pub const MemoryGuard = struct {
     total_allocated: if (builtin.mode == .Debug) usize else void,
     peak_allocated: if (builtin.mode == .Debug) usize else void,
     // Architecture exception: Thread coordination needed for debug allocation tracking.
-    // KausalDB core is single-threaded but test infrastructure uses threading.  
+    // KausalDB core is single-threaded but test infrastructure uses threading.
     // Zero runtime cost in release builds where tracking is compiled out.
-    mutex: if (builtin.mode == .Debug) std.Thread.Mutex else void,
+    mutex: if (builtin.mode == .Debug) std.Thread.Mutex else void, // tidy:ignore-arch
 
     /// Initialize memory guard with backing allocator.
     pub fn init(backing_allocator: std.mem.Allocator) MemoryGuard {

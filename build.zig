@@ -279,7 +279,7 @@ fn create_test_suite(
     }
 
     unit_test_exe.root_module.addImport("build_options", modules.build_options);
-    unit_test_exe.root_module.addImport("kausaldb", modules.kausaldb);
+    // unit_test_exe.root_module.addImport("kausaldb", modules.kausaldb); // Disabled to avoid module conflicts
 
     const unit_run = b.addRunArtifact(unit_test_exe);
     unit_run.has_side_effects = true;

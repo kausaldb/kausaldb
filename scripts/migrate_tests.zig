@@ -1,5 +1,3 @@
-#!/usr/bin/env zig run
-
 //! Test migration script to reorganize test structure for better maintainability.
 //!
 //! Migrates tests to follow the three-tier hierarchy:
