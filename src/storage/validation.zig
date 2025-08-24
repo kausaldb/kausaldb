@@ -15,7 +15,7 @@ const builtin = @import("builtin");
 
 const assert_mod = @import("../core/assert.zig");
 const memory = @import("../core/memory.zig");
-const context_block = @import("../context_block.zig");
+const context_block = @import("../core/types.zig");
 const wal = @import("wal.zig");
 const sstable = @import("sstable.zig");
 
@@ -47,7 +47,7 @@ pub fn validate_block(block: *const ContextBlock) ValidationResult {
     var warnings: u32 = 0;
 
     // Check block ID is non-zero
-    if (block.id.value == 0) {
+    if (block.id.is_zero()) {
         errors += 1;
         return .{
             .valid = false,
@@ -87,8 +87,8 @@ pub fn validate_block(block: *const ContextBlock) ValidationResult {
     }
 
     // Validate metadata is valid JSON if present
-    if (block.metadata.len > 0) {
-        if (block.metadata[0] != '{' or block.metadata[block.metadata.len - 1] != '}') {
+    if (block.metadata_json.len > 0) {
+        if (block.metadata_json[0] != '{' or block.metadata_json[block.metadata_json.len - 1] != '}') {
             warnings += 1; // Metadata should be JSON object
         }
     }
@@ -111,36 +111,36 @@ pub fn validate_edge(edge: *const GraphEdge) ValidationResult {
     var errors: u32 = 0;
 
     // Check edge endpoints are valid
-    if (edge.from_id.value == 0) {
+    if (edge.source_id.is_zero()) {
         errors += 1;
         return .{
             .valid = false,
             .error_count = errors,
             .warnings = 0,
             .context = "Edge validation",
-            .details = "Edge from_id cannot be zero",
+            .details = "Edge source_id cannot be zero",
         };
     }
 
-    if (edge.to_id.value == 0) {
+    if (edge.target_id.is_zero()) {
         errors += 1;
         return .{
             .valid = false,
             .error_count = errors,
             .warnings = 0,
             .context = "Edge validation",
-            .details = "Edge to_id cannot be zero",
+            .details = "Edge target_id cannot be zero",
         };
     }
 
     // Check for self-loops (usually indicates corruption)
-    if (edge.from_id.value == edge.to_id.value) {
+    if (edge.source_id.eql(edge.target_id)) {
         return .{
             .valid = false,
             .error_count = 1,
             .warnings = 0,
             .context = "Edge validation",
-            .details = "Self-loop detected (from_id == to_id)",
+            .details = "Self-loop detected (source_id == target_id)",
         };
     }
 
@@ -161,7 +161,8 @@ pub fn validate_wal_entry(entry: *const WALEntry, data: []const u8) ValidationRe
 
     var errors: u32 = 0;
 
-    // Validate entry type
+    // Entry type validation prevents processing of corrupted WAL data.
+    // Invalid types could indicate bit flips, partial writes, or malicious data.
     const valid_type = switch (entry.entry_type) {
         .put_block, .delete_block, .add_edge, .remove_edge, .checkpoint => true,
         else => false,
@@ -244,7 +245,8 @@ pub fn validate_sstable_header(header: *const SSTableHeader) ValidationResult {
         };
     }
 
-    // Check version
+    // Version bounds prevent processing files from incompatible future versions.
+    // Upper limit guards against integer overflow attacks via crafted headers.
     if (header.version == 0 or header.version > 100) {
         errors += 1;
         return .{
@@ -256,7 +258,7 @@ pub fn validate_sstable_header(header: *const SSTableHeader) ValidationResult {
         };
     }
 
-    // Validate block count
+    // Enforce SSTable size limits to prevent memory exhaustion attacks
     if (header.block_count > 1_000_000) { // Sanity check: 1M blocks per SSTable max
         errors += 1;
         return .{
@@ -269,7 +271,7 @@ pub fn validate_sstable_header(header: *const SSTableHeader) ValidationResult {
     }
 
     // Validate ID range
-    if (header.block_count > 0 and header.min_block_id.value >= header.max_block_id.value) {
+    if (header.block_count > 0 and header.min_block_id.compare(header.max_block_id) != .lt) {
         errors += 1;
         return .{
             .valid = false,
@@ -397,7 +399,7 @@ pub fn validate_buffer(buffer: []const u8, expected_pattern: ?u8) ValidationResu
     // Check for canary values (deadbeef, cafebabe, etc)
     if (buffer.len >= 8) {
         const first_qword = std.mem.readInt(u64, buffer[0..8], .little);
-        const last_qword = std.mem.readInt(u64, buffer[buffer.len - 8 ..], .little);
+        const last_qword = std.mem.readInt(u64, buffer[buffer.len - 8 ..][0..8], .little);
 
         const known_canaries = [_]u64{
             0xDEADBEEF_CAFEBABE,
@@ -485,10 +487,11 @@ fn compute_crc64(data: []const u8) u64 {
 // Tests
 test "validate_block detects corruption" {
     const invalid_block = ContextBlock{
-        .id = BlockId{ .value = 0 }, // Invalid: zero ID
+        .id = BlockId.zero(), // Invalid: zero ID
+        .version = 1,
         .content = "test",
         .source_uri = "test://file",
-        .metadata = "{}",
+        .metadata_json = "{}",
     };
 
     const result = validate_block(&invalid_block);
@@ -498,8 +501,8 @@ test "validate_block detects corruption" {
 
 test "validate_edge detects self-loops" {
     const self_loop = GraphEdge{
-        .from_id = BlockId{ .value = 42 },
-        .to_id = BlockId{ .value = 42 }, // Self-loop
+        .source_id = BlockId.from_u64(42),
+        .target_id = BlockId.from_u64(42), // Self-loop
         .edge_type = .calls,
     };
 
@@ -528,16 +531,18 @@ test "validate_buffer detects canary values" {
 test "batch validation aggregates errors" {
     const blocks = [_]ContextBlock{
         .{
-            .id = BlockId{ .value = 1 },
+            .id = BlockId.from_u64(1),
+            .version = 1,
             .content = "valid",
             .source_uri = "test://file1",
-            .metadata = "{}",
+            .metadata_json = "{}",
         },
         .{
-            .id = BlockId{ .value = 0 }, // Invalid
+            .id = BlockId.zero(), // Invalid
+            .version = 1,
             .content = "invalid",
             .source_uri = "test://file2",
-            .metadata = "{}",
+            .metadata_json = "{}",
         },
     };
 

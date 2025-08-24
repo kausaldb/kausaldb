@@ -173,16 +173,6 @@ pub const fatal_assertions = @import("testing/fatal_assertions.zig");
 pub const FatalCategory = fatal_assertions.FatalCategory;
 pub const FatalContext = fatal_assertions.FatalContext;
 
-// Test harnesses for standardized setup patterns
-pub const test_harness = @import("testing/harness.zig");
-pub const TestData = test_harness.TestData;
-pub const StorageHarness = test_harness.StorageHarness;
-pub const QueryHarness = test_harness.QueryHarness;
-pub const ProductionHarness = test_harness.ProductionHarness;
-pub const SimulationHarness = test_harness.SimulationHarness;
-pub const FaultInjectionHarness = test_harness.FaultInjectionHarness;
-pub const FaultInjectionConfig = test_harness.FaultInjectionConfig;
-
 // Scenario-driven fault injection testing framework
 pub const scenarios = @import("testing/scenarios.zig");
 pub const FaultScenario = scenarios.FaultScenario;

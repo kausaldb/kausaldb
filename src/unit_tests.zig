@@ -10,6 +10,7 @@ comptime {
     _ = @import("core/error_context.zig");
     _ = @import("core/file_handle.zig");
     _ = @import("core/memory.zig");
+    _ = @import("core/memory_guard.zig");
     _ = @import("core/memory_integration.zig");
     _ = @import("core/ownership.zig");
     _ = @import("core/pools.zig");
@@ -47,6 +48,7 @@ comptime {
     _ = @import("storage/sstable.zig");
     _ = @import("storage/sstable_manager.zig");
     _ = @import("storage/tiered_compaction.zig");
+    _ = @import("storage/validation.zig");
     _ = @import("storage/wal.zig");
     _ = @import("storage/wal/core.zig");
     _ = @import("storage/wal/corruption_tracker.zig");
@@ -54,6 +56,8 @@ comptime {
     _ = @import("storage/wal/recovery.zig");
     _ = @import("storage/wal/stream.zig");
     _ = @import("storage/wal/types.zig");
+    _ = @import("tests/harness.zig");
+    _ = @import("tests/storage/integration_test.zig");
 }
 
 const builtin = @import("builtin");

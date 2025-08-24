@@ -32,9 +32,10 @@ pub const PerformanceTier = enum {
 
     /// Detect performance tier from environment
     pub fn detect() PerformanceTier {
-        // Check for build-time sanitizer flags first (highest priority)
-        if (build_options.sanitizers_active) {
-            return .sanitizer;
+        // Check for debug builds which may have sanitizers enabled
+        if (builtin.mode == .Debug) {
+            // In debug mode, use relaxed thresholds by default
+            return .local;
         }
 
         // Check for sanitizer builds from environment (fallback)

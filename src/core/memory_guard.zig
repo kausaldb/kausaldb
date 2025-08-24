@@ -78,6 +78,9 @@ pub const MemoryGuard = struct {
     allocation_counter: if (builtin.mode == .Debug) u64 else void,
     total_allocated: if (builtin.mode == .Debug) usize else void,
     peak_allocated: if (builtin.mode == .Debug) usize else void,
+    // Architecture exception: Thread coordination needed for debug allocation tracking.
+    // KausalDB core is single-threaded but test infrastructure uses threading.  
+    // Zero runtime cost in release builds where tracking is compiled out.
     mutex: if (builtin.mode == .Debug) std.Thread.Mutex else void,
 
     /// Initialize memory guard with backing allocator.
@@ -135,6 +138,7 @@ pub const MemoryGuard = struct {
                 .vtable = &.{
                     .alloc = alloc_debug,
                     .resize = resize_debug,
+                    .remap = remap_debug,
                     .free = free_debug,
                 },
             };
@@ -144,21 +148,23 @@ pub const MemoryGuard = struct {
         }
     }
 
-    fn alloc_debug(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+    fn alloc_debug(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *MemoryGuard = @ptrCast(@alignCast(ctx));
-        _ = ret_addr;
 
-        const alignment = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(ptr_align));
+        const alignment_bytes = alignment.toByteUnits();
 
-        // Calculate total size with header and footer
-        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment);
+        // Calculate total size with header and aligned footer
+        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment_bytes);
+        const footer_offset = std.mem.alignForward(usize, len, @alignOf(AllocationFooter));
         const footer_size = @sizeOf(AllocationFooter);
-        const total_size = header_size + len + footer_size;
+        const total_size = header_size + footer_offset + footer_size;
 
-        // Allocate from backing allocator
-        const raw_ptr = self.backing_allocator.rawAlloc(total_size, ptr_align, ret_addr) orelse return null;
+        // Use rawAlloc to bypass any allocator wrappers that might interfere with canary placement
+        const raw_ptr = self.backing_allocator.rawAlloc(total_size, alignment, ret_addr) orelse return null;
 
-        // Set up header
+        // Canary values enable immediate detection of heap corruption.
+        // Industry-standard values (DEADBEEF) are easily recognizable in crash dumps.
+        // Header placed before user data to catch negative buffer overflows
         const header: *AllocationHeader = @ptrCast(@alignCast(raw_ptr));
         header.* = .{
             .canary_before = CANARY_BEFORE,
@@ -171,65 +177,74 @@ pub const MemoryGuard = struct {
             .is_freed = false,
         };
 
-        // Set up footer
+        // Footer canary detects positive buffer overflows past allocation boundary.
+        // Separate value from header distinguishes overflow direction.
         const user_ptr = raw_ptr + header_size;
-        const footer_ptr = user_ptr + len;
+        // Ensure footer is properly aligned for u64 field
+        const footer_ptr = user_ptr + footer_offset;
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.* = .{
             .canary_after = CANARY_AFTER,
         };
 
-        // Track allocation
+        // Record allocation in debug map to detect double-free and use-after-free
         self.track_allocation(user_ptr, len, header.allocation_id, &header.stack_trace);
 
         return user_ptr;
     }
 
-    fn resize_debug(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
-        const self: *MemoryGuard = @ptrCast(@alignCast(ctx));
-        _ = ret_addr;
-
+    fn resize_debug(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
         if (new_len == 0) {
-            free_debug(ctx, buf, buf_align, ret_addr);
+            free_debug(ctx, buf, alignment, ret_addr);
             return true;
         }
 
         // Get header and validate
-        const alignment = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(buf_align));
-        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment);
+        const alignment_bytes = alignment.toByteUnits();
+        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment_bytes);
         const header_ptr = @as([*]u8, @ptrCast(buf.ptr)) - header_size;
         const header: *AllocationHeader = @ptrCast(@alignCast(header_ptr));
         header.validate();
 
-        // Validate footer
-        const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + buf.len;
+        // Validate footer at aligned position
+        const footer_offset = std.mem.alignForward(usize, buf.len, @alignOf(AllocationFooter));
+        const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + footer_offset;
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.validate();
 
         // For simplicity in debug mode, allocate new and copy
-        const new_ptr = alloc_debug(ctx, new_len, buf_align, ret_addr) orelse return false;
+        const new_ptr = alloc_debug(ctx, new_len, alignment, ret_addr) orelse return false;
         const copy_len = @min(buf.len, new_len);
         @memcpy(new_ptr[0..copy_len], buf[0..copy_len]);
-        free_debug(ctx, buf, buf_align, ret_addr);
+        free_debug(ctx, buf, alignment, ret_addr);
 
         return true;
     }
 
-    fn free_debug(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+    fn remap_debug(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        // For simplicity in debug mode, use alloc+copy+free pattern
+        const new_ptr = alloc_debug(ctx, new_len, alignment, ret_addr) orelse return null;
+        const copy_len = @min(buf.len, new_len);
+        @memcpy(new_ptr[0..copy_len], buf[0..copy_len]);
+        free_debug(ctx, buf, alignment, ret_addr);
+        return new_ptr;
+    }
+
+    fn free_debug(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
         const self: *MemoryGuard = @ptrCast(@alignCast(ctx));
-        _ = ret_addr;
 
         if (buf.len == 0) return;
 
         // Get header and validate
-        const alignment = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(buf_align));
-        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment);
+        const alignment_bytes = alignment.toByteUnits();
+        const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment_bytes);
         const header_ptr = @as([*]u8, @ptrCast(buf.ptr)) - header_size;
         const header: *AllocationHeader = @ptrCast(@alignCast(header_ptr));
         header.validate();
 
-        // Validate footer
-        const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + buf.len;
+        // Validate footer at aligned position
+        const footer_offset = std.mem.alignForward(usize, buf.len, @alignOf(AllocationFooter));
+        const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + footer_offset;
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.validate();
 
@@ -240,16 +255,17 @@ pub const MemoryGuard = struct {
             .{ buf.len, header.requested_size, header.allocation_id },
         );
 
-        // Mark as freed and poison memory
+        // Poison pattern (0xDE) makes use-after-free bugs fail fast and obviously.
+        // Alternative to keeping freed memory valid, which masks bugs.
         header.is_freed = true;
         @memset(buf, POISON_BYTE);
 
-        // Untrack allocation
+        // Remove from debug map to enable detection of use-after-free
         self.untrack_allocation(@intFromPtr(buf.ptr));
 
         // Free from backing allocator
         const raw_slice = header_ptr[0..header.actual_size];
-        self.backing_allocator.rawFree(raw_slice, buf_align, ret_addr);
+        self.backing_allocator.rawFree(raw_slice, alignment, ret_addr);
     }
 
     fn next_allocation_id(self: *MemoryGuard) u64 {
@@ -325,7 +341,7 @@ pub const MemoryGuard = struct {
             const header_ptr = info.ptr - header_size;
             const header: *const AllocationHeader = @ptrCast(@alignCast(header_ptr));
 
-            // Check header canary
+            // Canary corruption indicates buffer underflow or heap metadata damage
             if (header.canary_before != CANARY_BEFORE) {
                 std.debug.print("Corruption in allocation {}: header damaged\n", .{info.id});
                 corrupted += 1;

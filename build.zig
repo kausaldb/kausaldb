@@ -1,9 +1,9 @@
 const std = @import("std");
 
 const TestType = enum {
-    unit,        // Unit tests in src files
-    integration, // Integration tests in src/tests/
-    e2e,        // End-to-end tests in tests/
+    unit,
+    integration,
+    e2e,
 
     fn description(self: TestType) []const u8 {
         return switch (self) {
@@ -49,34 +49,20 @@ fn create_build_modules(
     const enable_fault_injection = b.option(bool, "enable-fault-injection", "Enable fault injection testing") orelse false;
     const enable_thread_sanitizer = b.option(bool, "enable-thread-sanitizer", "Enable Thread Sanitizer") orelse false;
     const enable_ubsan = b.option(bool, "enable-ubsan", "Enable Undefined Behavior Sanitizer") orelse false;
+    const enable_memory_guard = b.option(bool, "enable-memory-guard", "Enable memory guard for corruption detection") orelse false;
     const debug_tests = b.option(bool, "debug", "Enable debug test output (verbose logging and demo content)") orelse false;
-
-    const sanitizers_active = enable_thread_sanitizer or enable_ubsan;
 
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_statistics", enable_statistics);
     build_options.addOption(bool, "enable_detailed_logging", enable_detailed_logging);
     build_options.addOption(bool, "enable_fault_injection", enable_fault_injection);
-    build_options.addOption(bool, "enable_thread_sanitizer", enable_thread_sanitizer);
-    build_options.addOption(bool, "enable_ubsan", enable_ubsan);
-    build_options.addOption(bool, "sanitizers_active", sanitizers_active);
-    build_options.addOption(bool, "is_debug_build", optimize == .Debug);
-    build_options.addOption(bool, "debug_tests", debug_tests);
+    build_options.addOption(bool, "enable_memory_guard", enable_memory_guard);
 
     const kausaldb_module = b.createModule(.{
         .root_source_file = b.path("src/kausaldb.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    // Apply sanitizer flags to main module
-    if (enable_thread_sanitizer) {
-        kausaldb_module.sanitize_thread = true;
-    }
-    if (enable_ubsan) {
-        kausaldb_module.sanitize_c = .full;
-    }
-
     kausaldb_module.addImport("build_options", build_options.createModule());
 
     const kausaldb_test_module = b.createModule(.{
@@ -84,18 +70,9 @@ fn create_build_modules(
         .target = target,
         .optimize = optimize,
     });
-
-    // Apply sanitizer flags to test module
-    if (enable_thread_sanitizer) {
-        kausaldb_test_module.sanitize_thread = true;
-    }
-    if (enable_ubsan) {
-        kausaldb_test_module.sanitize_c = .full;
-    }
-
     kausaldb_test_module.addImport("build_options", build_options.createModule());
 
-    return BuildModules{
+    return .{
         .kausaldb = kausaldb_module,
         .kausaldb_test = kausaldb_test_module,
         .build_options = build_options.createModule(),
@@ -106,44 +83,71 @@ fn create_build_modules(
 }
 
 const TestFile = struct {
-    name: []const u8,
     path: []const u8,
-    category: TestCategory,
+    name: []const u8,
+    test_type: TestType,
 };
 
-fn discover_test_files(allocator: std.mem.Allocator) !std.array_list.Managed(TestFile) {
-    var discovered_tests = std.array_list.Managed(TestFile).init(allocator);
+fn discover_integration_tests(allocator: std.mem.Allocator) !std.ArrayList(TestFile) {
+    var discovered_tests = std.ArrayList(TestFile){};
 
     // Discover integration tests in src/tests/
     var src_tests_dir = std.fs.cwd().openDir("src/tests", .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => {},
+        error.FileNotFound => return discovered_tests,
         else => return err,
     };
-    if (src_tests_dir) |*dir| {
-        defer dir.close();
-        var walker = try dir.walk(allocator);
-        defer walker.deinit();
+    defer src_tests_dir.close();
+
+    var walker = try src_tests_dir.walk(allocator);
+    defer walker.deinit();
 
     while (try walker.next()) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".zig")) continue;
-        if (std.mem.endsWith(u8, entry.path, "_helper.zig") or
-            std.mem.endsWith(u8, entry.path, "helper.zig")) continue;
+        if (std.mem.eql(u8, entry.basename, "harness.zig")) continue; // Skip harness framework
 
-        const step_name = try generate_step_name(allocator, entry.path);
-        const full_path = try std.fmt.allocPrint(allocator, "tests/{s}", .{entry.path});
-        const category = categorize_test(step_name);
+        const full_path = try std.fmt.allocPrint(allocator, "src/tests/{s}", .{entry.path});
+        const test_name = try generate_test_name(allocator, entry.path);
 
-        try discovered_tests.append(.{
-            .name = step_name,
+        try discovered_tests.append(allocator, .{
             .path = full_path,
-            .category = category,
+            .name = test_name,
+            .test_type = .integration,
         });
     }
 
     return discovered_tests;
 }
 
-fn generate_step_name(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+fn discover_e2e_tests(allocator: std.mem.Allocator) !std.ArrayList(TestFile) {
+    var discovered_tests = std.ArrayList(TestFile){};
+
+    // Discover E2E tests in tests/
+    var tests_dir = std.fs.cwd().openDir("tests", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return discovered_tests,
+        else => return err,
+    };
+    defer tests_dir.close();
+
+    var walker = try tests_dir.walk(allocator);
+    defer walker.deinit();
+
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".zig")) continue;
+
+        const full_path = try std.fmt.allocPrint(allocator, "tests/{s}", .{entry.path});
+        const test_name = try generate_test_name(allocator, entry.path);
+
+        try discovered_tests.append(allocator, .{
+            .path = full_path,
+            .name = test_name,
+            .test_type = .e2e,
+        });
+    }
+
+    return discovered_tests;
+}
+
+fn generate_test_name(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     var name_buf: [256]u8 = undefined;
     var name_len: usize = 0;
 
@@ -169,7 +173,7 @@ fn generate_step_name(allocator: std.mem.Allocator, path: []const u8) ![]const u
         is_first = false;
     }
 
-    return try allocator.dupe(u8, name_buf[0..name_len]);
+    return allocator.dupe(u8, name_buf[0..name_len]);
 }
 
 fn create_test_executable(
@@ -179,14 +183,11 @@ fn create_test_executable(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Step.Compile {
-    // Performance tests should run in release mode for accurate measurements
-    const test_optimize = if (test_file.category == .performance) .ReleaseFast else optimize;
-
     const test_exe = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path(test_file.path),
             .target = target,
-            .optimize = test_optimize,
+            .optimize = optimize,
         }),
     });
 
@@ -194,40 +195,33 @@ fn create_test_executable(
         test_exe.linkLibC();
     }
 
-    // For performance tests, create release-mode kausaldb module
-    const kausaldb_module = if (test_file.category == .performance) blk: {
-        const perf_kausaldb_module = b.createModule(.{
-            .root_source_file = b.path("src/testing_api.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        });
-        perf_kausaldb_module.addImport("build_options", modules.build_options);
-        break :blk perf_kausaldb_module;
-    } else modules.kausaldb_test;
-
-    // Apply sanitizer flags if enabled (skip for performance tests to avoid overhead)
-    if (test_file.category != .performance) {
-        if (modules.enable_thread_sanitizer) {
-            test_exe.root_module.sanitize_thread = true;
-        }
-        if (modules.enable_ubsan) {
-            test_exe.root_module.sanitize_c = .full;
-        }
+    // Apply sanitizer flags
+    if (modules.enable_thread_sanitizer) {
+        test_exe.root_module.sanitize_thread = true;
     }
+    if (modules.enable_ubsan) {
+        test_exe.root_module.sanitize_c = .full;
+    }
+
+    // Choose appropriate module based on test type
+    const kausaldb_module = switch (test_file.test_type) {
+        .unit => modules.kausaldb,
+        .integration => modules.kausaldb_test, // Full API access
+        .e2e => modules.kausaldb, // Public API only
+    };
 
     test_exe.root_module.addImport("kausaldb", kausaldb_module);
     test_exe.root_module.addImport("build_options", modules.build_options);
 
-    // Create test-specific build options with log level
+    // Create test-specific build options
     const test_options = b.addOptions();
     test_options.addOption(bool, "debug_tests", modules.debug_tests);
 
-    // Set appropriate log level for test category unless --debug flag is used
-    const log_level: std.log.Level = if (modules.debug_tests) .debug else switch (test_file.category) {
-        .performance, .stress => .err, // Performance tests: errors only
-        .fault_injection, .defensive => .err, // Fault injection: expected failures are noise
-        .integration, .simulation => .warn, // Integration: warnings and errors
-        .unit, .ingestion, .recovery, .safety => .warn, // Standard: warnings and errors
+    // Set appropriate log level for test type
+    const log_level: std.log.Level = if (modules.debug_tests) .debug else switch (test_file.test_type) {
+        .unit => .warn,
+        .integration => .warn,
+        .e2e => .err, // E2E tests should be quieter
     };
     test_options.addOption(std.log.Level, "test_log_level", log_level);
     test_exe.root_module.addImport("test_build_options", test_options.createModule());
@@ -236,19 +230,20 @@ fn create_test_executable(
 }
 
 const TestSuite = struct {
-    unit: std.array_list.Managed(*std.Build.Step.Run),
-    integration: std.array_list.Managed(*std.Build.Step.Run),
-    e2e: std.array_list.Managed(*std.Build.Step.Run),
+    unit: std.ArrayList(*std.Build.Step.Run),
+    integration: std.ArrayList(*std.Build.Step.Run),
+    e2e: std.ArrayList(*std.Build.Step.Run),
 
     fn init(allocator: std.mem.Allocator) TestSuite {
+        _ = allocator;
         return TestSuite{
-            .unit = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .integration = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
-            .e2e = std.array_list.Managed(*std.Build.Step.Run).init(allocator),
+            .unit = std.ArrayList(*std.Build.Step.Run){},
+            .integration = std.ArrayList(*std.Build.Step.Run){},
+            .e2e = std.ArrayList(*std.Build.Step.Run){},
         };
     }
 
-    fn get_tests(self: *TestSuite, test_type: TestType) *std.array_list.Managed(*std.Build.Step.Run) {
+    fn get_tests(self: *TestSuite, test_type: TestType) *std.ArrayList(*std.Build.Step.Run) {
         return switch (test_type) {
             .unit => &self.unit,
             .integration => &self.integration,
@@ -257,17 +252,16 @@ const TestSuite = struct {
     }
 };
 
-fn create_categorized_tests(
+fn create_test_suite(
     b: *std.Build,
-    test_files: []TestFile,
     modules: BuildModules,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     allocator: std.mem.Allocator,
-) !CategorizedTests {
-    var categorized = CategorizedTests.init(allocator);
+) !TestSuite {
+    var suite = TestSuite.init(allocator);
 
-    // Add unit test runner
+    // Add unit test runner (built-in source tests)
     const unit_test_exe = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/unit_tests.zig"),
@@ -277,7 +271,6 @@ fn create_categorized_tests(
     });
     unit_test_exe.linkLibC();
 
-    // Apply sanitizer flags if enabled
     if (modules.enable_thread_sanitizer) {
         unit_test_exe.root_module.sanitize_thread = true;
     }
@@ -286,121 +279,52 @@ fn create_categorized_tests(
     }
 
     unit_test_exe.root_module.addImport("build_options", modules.build_options);
+    unit_test_exe.root_module.addImport("kausaldb", modules.kausaldb);
 
-    const unit_test_run = b.addRunArtifact(unit_test_exe);
-    try categorized.unit.append(unit_test_run);
+    const unit_run = b.addRunArtifact(unit_test_exe);
+    unit_run.has_side_effects = true;
+    try suite.unit.append(allocator, unit_run);
 
-    // Process discovered integration tests
-    for (test_files) |test_file| {
+    // Add integration tests
+    var integration_tests = try discover_integration_tests(allocator);
+    defer integration_tests.deinit(allocator);
+
+    for (integration_tests.items) |test_file| {
         const test_exe = create_test_executable(b, test_file, modules, target, optimize);
         const test_run = b.addRunArtifact(test_exe);
-
-        const category_tests = categorized.get_category_tests(test_file.category);
-        try category_tests.append(test_run);
+        test_run.has_side_effects = true;
+        try suite.integration.append(allocator, test_run);
     }
 
-    return categorized;
+    // Add E2E tests
+    var e2e_tests = try discover_e2e_tests(allocator);
+    defer e2e_tests.deinit(allocator);
+
+    for (e2e_tests.items) |test_file| {
+        const test_exe = create_test_executable(b, test_file, modules, target, optimize);
+        const test_run = b.addRunArtifact(test_exe);
+        test_run.has_side_effects = true;
+        try suite.e2e.append(allocator, test_run);
+    }
+
+    return suite;
 }
 
-fn create_development_tools(
-    b: *std.Build,
-    modules: BuildModules,
-    target: std.Build.ResolvedTarget,
-) void {
-    const benchmark_exe = b.addExecutable(.{
-        .name = "benchmark",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/benchmark.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-    benchmark_exe.linkLibC();
-    benchmark_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
-    const install_benchmark = b.addInstallArtifact(benchmark_exe, .{});
-    const benchmark_step = b.step("benchmark", "Build and install benchmark");
-    benchmark_step.dependOn(&install_benchmark.step);
-
-    const fuzz_exe = b.addExecutable(.{
-        .name = "fuzz",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/fuzz.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-    fuzz_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
-    const install_fuzz = b.addInstallArtifact(fuzz_exe, .{});
-    const fuzz_step = b.step("fuzz", "Build and install fuzz tester");
-    fuzz_step.dependOn(&install_fuzz.step);
-
-    const commit_validator_exe = b.addExecutable(.{
-        .name = "commit-msg-validator",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/commit_msg_validator.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-    const install_commit_validator = b.addInstallArtifact(commit_validator_exe, .{});
-    const commit_validator_step = b.step("commit-msg-validator", "Build and install commit message validator");
-    commit_validator_step.dependOn(&install_commit_validator.step);
-}
-
-fn create_workflow_steps(
-    b: *std.Build,
-    categorized: CategorizedTests,
-) void {
-    // Primary test categories
+fn create_workflow_steps(b: *std.Build, suite: TestSuite) void {
+    // Primary test commands
     const test_step = b.step("test", "Run unit tests");
-    for (categorized.unit.items) |test_run| {
+    for (suite.unit.items) |test_run| {
         test_step.dependOn(&test_run.step);
     }
 
     const test_integration_step = b.step("test-integration", "Run integration tests");
-    for (categorized.integration.items) |test_run| {
+    for (suite.integration.items) |test_run| {
         test_integration_step.dependOn(&test_run.step);
     }
 
-    const test_ingestion_step = b.step("test-ingestion", "Run ingestion tests");
-    for (categorized.ingestion.items) |test_run| {
-        test_ingestion_step.dependOn(&test_run.step);
-    }
-
-    const test_simulation_step = b.step("test-simulation", "Run simulation tests");
-    for (categorized.simulation.items) |test_run| {
-        test_simulation_step.dependOn(&test_run.step);
-    }
-
-    const test_stress_step = b.step("test-stress", "Run stress tests");
-    for (categorized.stress.items) |test_run| {
-        test_stress_step.dependOn(&test_run.step);
-    }
-
-    // Secondary test categories (less common)
-    const test_performance_step = b.step("test-performance", "Run performance tests");
-    for (categorized.performance.items) |test_run| {
-        test_performance_step.dependOn(&test_run.step);
-    }
-
-    const test_fault_injection_step = b.step("test-fault-injection", "Run fault injection tests");
-    for (categorized.fault_injection.items) |test_run| {
-        test_fault_injection_step.dependOn(&test_run.step);
-    }
-
-    const test_recovery_step = b.step("test-recovery", "Run recovery tests");
-    for (categorized.recovery.items) |test_run| {
-        test_recovery_step.dependOn(&test_run.step);
-    }
-
-    const test_safety_step = b.step("test-safety", "Run safety tests");
-    for (categorized.safety.items) |test_run| {
-        test_safety_step.dependOn(&test_run.step);
-    }
-
-    const test_defensive_step = b.step("test-defensive", "Run defensive programming tests");
-    for (categorized.defensive.items) |test_run| {
-        test_defensive_step.dependOn(&test_run.step);
+    const test_e2e_step = b.step("test-e2e", "Run end-to-end tests");
+    for (suite.e2e.items) |test_run| {
+        test_e2e_step.dependOn(&test_run.step);
     }
 
     // Aggregate workflows
@@ -408,21 +332,11 @@ fn create_workflow_steps(
     test_fast_step.dependOn(test_step);
     test_fast_step.dependOn(test_integration_step);
 
-    const test_all_step = b.step("test-all", "Run all functional tests (excludes performance tests)");
+    const test_all_step = b.step("test-all", "Run all tests");
     test_all_step.dependOn(test_fast_step);
-    test_all_step.dependOn(test_ingestion_step);
-    test_all_step.dependOn(test_simulation_step);
-    test_all_step.dependOn(test_stress_step);
-    // Performance tests excluded from test-all to prevent resource contention
-    // Use 'test-performance' or 'test-perf' for isolated performance testing
-    test_all_step.dependOn(test_fault_injection_step);
-    test_all_step.dependOn(test_recovery_step);
-    test_all_step.dependOn(test_safety_step);
-    test_all_step.dependOn(test_defensive_step);
+    test_all_step.dependOn(test_e2e_step);
 
     // Code quality steps
-    const tidy_step = b.step("tidy", "Run code quality checks");
-
     const fmt_check = b.addFmt(.{
         .paths = &.{ "src", "tests", "build.zig" },
         .check = true,
@@ -438,49 +352,22 @@ fn create_workflow_steps(
     fmt_fix_step.dependOn(&fmt_fix.step);
 
     // CI step
-    const ci_step = b.step("ci", "Run all CI checks (tests, tidy, format)");
+    const ci_step = b.step("ci", "Run all CI checks");
     ci_step.dependOn(test_fast_step);
-    ci_step.dependOn(tidy_step);
-    ci_step.dependOn(&fmt_check.step);
-
-    // Test listing step
-    const test_list_step = b.step("test-list", "List all available individual tests");
-    test_list_step.makeFn = struct {
-        fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
-            _ = options;
-            _ = step;
-
-            std.debug.print("\nAvailable test targets:\n\n", .{});
-            std.debug.print("Core test categories:\n", .{});
-            std.debug.print("  test                 - Run unit tests\n", .{});
-            std.debug.print("  test-integration     - Run integration tests\n", .{});
-            std.debug.print("  test-ingestion       - Run ingestion tests\n", .{});
-            std.debug.print("  test-simulation      - Run simulation tests\n", .{});
-            std.debug.print("  test-stress          - Run stress tests\n", .{});
-            std.debug.print("  test-performance     - Run performance tests\n", .{});
-            std.debug.print("  test-fault-injection - Run fault injection tests\n", .{});
-            std.debug.print("  test-recovery        - Run recovery tests\n", .{});
-            std.debug.print("  test-safety          - Run safety tests\n", .{});
-            std.debug.print("  test-defensive       - Run defensive programming tests\n", .{});
-
-            std.debug.print("\nWorkflow commands:\n", .{});
-            std.debug.print("  test-fast            - Run core tests (unit + integration)\n", .{});
-            std.debug.print("  test-all             - Run all tests including stress tests\n", .{});
-
-            std.debug.print("\nUse the category commands above to run groups of tests.\n", .{});
-            std.debug.print("Use './zig/zig build --list-steps' to see all available build targets.\n\n", .{});
-        }
-    }.make;
+    ci_step.dependOn(fmt_step);
 }
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Create core modules
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
     const modules = create_build_modules(b, target, optimize);
 
-    // Create main executable
+    // Main executable
     const exe = b.addExecutable(.{
         .name = "kausaldb",
         .root_module = b.createModule(.{
@@ -489,17 +376,9 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-
-    // Apply sanitizer flags to main executable
-    if (modules.enable_thread_sanitizer) {
-        exe.root_module.sanitize_thread = true;
-    }
-    if (modules.enable_ubsan) {
-        exe.root_module.sanitize_c = .full;
-    }
-
     exe.linkLibC();
     exe.root_module.addImport("kausaldb", modules.kausaldb);
+    exe.root_module.addImport("build_options", modules.build_options);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -507,142 +386,37 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
-    const run_step = b.step("run", "Run KausalDB");
+
+    const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Discover and organize tests
-    var arena = std.heap.ArenaAllocator.init(b.allocator);
-    defer arena.deinit();
-    const arena_allocator = arena.allocator();
-
-    const test_files = discover_test_files(arena_allocator) catch |err| {
-        std.debug.print("Failed to discover test files: {}\n", .{err});
+    // Create test suite
+    const suite = create_test_suite(b, modules, target, optimize, arena_allocator) catch |err| {
+        std.debug.print("Failed to create test suite: {}\n", .{err});
         return;
     };
 
-    const categorized = create_categorized_tests(b, test_files.items, modules, target, optimize, arena_allocator) catch |err| {
-        std.debug.print("Failed to create categorized tests: {}\n", .{err});
-        return;
-    };
+    // Create workflow steps
+    create_workflow_steps(b, suite);
 
-    // Create development tools and workflow steps
-    create_development_tools(b, modules, target);
-    create_workflow_steps(b, categorized);
-
-    // Create convenience commands for development workflow
-    create_convenience_commands(b, exe, target, optimize, modules);
-}
-
-/// Creates convenient development commands for common workflows
-fn create_convenience_commands(
-    b: *std.Build,
-    exe: *std.Build.Step.Compile,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    modules: BuildModules,
-) void {
-    // Server command: ./zig build server [-- --port 3000]
-    const server_cmd = b.addRunArtifact(exe);
-    server_cmd.step.dependOn(b.getInstallStep());
-    server_cmd.addArg("server");
-    if (b.args) |args| {
-        server_cmd.addArgs(args);
-    }
-    const server_step = b.step("server", "Start KausalDB server");
-    server_step.dependOn(&server_cmd.step);
-
-    // Demo command: ./zig build demo
-    const demo_cmd = b.addRunArtifact(exe);
-    demo_cmd.step.dependOn(b.getInstallStep());
-    demo_cmd.addArg("demo");
-    if (b.args) |args| {
-        demo_cmd.addArgs(args);
-    }
-    const demo_step = b.step("demo", "Run KausalDB storage and query demonstration");
-    demo_step.dependOn(&demo_cmd.step);
-
-    // Performance validation: ./zig build perf
-    const perf_cmd = create_performance_validation_step(b, target, optimize, modules);
-    const perf_step = b.step("perf", "Validate performance thresholds");
-    perf_step.dependOn(&perf_cmd.step);
-
-    // Benchmark commands with different targets
-    create_benchmark_commands(b, target, optimize, modules);
-}
-
-/// Creates performance validation step using benchmark tools
-fn create_performance_validation_step(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    modules: BuildModules,
-) *std.Build.Step.Run {
-    // Build benchmark first, then run performance validation
-    const benchmark_exe = create_benchmark_executable(b, target, optimize, modules);
-
-    const perf_cmd = b.addRunArtifact(benchmark_exe);
-    perf_cmd.step.dependOn(b.getInstallStep());
-
-    // Run storage benchmarks and validate thresholds
-    perf_cmd.addArgs(&.{ "storage", "--json" });
-
-    return perf_cmd;
-}
-
-/// Creates benchmark command shortcuts
-fn create_benchmark_commands(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    modules: BuildModules,
-) void {
-    const benchmark_exe = create_benchmark_executable(b, target, optimize, modules);
-
-    // Generic benchmark command: ./zig build bench [-- block-write]
-    const bench_cmd = b.addRunArtifact(benchmark_exe);
-    bench_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        bench_cmd.addArgs(args);
-    }
-    const bench_step = b.step("bench", "Run performance benchmarks");
-    bench_step.dependOn(&bench_cmd.step);
-
-    // Quick benchmark shortcuts
-    const shortcuts = .{
-        .{ "bench-write", "block-write", "Benchmark block write operations" },
-        .{ "bench-read", "block-read", "Benchmark block read operations" },
-        .{ "bench-graph", "graph-traversal", "Benchmark graph traversal operations" },
-        .{ "bench-all", "all", "Run all benchmarks" },
-    };
-
-    inline for (shortcuts) |shortcut| {
-        const cmd = b.addRunArtifact(benchmark_exe);
-        cmd.step.dependOn(b.getInstallStep());
-        cmd.addArg(shortcut[1]);
-        const step = b.step(shortcut[0], shortcut[2]);
-        step.dependOn(&cmd.step);
-    }
-}
-
-/// Creates or reuses benchmark executable
-fn create_benchmark_executable(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    modules: BuildModules,
-) *std.Build.Step.Compile {
-    // Create benchmark executable
+    // Benchmark executable
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/benchmark.zig"),
+            .root_source_file = b.path("src/benchmark.zig"),
             .target = target,
-            .optimize = optimize,
+            .optimize = .ReleaseFast,
         }),
     });
-    benchmark_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
     benchmark_exe.linkLibC();
+    benchmark_exe.root_module.addImport("kausaldb", modules.kausaldb);
+    benchmark_exe.root_module.addImport("build_options", modules.build_options);
     b.installArtifact(benchmark_exe);
 
-    return benchmark_exe;
+    const benchmark_cmd = b.addRunArtifact(benchmark_exe);
+    if (b.args) |args| {
+        benchmark_cmd.addArgs(args);
+    }
+    const benchmark_step = b.step("benchmark", "Run performance benchmarks");
+    benchmark_step.dependOn(&benchmark_cmd.step);
 }

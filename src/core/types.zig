@@ -56,6 +56,30 @@ pub const BlockId = struct {
         return std.mem.eql(u8, &self.bytes, &other.bytes);
     }
 
+    /// Check if BlockId is zero (invalid).
+    pub fn is_zero(self: BlockId) bool {
+        const zero_bytes = [_]u8{0} ** 16;
+        return std.mem.eql(u8, &self.bytes, &zero_bytes);
+    }
+
+    /// Create a zero BlockId (invalid ID for validation purposes).
+    pub fn zero() BlockId {
+        return BlockId{ .bytes = [_]u8{0} ** 16 };
+    }
+
+    /// Create BlockId from u64 value (for testing purposes).
+    pub fn from_u64(value: u64) BlockId {
+        var bytes: [16]u8 = undefined;
+        std.mem.writeInt(u64, bytes[0..8], value, .little);
+        std.mem.writeInt(u64, bytes[8..16], 0, .little);
+        return BlockId{ .bytes = bytes };
+    }
+
+    /// Compare BlockIds for ordering (for min/max comparisons).
+    pub fn compare(self: BlockId, other: BlockId) std.math.Order {
+        return std.mem.order(u8, &self.bytes, &other.bytes);
+    }
+
     /// Global counter for deterministic BlockId generation.
     /// Ensures reproducible test behavior and maintains architectural determinism.
     /// Single-threaded design eliminates need for synchronization.
