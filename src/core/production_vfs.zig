@@ -217,20 +217,27 @@ pub const ProductionVFS = struct {
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
+            // For absolute paths, create parent directories as needed
+            if (std.fs.path.dirname(path)) |parent_dir| {
+                std.fs.cwd().makePath(parent_dir) catch |err| switch (err) {
+                    error.PathAlreadyExists => {},
+                    error.AccessDenied => return VFSError.AccessDenied,
+                    else => return VFSError.IoError,
+                };
+            }
             std.fs.makeDirAbsolute(path) catch |err| {
                 return switch (err) {
-                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.PathAlreadyExists => {}, // Success - directory exists
                     error.AccessDenied => VFSError.AccessDenied,
                     error.FileNotFound => VFSError.FileNotFound,
                     else => VFSError.IoError,
                 };
             };
         } else {
-            std.fs.cwd().makeDir(path) catch |err| {
+            std.fs.cwd().makePath(path) catch |err| {
                 return switch (err) {
-                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.PathAlreadyExists => {}, // Success - directory exists
                     error.AccessDenied => VFSError.AccessDenied,
-                    error.FileNotFound => VFSError.FileNotFound,
                     else => VFSError.IoError,
                 };
             };
@@ -243,9 +250,17 @@ pub const ProductionVFS = struct {
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
+            // For absolute paths, create all parent directories
+            if (std.fs.path.dirname(path)) |parent_dir| {
+                std.fs.cwd().makePath(parent_dir) catch |err| switch (err) {
+                    error.PathAlreadyExists => {},
+                    error.AccessDenied => return VFSError.AccessDenied,
+                    else => return VFSError.IoError,
+                };
+            }
             std.fs.makeDirAbsolute(path) catch |err| {
                 return switch (err) {
-                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.PathAlreadyExists => {}, // Success - directory exists
                     error.AccessDenied => VFSError.AccessDenied,
                     error.FileNotFound => VFSError.FileNotFound,
                     else => VFSError.IoError,
@@ -254,7 +269,7 @@ pub const ProductionVFS = struct {
         } else {
             std.fs.cwd().makePath(path) catch |err| {
                 return switch (err) {
-                    error.PathAlreadyExists => return, // Success - directory exists
+                    error.PathAlreadyExists => {}, // Success - directory exists
                     error.AccessDenied => VFSError.AccessDenied,
                     else => VFSError.IoError,
                 };

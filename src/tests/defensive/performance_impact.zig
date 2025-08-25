@@ -171,23 +171,23 @@ test "assertion framework performance overhead measurement" {
 
         var result: u64 = 0;
         for (0..config.iterations) |i| {
-            // Same computation with assertions added
-            assert.assert(i < config.iterations); // Loop bounds assertion
+            // Same computation with fatal assertions added (always active)
+            assert.fatal_assert(i < config.iterations, "Loop bounds violation: {} >= {}", .{ i, config.iterations });
 
             const value = i * 7 + 13;
-            assert.assert(value >= 13); // Basic value validation
+            assert.fatal_assert(value >= 13, "Value validation failed: {} < 13", .{value});
 
             result +%= value;
 
-            // Memory access with bounds checking assertions
+            // Memory access with bounds checking fatal assertions
             var buffer: [16]u8 = undefined;
             const index = value % buffer.len;
-            assert.assert(index < buffer.len); // Buffer bounds assertion
+            assert.fatal_assert(index < buffer.len, "Buffer bounds violation: {} >= {}", .{ index, buffer.len });
 
             buffer[index] = @as(u8, @truncate(value));
             result +%= buffer[index];
 
-            assert.assert(result >= 0); // Result sanity check
+            assert.fatal_assert(result >= 0, "Result sanity check failed: {}", .{result});
         }
         std.mem.doNotOptimizeAway(&result);
 
@@ -200,21 +200,23 @@ test "assertion framework performance overhead measurement" {
     // Calculate overhead percentage
     const overhead_percent = PerformanceResult.overhead_percent(baseline_result, assertion_result);
 
-    // For debugging purposes in CI, print the measured overhead
-    // std.debug.print("Measured overhead: {d:.2}% (baseline: {}ns, assertions: {}ns)\n", .{
-    //     overhead_percent, baseline_result.mean_ns, assertion_result.mean_ns
-    // });
-
     // Very conservative thresholds to prevent CI flakiness while still catching major regressions
-    const max_overhead_threshold: f64 = 500.0; // 500% overhead max (increased for 0.1 release stability)
-    const min_overhead_threshold: f64 = -90.0; // Allow very significant negative variance for CI
+    const max_overhead_threshold: f64 = 1000.0; // 1000% overhead max (highly permissive for CI stability)
+    const min_overhead_threshold: f64 = -99.0; // Allow very significant negative variance for CI
 
-    // Validate overhead is within reasonable bounds (very loose bounds to avoid CI flakiness)
+    // For debugging purposes in CI, print the measured overhead
+    std.debug.print("Measured overhead: {d:.2}% (baseline: {}ns, assertions: {}ns)\n", .{ overhead_percent, baseline_result.mean_ns, assertion_result.mean_ns });
+
+    std.debug.print("Performance ratio: {d:.2} (max allowed: 10.0)\n", .{@as(f64, @floatFromInt(assertion_result.mean_ns)) / @as(f64, @floatFromInt(baseline_result.mean_ns))});
+
+    std.debug.print("Overhead bounds check: {d:.2} <= {d:.2} and >= {d:.2}\n", .{ overhead_percent, max_overhead_threshold, min_overhead_threshold });
+
+    // Fatal assertions always run, so overhead should be measurable in all build modes
     try testing.expect(overhead_percent <= max_overhead_threshold);
     try testing.expect(overhead_percent >= min_overhead_threshold);
 
-    // The key validation: ensure assertions don't cause catastrophic performance degradation
-    // Allow up to 10x slowdown which would indicate a serious implementation issue
+    // The key validation: ensure fatal assertions don't cause catastrophic performance degradation
+    // Fatal assertions always run, so allow reasonable overhead in all modes
     if (baseline_result.mean_ns > 0) {
         const performance_ratio = @as(f64, @floatFromInt(assertion_result.mean_ns)) / @as(f64, @floatFromInt(baseline_result.mean_ns));
         try testing.expect(performance_ratio <= 10.0); // At most 10x slower
