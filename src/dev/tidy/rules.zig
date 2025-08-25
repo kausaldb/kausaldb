@@ -389,7 +389,9 @@ fn check_single_threaded(context: *RuleContext) []const Rule.RuleViolation {
     violations.ensureTotalCapacity(5) catch {};
 
     // Skip tidy files - they contain pattern examples
-    if (std.mem.indexOf(u8, context.file_path, "tidy/rules.zig") != null) {
+    if (std.mem.indexOf(u8, context.file_path, "tidy/rules.zig") != null or
+        std.mem.indexOf(u8, context.file_path, "tidy/patterns.zig") != null)
+    {
         return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
     }
 
@@ -887,12 +889,17 @@ fn check_documentation_standards(context: *RuleContext) []const Rule.RuleViolati
     return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
 }
 
-/// Rule: Check function length limits using smart pattern matching
+/// Rule: Check function length limits using simple brace counting
 fn check_function_length(
     context: *RuleContext,
 ) []const Rule.RuleViolation {
     var violations = std.array_list.Managed(Rule.RuleViolation).init(context.allocator);
     violations.ensureTotalCapacity(10) catch {};
+
+    // Skip tidy files - they contain long analysis functions by necessity
+    if (std.mem.indexOf(u8, context.file_path, "/tidy/") != null) {
+        return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
+    }
 
     var line_start: usize = 0;
     var line_num: u32 = 1;
@@ -901,24 +908,23 @@ fn check_function_length(
         const line_end = std.mem.indexOfScalarPos(u8, context.source, line_start, '\n') orelse context.source.len;
         const line = context.source[line_start..line_end];
 
-        // Skip comments and string literals
+        // Skip comments and empty lines
         if (is_comment_or_string_line(line)) {
             line_start = line_end + 1;
             line_num += 1;
             continue;
         }
 
-        // Use smart function definition detection
-        if (find_function_definition(line)) |func_name| {
-            // Calculate function length by finding matching brace
-            const fn_start_pos = line_start;
-            const opening_brace = std.mem.indexOfScalarPos(u8, context.source, fn_start_pos, '{') orelse {
+        // Look for function definitions
+        if (find_function_definition(line)) |_| {
+            // Find opening brace
+            const opening_brace = std.mem.indexOfScalarPos(u8, context.source, line_start, '{') orelse {
                 line_start = line_end + 1;
                 line_num += 1;
                 continue;
             };
 
-            // Find matching closing brace (simple brace counting)
+            // Count lines in function body using brace matching
             var brace_count: i32 = 1;
             var pos = opening_brace + 1;
             var function_lines: u32 = 0;
@@ -934,15 +940,10 @@ fn check_function_length(
                 pos += 1;
             }
 
-            // Flag functions longer than 200 lines
+            // Flag functions longer than 300 lines
             if (function_lines > 300) {
-                // Check for length suppression on the function definition line
-                // Also skip generated or analysis functions that are inherently long
-                const is_analysis_function = std.mem.indexOf(u8, line, "check_") != null or
-                    std.mem.indexOf(u8, line, "analyze_") != null or
-                    std.mem.indexOf(u8, line, "validate_") != null;
-
-                if (std.mem.indexOf(u8, line, "// tidy:ignore-length") == null and !is_analysis_function) {
+                // Check for suppression comment
+                if (std.mem.indexOf(u8, line, "// tidy:ignore-length") == null) {
                     violations.append(.{
                         .line = line_num,
                         .message = "Function is too long (>300 lines) - consider breaking into smaller functions",
@@ -950,8 +951,6 @@ fn check_function_length(
                     }) catch {};
                 }
             }
-
-            _ = func_name; // Function name used for validation
         }
 
         line_start = line_end + 1;
@@ -1020,7 +1019,8 @@ fn check_banned_patterns(context: *RuleContext) []const Rule.RuleViolation {
 
     // stdx.zig is allowed to use std functions, and tidy rules need these patterns for detection
     if (std.mem.endsWith(u8, context.file_path, "src/core/stdx.zig") or
-        std.mem.indexOf(u8, context.file_path, "tidy/rules.zig") != null)
+        std.mem.indexOf(u8, context.file_path, "tidy/rules.zig") != null or
+        std.mem.indexOf(u8, context.file_path, "tidy/patterns.zig") != null)
     {
         return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
     }
