@@ -12,7 +12,7 @@ const types = kausaldb.types;
 
 const PerformanceAssertion = kausaldb.PerformanceAssertion;
 const PerformanceThresholds = kausaldb.PerformanceThresholds;
-const ProductionHarness = kausaldb.test_harness.ProductionHarness;
+const SimulationHarness = kausaldb.test_harness.SimulationHarness;
 const TestData = kausaldb.test_harness.TestData;
 const ContextBlock = types.ContextBlock;
 
@@ -108,12 +108,8 @@ test "large block storage engine performance" {
         var total_read_ns: u64 = 0;
 
         for (0..iterations) |i| {
-            // Create unique DB name with timestamp for each iteration to ensure isolation
-            const timestamp = std.time.nanoTimestamp();
-            const db_name = try std.fmt.allocPrint(allocator, "large_perf_{}_{}", .{ i, timestamp });
-            defer allocator.free(db_name);
-
-            var harness = try ProductionHarness.init_and_startup(allocator, db_name);
+            // Use simulation harness for deterministic testing per architecture standards
+            var harness = try SimulationHarness.init_and_startup(allocator, @intCast(0x12345 + i), "large_block_benchmark");
             defer harness.deinit();
 
             // Profile WAL entry creation separately
@@ -124,7 +120,7 @@ test "large block storage engine performance" {
 
             // Measure full write time
             const write_start = std.time.nanoTimestamp();
-            try harness.storage().put_block(test_block);
+            try harness.storage_engine.put_block(test_block);
             const write_end = std.time.nanoTimestamp();
 
             // Calculate breakdown
@@ -141,7 +137,7 @@ test "large block storage engine performance" {
             const read_timing_start = std.time.nanoTimestamp();
 
             for (0..read_iterations) |_| {
-                const retrieved = try harness.storage().find_block(test_block.id, .query_engine);
+                const retrieved = try harness.storage_engine.find_block(test_block.id, .query_engine);
                 try testing.expect(retrieved != null);
                 // Prevent optimization from eliminating the read
                 std.mem.doNotOptimizeAway(retrieved);
