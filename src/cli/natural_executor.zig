@@ -56,11 +56,20 @@ pub const NaturalExecutionContext = struct {
         const coordinator = try allocator.create(ArenaCoordinator);
         coordinator.* = ArenaCoordinator.init(arena);
 
-        // Resolve data directory to absolute path
-        const absolute_data_dir = if (std.fs.path.isAbsolute(data_dir))
-            try allocator.dupe(u8, data_dir)
-        else
-            try std.fs.cwd().realpathAlloc(allocator, data_dir);
+        // Ensure data directory exists and resolve to absolute path
+        const absolute_data_dir = if (std.fs.path.isAbsolute(data_dir)) blk: {
+            std.fs.makeDirAbsolute(data_dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {}, // Directory already exists, continue
+                else => return err,
+            };
+            break :blk try allocator.dupe(u8, data_dir);
+        } else blk: {
+            std.fs.cwd().makeDir(data_dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {}, // Directory already exists, continue
+                else => return err,
+            };
+            break :blk try std.fs.cwd().realpathAlloc(allocator, data_dir);
+        };
 
         return NaturalExecutionContext{
             .allocator = allocator,

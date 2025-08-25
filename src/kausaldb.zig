@@ -23,6 +23,10 @@ pub const StorageEngine = storage.StorageEngine;
 pub const Config = storage.Config;
 pub const Error = storage.StorageError;
 
+pub const concurrency = @import("core/concurrency.zig");
+pub const production_vfs = @import("core/production_vfs.zig");
+pub const ownership = @import("core/ownership.zig");
+
 pub const query_engine = @import("query/engine.zig");
 pub const QueryEngine = query_engine.QueryEngine;
 pub const QueryResult = query_engine.QueryResult;
@@ -80,7 +84,6 @@ pub const version = .{
 /// The database handles knowledge graph storage and querying.
 /// Uses production VFS and default data directory.
 pub fn init(allocator: Allocator, config: Config) !Database {
-    const production_vfs = @import("core/production_vfs.zig");
     var vfs_instance = production_vfs.ProductionVFS.init(allocator);
     return Database.init(allocator, vfs_instance.vfs(), "data", config);
 }

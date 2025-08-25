@@ -48,7 +48,7 @@ test "put block basic" {
 test "find block missing" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "memtable_missing");
+    var harness = try StorageHarness.init_and_startup(allocator, "memtable_missing");
     defer harness.deinit();
 
     const manager = &harness.storage_engine.memtable_manager;
@@ -63,7 +63,7 @@ test "find block missing" {
 test "put block overwrite" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "memtable_overwrite");
+    var harness = try StorageHarness.init_and_startup(allocator, "memtable_overwrite");
     defer harness.deinit();
 
     const manager = &harness.storage_engine.memtable_manager;
