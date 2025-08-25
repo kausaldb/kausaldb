@@ -12,13 +12,8 @@ performance-baseline.json
 fuzz_reports/
 .fuzzing_monitoring
 
-# Data directories (runtime generated)
-kausaldb_data/
-self_analysis_data/
-demo_data/
-test_data/
-.kausaldb-tests/
+# Data directory (runtime generated)
+.kausal-data/
 
 # Where does this damn file come from?
 .DS_Store
-.kausal_data/
