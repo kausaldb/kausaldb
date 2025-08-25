@@ -313,7 +313,7 @@ fn create_test_suite(
     return suite;
 }
 
-fn create_workflow_steps(b: *std.Build, suite: TestSuite) void {
+fn create_workflow_steps(b: *std.Build, suite: TestSuite, modules: BuildModules, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     // Primary test commands
     const test_step = b.step("test", "Run unit tests");
     for (suite.unit.items) |test_run| {
@@ -338,6 +338,32 @@ fn create_workflow_steps(b: *std.Build, suite: TestSuite) void {
     const test_all_step = b.step("test-all", "Run all tests");
     test_all_step.dependOn(test_fast_step);
     test_all_step.dependOn(test_e2e_step);
+
+    // Specialized test workflows - create dedicated test executables
+    const test_golden_masters_step = b.step("test-golden-masters", "Run systematic golden master validation");
+    const test_scenarios_step = b.step("test-scenarios", "Run systematic fault scenario execution");
+
+    // Create golden masters test executable
+    const golden_masters_test_file = TestFile{
+        .path = "src/tests/golden_masters_test.zig",
+        .name = "golden_masters_test",
+        .test_type = .integration,
+    };
+    const golden_masters_exe = create_test_executable(b, golden_masters_test_file, modules, target, optimize);
+    const golden_masters_run = b.addRunArtifact(golden_masters_exe);
+    golden_masters_run.has_side_effects = true;
+    test_golden_masters_step.dependOn(&golden_masters_run.step);
+
+    // Create scenarios test executable
+    const scenarios_test_file = TestFile{
+        .path = "src/tests/scenarios_test.zig",
+        .name = "scenarios_test",
+        .test_type = .integration,
+    };
+    const scenarios_exe = create_test_executable(b, scenarios_test_file, modules, target, optimize);
+    const scenarios_run = b.addRunArtifact(scenarios_exe);
+    scenarios_run.has_side_effects = true;
+    test_scenarios_step.dependOn(&scenarios_run.step);
 
     // Code quality steps
     const fmt_check = b.addFmt(.{
@@ -400,7 +426,7 @@ pub fn build(b: *std.Build) void {
     };
 
     // Create workflow steps
-    create_workflow_steps(b, suite);
+    create_workflow_steps(b, suite, modules, target, optimize);
 
     // Benchmark executable
     const benchmark_exe = b.addExecutable(.{

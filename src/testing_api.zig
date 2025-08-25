@@ -119,6 +119,7 @@ pub const FaultInjectionConfig = test_harness.FaultInjectionConfig;
 pub const FaultInjectionHarness = test_harness.FaultInjectionHarness;
 
 pub const golden_master = @import("testing/golden_master.zig");
+pub const scenarios = @import("testing/scenarios.zig");
 pub const performance_assertions = @import("testing/performance_assertions.zig");
 pub const PerformanceAssertion = performance_assertions.PerformanceAssertion;
 pub const PerformanceThresholds = performance_assertions.PerformanceThresholds;
@@ -179,7 +180,6 @@ pub const FatalCategory = fatal_assertions.FatalCategory;
 pub const FatalContext = fatal_assertions.FatalContext;
 
 // Scenario-driven fault injection testing framework
-pub const scenarios = @import("testing/scenarios.zig");
 pub const FaultScenario = scenarios.FaultScenario;
 pub const ScenarioExecutor = scenarios.ScenarioExecutor;
 pub const WalDurabilityScenario = scenarios.WalDurabilityScenario;
