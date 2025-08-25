@@ -106,13 +106,18 @@ pub const StorageHarness = test_harness.StorageHarness;
 pub const QueryHarness = test_harness.QueryHarness;
 pub const SimulationHarness = test_harness.SimulationHarness;
 pub const BenchmarkHarness = test_harness.BenchmarkHarness;
+pub const ProductionHarness = test_harness.ProductionHarness;
 
 // Memory safety utilities
 pub const memory_guard = @import("core/memory_guard.zig");
 pub const MemoryGuard = memory_guard.MemoryGuard;
 pub const core_types = @import("core/types.zig");
 
-// Test utilities and frameworks
+// Test utilities and frameworks - already using old API
+pub const TestData = test_harness.TestData;
+pub const FaultInjectionConfig = test_harness.FaultInjectionConfig;
+pub const FaultInjectionHarness = test_harness.FaultInjectionHarness;
+
 pub const golden_master = @import("testing/golden_master.zig");
 pub const performance_assertions = @import("testing/performance_assertions.zig");
 pub const PerformanceAssertion = performance_assertions.PerformanceAssertion;

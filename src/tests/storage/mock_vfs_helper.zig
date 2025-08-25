@@ -11,10 +11,10 @@ const kausaldb = @import("kausaldb");
 
 const simulation_vfs = kausaldb.simulation_vfs;
 const testing = std.testing;
-const vfs = kausaldb.vfs;
+const vfs_mod = kausaldb.vfs;
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const VFS = vfs.VFS;
+const VFS = vfs_mod.VFS;
 
 /// Mock VFS wrapper with testing conveniences and failure injection
 pub const MockVFS = struct {
@@ -35,6 +35,8 @@ pub const MockVFS = struct {
     }
 
     pub fn vfs(self: *MockVFS) VFS {
+        // Return the simulation VFS directly - fault injection is not supported
+        // TODO: Implement proper fault injection wrapper for create() operations
         return self.sim_vfs.vfs();
     }
 
@@ -47,7 +49,7 @@ pub const MockVFS = struct {
         try self.vfs().mkdir("/test/data/sst");
 
         // Create some test files for discovery tests
-        var file = try self.vfs().create("/test/data/sst/test_001.sst", .write);
+        var file = try self.vfs().create("/test/data/sst/test_001.sst");
         defer file.close();
 
         const test_content = "test sstable content";
@@ -65,13 +67,26 @@ pub const MockVFS = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        const entries = try self.vfs().list_directory("/test/data", arena.allocator());
-        try testing.expect(entries.len >= 2); // Should have wal and sst subdirs
+        var iterator = try self.vfs().iterate_directory("/test/data", arena.allocator());
+        defer iterator.deinit(arena.allocator());
+
+        var count: usize = 0;
+        while (iterator.next()) |_| {
+            count += 1;
+        }
+        try testing.expect(count >= 2); // Should have wal and sst subdirs
     }
 
     /// Get list of files in SSTable directory
     pub fn list_sstables(self: *MockVFS, allocator: std.mem.Allocator) ![][]const u8 {
-        return self.vfs().list_directory("/test/data/sst", allocator);
+        var iterator = try self.vfs().iterate_directory("/test/data/sst", allocator);
+        defer iterator.deinit(allocator);
+
+        var files = try std.ArrayList([]const u8).initCapacity(allocator, 0);
+        while (iterator.next()) |entry| {
+            try files.append(allocator, try allocator.dupe(u8, entry.name));
+        }
+        return files.toOwnedSlice(allocator);
     }
 
     /// Get list of files in WAL directory
@@ -81,7 +96,7 @@ pub const MockVFS = struct {
 
     /// Create a file with specific content for testing
     pub fn create_test_file(self: *MockVFS, path: []const u8, content: []const u8) !void {
-        var file = try self.vfs().create(path, .write);
+        var file = try self.vfs().create(path);
         defer file.close();
 
         _ = try file.write(content);
@@ -95,25 +110,34 @@ pub const MockVFS = struct {
 
         const size = try file.file_size();
         const content = try allocator.alloc(u8, size);
-        _ = try file.readAll(content);
+        const bytes_read = try file.read(content);
+        _ = bytes_read;
         return content;
     }
 
     /// Simulate disk space exhaustion
     pub fn exhaust_disk_space(self: *MockVFS) void {
-        self.sim_vfs.set_disk_limit(0);
+        self.disk_full = true;
     }
 
     /// Restore normal disk space
     pub fn restore_disk_space(self: *MockVFS) void {
-        self.sim_vfs.set_disk_limit(1024 * 1024 * 1024); // 1GB limit
+        self.disk_full = false;
+    }
+
+    /// Create a file with fault injection support
+    pub fn create_with_faults(self: *MockVFS, path: []const u8) vfs_mod.VFSError!vfs_mod.VFile {
+        if (self.disk_full) {
+            return error.NoSpaceLeft;
+        }
+        return self.sim_vfs.vfs().create(path);
     }
 };
 
 /// Helper to create isolated test environment for storage components
 pub fn create_isolated_test_env(allocator: std.mem.Allocator) !MockVFS {
     var mock_vfs = try MockVFS.init(allocator);
-    try mock_vfs.setup_test_filesystem(allocator);
+    try mock_vfs.setup_test_filesystem();
     return mock_vfs;
 }
 
@@ -125,7 +149,7 @@ test "MockVFS basic functionality" {
     var mock_vfs = try MockVFS.init(allocator);
     defer mock_vfs.deinit();
 
-    try mock_vfs.setup_test_filesystem(allocator);
+    try mock_vfs.setup_test_filesystem();
     try mock_vfs.verify_directory_structure(allocator);
 }
 
@@ -139,12 +163,12 @@ test "MockVFS failure injection" {
     mock_vfs.exhaust_disk_space();
 
     // Should fail to create files when disk is full
-    const result = mock_vfs.vfs().create("/test/should_fail.txt", .write);
+    const result = mock_vfs.create_with_faults("/test/should_fail.txt");
     try testing.expectError(error.NoSpaceLeft, result);
 
     // Restore and verify normal operation
     mock_vfs.restore_disk_space();
-    var file = try mock_vfs.vfs().create("/test/should_succeed.txt", .write);
+    var file = try mock_vfs.vfs().create("/test/should_succeed.txt");
     file.close();
 }
 

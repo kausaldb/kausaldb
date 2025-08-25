@@ -1,547 +1,600 @@
-//! Unified test harness framework for consistent testing patterns.
+//! Standardized Test Harness Framework
 //!
-//! Provides standardized harnesses for storage, query, and simulation testing
-//! with proper lifecycle management, memory safety, and deterministic behavior.
-//! All harnesses follow the two-phase initialization pattern and arena-based
-//! memory management.
-//!
-//! Design rationale: Centralized harness infrastructure ensures consistent
-//! testing patterns, proper resource cleanup, and eliminates boilerplate across
-//! test files. Arena-based memory model prevents leaks in test scenarios.
+//! Provides reusable test setup patterns following KausalDB's architecture principles.
+//! Each harness follows the pure coordinator pattern and two-phase initialization.
+//! All harnesses use arena allocation for O(1) cleanup and explicit lifecycle management.
 
 const std = @import("std");
-const builtin = @import("builtin");
 
-const assert_mod = @import("../core/assert.zig");
-const memory = @import("../core/memory.zig");
-const vfs = @import("../core/vfs.zig");
+const kausaldb = @import("../testing_api.zig");
+
 const production_vfs = @import("../core/production_vfs.zig");
-const simulation_vfs = @import("../sim/simulation_vfs.zig");
-const storage_engine = @import("../storage/engine.zig");
-const storage_config = @import("../storage/config.zig");
-const query_engine = @import("../query/engine.zig");
-const simulation = @import("../sim/simulation.zig");
-const context_block = @import("../core/types.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
-const ArenaAllocator = std.heap.ArenaAllocator;
-const ArenaCoordinator = memory.ArenaCoordinator;
-const VFS = vfs.VFS;
+const assert = kausaldb.assert;
+const query_engine = kausaldb.query_engine;
+const simulation = kausaldb.simulation;
+const simulation_vfs = kausaldb.simulation_vfs;
+const storage = kausaldb.storage;
+const testing = std.testing;
+const types = kausaldb.types;
+
 const ProductionVFS = production_vfs.ProductionVFS;
-const SimulationVFS = simulation_vfs.SimulationVFS;
-const StorageEngine = storage_engine.StorageEngine;
-const StorageConfig = storage_config.Config;
+const StorageEngine = storage.StorageEngine;
+const NodeId = simulation.NodeId;
+const Node = simulation.Node;
 const QueryEngine = query_engine.QueryEngine;
 const Simulation = simulation.Simulation;
-const ContextBlock = context_block.ContextBlock;
-const BlockId = context_block.BlockId;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const VFS = kausaldb.VFS;
+const ContextBlock = types.ContextBlock;
+const BlockId = types.BlockId;
+const GraphEdge = types.GraphEdge;
+const EdgeType = types.EdgeType;
 
-/// Core test harness providing base functionality for all test scenarios.
-/// Manages test lifecycle, memory, and provides common utilities.
-pub const TestHarness = struct {
-    name: []const u8,
-    allocator: std.mem.Allocator,
-    temp_dir: ?std.fs.Dir,
-    start_time: i64,
-
-    /// Initialize test harness with memory allocation only.
-    /// No I/O operations performed in this phase.
-    pub fn init(allocator: std.mem.Allocator, name: []const u8) TestHarness {
-        return .{
-            .name = name,
-            .allocator = allocator,
-            .temp_dir = null,
-            .start_time = 0,
-        };
+/// Test data utilities following deterministic patterns for reproducible testing
+pub const TestData = struct {
+    /// Generate deterministic BlockId from seed ensuring non-zero result
+    /// All-zero BlockId is invalid per storage engine requirements
+    pub fn deterministic_block_id(seed: u32) BlockId {
+        var bytes: [16]u8 = undefined;
+        // Use seed + 1 to ensure non-zero BlockId
+        std.mem.writeInt(u128, &bytes, seed + 1, .little);
+        return BlockId.from_bytes(bytes);
     }
 
-    /// Start test execution with I/O operations.
-    /// Creates temporary directory for test isolation.
-    pub fn startup(self: *TestHarness) !void {
-        self.start_time = std.time.milliTimestamp();
-
-        // Use static temp directory names for deterministic testing
-
-        // Create temp directory through abstraction (will be overridden in simulation harness)
-        self.temp_dir = null; // Default to no temp dir, let specific harnesses handle it
-    }
-
-    /// Clean up test resources.
-    pub fn shutdown(self: *TestHarness) void {
-        if (self.temp_dir) |*dir| {
-            dir.close();
-            self.temp_dir = null;
-        }
-
-        const elapsed = std.time.milliTimestamp() - self.start_time;
-        if (builtin.mode == .Debug) {
-            std.debug.print("Test '{s}' completed in {d}ms\n", .{ self.name, elapsed });
-        }
-    }
-
-    /// Deallocate all test memory.
-    pub fn deinit(self: *TestHarness) void {
-        // No cleanup needed for simple allocator
-        _ = self;
-    }
-
-    /// Provide allocator for subsystem testing.
-    pub fn test_allocator(self: *TestHarness) std.mem.Allocator {
-        return self.allocator;
-    }
-
-    /// Generate deterministic test data with static content to avoid memory leaks.
-    pub fn generate_block(self: *TestHarness, index: u32) !ContextBlock {
-        _ = self; // Static content doesn't need allocator
-
-        // Use static strings to prevent memory leaks in tests
-        const content = "Test block content";
-        const metadata = "{\"test\":true}";
+    /// Create test block with deterministic content for reproducible testing
+    pub fn create_test_block(allocator: std.mem.Allocator, index: u32) !ContextBlock {
+        const block_id = deterministic_block_id(index);
+        const source_uri = try std.fmt.allocPrint(allocator, "test://block_{}.zig", .{index});
+        const metadata_json = try std.fmt.allocPrint(allocator, "{{\"type\":\"test\",\"index\":{}}}", .{index});
+        const content = try std.fmt.allocPrint(allocator, "Test block content for index {}", .{index});
 
         return ContextBlock{
-            .id = BlockId.from_u64(index + 1), // Never create zero BlockIDs
+            .id = block_id,
             .version = 1,
+            .source_uri = source_uri,
+            .metadata_json = metadata_json,
             .content = content,
-            .source_uri = "test://block",
-            .metadata_json = metadata,
         };
     }
 
-    /// Validate memory usage is within expected bounds.
-    pub fn validate_memory_usage(self: *TestHarness, max_bytes: usize) !void {
-        // For testing allocator, we trust it to track usage properly
-        _ = self;
-        _ = max_bytes;
+    /// Create test edge between blocks using provided block IDs
+    pub fn create_test_edge(source_id: BlockId, target_id: BlockId, edge_type: EdgeType) GraphEdge {
+        return GraphEdge{
+            .source_id = source_id,
+            .target_id = target_id,
+            .edge_type = edge_type,
+        };
+    }
+
+    /// Create test edge from indices using deterministic ID generation
+    /// Convenience function for tests that work with sequential indices
+    pub fn create_test_edge_from_indices(source_index: u32, target_index: u32, edge_type: EdgeType) GraphEdge {
+        return create_test_edge(deterministic_block_id(source_index), deterministic_block_id(target_index), edge_type);
+    }
+
+    /// Create test block with custom content for specific test scenarios
+    pub fn create_test_block_with_content(allocator: std.mem.Allocator, index: u32, content: []const u8) !ContextBlock {
+        const block_id = deterministic_block_id(index);
+        const source_uri = try std.fmt.allocPrint(allocator, "test://block_{}.zig", .{index});
+        const metadata_json = try std.fmt.allocPrint(allocator, "{{\"type\":\"test\",\"index\":{}}}", .{index});
+        const content_copy = try allocator.dupe(u8, content);
+
+        return ContextBlock{
+            .id = block_id,
+            .version = 1,
+            .source_uri = source_uri,
+            .metadata_json = metadata_json,
+            .content = content_copy,
+        };
+    }
+
+    /// Create BlockId from index for use in queries and edge creation
+    pub fn create_block_id(index: u32) BlockId {
+        return deterministic_block_id(index);
+    }
+
+    /// Clean up test block allocated strings
+    pub fn cleanup_test_block(allocator: std.mem.Allocator, block: ContextBlock) void {
+        allocator.free(block.source_uri);
+        allocator.free(block.metadata_json);
+        allocator.free(block.content);
     }
 };
 
-/// Storage-specific test harness with VFS and StorageEngine setup.
+/// Storage test harness providing standardized setup for storage engine testing
+/// Follows two-phase initialization and arena-per-subsystem memory patterns
 pub const StorageHarness = struct {
-    base: TestHarness,
-    // For tests, we'll just use SimulationVFS always - simpler and more deterministic
-    sim_vfs: SimulationVFS,
-    storage_engine: StorageEngine,
+    allocator: std.mem.Allocator,
+    sim_vfs: *SimulationVFS,
+    vfs_instance: VFS,
+    storage_engine: *StorageEngine,
 
-    /// Initialize storage harness with simulation VFS (always for tests).
-    pub fn init(allocator: std.mem.Allocator, name: []const u8, _: bool) !StorageHarness {
-        const base = TestHarness.init(allocator, name);
-        const sim_vfs = try SimulationVFS.init(allocator);
+    const Self = @This();
 
-        return .{
-            .base = base,
+    /// Get VFS interface for components that need direct VFS access
+    pub fn vfs(self: *Self) *SimulationVFS {
+        return self.sim_vfs;
+    }
+
+    /// Get VFS pointer for components that need *VFS parameter
+    pub fn vfs_ptr(self: *Self) *VFS {
+        return &self.vfs_instance;
+    }
+
+    /// Phase 1 initialization: memory allocation only, no I/O operations
+    pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        // Use backing allocator consistently - components manage their own arenas
+
+        // SimulationVFS manages its own internal arena
+        var sim_vfs = try SimulationVFS.heap_init(allocator);
+
+        // Storage engine uses heap allocation to prevent struct copying corruption
+        const vfs_instance = sim_vfs.vfs();
+        const storage_engine = try allocator.create(StorageEngine);
+        storage_engine.* = try StorageEngine.init_default(allocator, vfs_instance, db_name);
+
+        return Self{
+            .allocator = allocator,
             .sim_vfs = sim_vfs,
-            .storage_engine = undefined, // Set in startup
+            .vfs_instance = vfs_instance,
+            .storage_engine = storage_engine,
         };
     }
 
-    /// Initialize and start storage engine.
-    pub fn startup(self: *StorageHarness) !void {
-        try self.base.startup();
-
-        // Use static paths for testing to avoid memory leaks
-        const data_dir = "/tmp/kausaldb_test";
-
-        self.storage_engine = try StorageEngine.init(
-            self.base.allocator,
-            self.sim_vfs.vfs(),
-            data_dir,
-            StorageConfig.minimal_for_testing(),
-        );
+    /// Phase 2 initialization: perform all I/O operations to complete startup
+    pub fn startup(self: *Self) !void {
         try self.storage_engine.startup();
     }
 
-    /// Shutdown storage engine and base harness.
-    pub fn shutdown(self: *StorageHarness) !void {
-        try self.storage_engine.shutdown();
-        self.base.shutdown();
-    }
-
-    /// Clean up all resources.
-    pub fn deinit(self: *StorageHarness) void {
+    /// Clean up all harness resources
+    pub fn deinit(self: *Self) void {
         self.storage_engine.deinit();
+        self.allocator.destroy(self.storage_engine);
         self.sim_vfs.deinit();
-        self.base.deinit();
+        self.allocator.destroy(self.sim_vfs);
     }
 
-    /// Convenience method combining init and startup phases.
-    pub fn init_and_startup(allocator: std.mem.Allocator, name: []const u8) !StorageHarness {
-        var harness = try init(allocator, name, false);
+    /// Convenience method combining init and startup phases
+    pub fn init_and_startup(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var harness = try Self.init(allocator, db_name);
         try harness.startup();
         return harness;
     }
-
-    /// Helper to write and verify a block.
-    pub fn write_and_verify_block(self: *StorageHarness, block: *const ContextBlock) !void {
-        try self.storage_engine.put_block(block.*);
-
-        var retrieved = try self.storage_engine.find_block_with_ownership(block.id, .temporary);
-        fatal_assert(retrieved != null, "Block not found after write", .{});
-
-        defer if (retrieved) |*owned_block| {
-            owned_block.deinit();
-        };
-
-        fatal_assert(
-            std.mem.eql(u8, retrieved.?.block.content, block.content),
-            "Block content mismatch",
-            .{},
-        );
-    }
-
-    /// Force a memtable flush to SSTable.
-    pub fn force_flush(self: *StorageHarness) !void {
-        try self.storage_engine.flush_memtable_to_sstable();
-    }
-
-    /// Inject a simulated I/O failure (simulation VFS only).
-    pub fn inject_io_failure(self: *StorageHarness) !void {
-        switch (self.test_vfs) {
-            .simulation => |*sim| sim.inject_next_failure(),
-            .real => return error.NotSimulation,
-        }
-    }
 };
 
-/// Query test harness combining storage and query engines.
+/// Query test harness extending storage harness with query engine coordination
+/// Pure coordinator pattern orchestrating storage and query components
 pub const QueryHarness = struct {
     storage_harness: StorageHarness,
-    query_engine: QueryEngine,
+    query_engine: *QueryEngine,
 
-    /// Initialize query harness with storage backend.
-    pub fn init(allocator: std.mem.Allocator, name: []const u8) !QueryHarness {
-        const storage_harness = try StorageHarness.init(allocator, name, false);
-        return .{
+    const Self = @This();
+
+    /// Phase 1 initialization: memory allocation only, no I/O operations
+    pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var storage_harness = try StorageHarness.init(allocator, db_name);
+
+        // Query engine uses backing allocator for consistency
+        const query_engine_ptr = try storage_harness.allocator.create(QueryEngine);
+        query_engine_ptr.* = QueryEngine.init(storage_harness.allocator, storage_harness.storage_engine);
+
+        // Disable caching in tests to prevent memory leaks from arena allocator
+        query_engine_ptr.caching_enabled = false;
+
+        return Self{
             .storage_harness = storage_harness,
-            .query_engine = undefined, // Set in startup
+            .query_engine = query_engine_ptr,
         };
     }
 
-    /// Start storage and query engines.
-    pub fn startup(self: *QueryHarness) !void {
+    /// Phase 2 initialization: perform I/O operations to complete startup
+    pub fn startup(self: *Self) !void {
         try self.storage_harness.startup();
-
-        self.query_engine = QueryEngine.init(
-            self.storage_harness.base.allocator,
-            &self.storage_harness.storage_engine,
-        );
         self.query_engine.startup();
     }
 
-    /// Shutdown both engines.
-    pub fn shutdown(self: *QueryHarness) !void {
-        self.query_engine.shutdown();
-        try self.storage_harness.shutdown();
-    }
-
-    /// Clean up resources.
-    pub fn deinit(self: *QueryHarness) void {
-        self.query_engine.deinit();
+    /// Clean up all harness resources
+    pub fn deinit(self: *Self) void {
+        self.storage_harness.allocator.destroy(self.query_engine);
         self.storage_harness.deinit();
     }
 
-    /// Convenience method combining init and startup phases.
-    pub fn init_and_startup(allocator: std.mem.Allocator, name: []const u8) !QueryHarness {
-        var harness = try init(allocator, name);
+    /// Convenience method combining init and startup phases
+    pub fn init_and_startup(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var harness = try Self.init(allocator, db_name);
         try harness.startup();
         return harness;
     }
 
-    /// Helper to create and index a graph of blocks.
-    pub fn create_block_graph(self: *QueryHarness, node_count: u32) !void {
-        var i: u32 = 1;
-        while (i <= node_count) : (i += 1) {
-            const block = try self.storage_harness.base.generate_block(i);
-            try self.storage_harness.storage_engine.put_block(block);
-
-            // Create edges to previous blocks
-            if (i > 1) {
-                const edge = context_block.GraphEdge{
-                    .source_id = block.id,
-                    .target_id = BlockId.from_u64(i - 1),
-                    .edge_type = .calls,
-                };
-                try self.storage_harness.storage_engine.put_edge(edge);
-            }
-        }
+    /// Access storage engine through harness coordinator
+    pub fn storage(self: *Self) *StorageEngine {
+        return self.storage_harness.storage_engine;
     }
 
-    /// Execute and validate a semantic query.
-    pub fn validate_query(self: *QueryHarness, query: []const u8, expected_count: usize) !void {
-        const results = try self.query_engine.execute_semantic_query(query);
-        fatal_assert(
-            results.len == expected_count,
-            "Query returned {d} results, expected {d}",
-            .{ results.len, expected_count },
-        );
+    /// Access simulation VFS for fault injection testing
+    pub fn sim_vfs(self: *Self) *SimulationVFS {
+        return self.storage_harness.sim_vfs;
     }
 };
 
-/// Simulation harness for deterministic failure testing.
+/// Production harness for performance testing with real filesystem
+/// Uses ProductionVFS for minimal overhead and realistic I/O performance
+pub const ProductionHarness = struct {
+    storage_harness: ProductionStorageHarness,
+    query_engine: *QueryEngine,
+
+    const Self = @This();
+
+    /// Phase 1 initialization: memory allocation only, no I/O operations
+    pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var storage_harness = try ProductionStorageHarness.init(allocator, db_name);
+
+        // Query engine uses backing allocator for consistency
+        const query_engine_ptr = try storage_harness.allocator.create(QueryEngine);
+        query_engine_ptr.* = QueryEngine.init(storage_harness.allocator, storage_harness.storage_engine);
+
+        // Disable caching in tests to prevent memory leaks from arena allocator
+        query_engine_ptr.enable_caching(false);
+
+        return Self{
+            .storage_harness = storage_harness,
+            .query_engine = query_engine_ptr,
+        };
+    }
+
+    /// Phase 2 startup: hot path initialization with I/O operations
+    pub fn startup(self: *Self) !void {
+        try self.storage_harness.startup();
+    }
+
+    /// Convenience method combining init and startup phases
+    pub fn init_and_startup(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var harness = try Self.init(allocator, db_name);
+        try harness.startup();
+        return harness;
+    }
+
+    /// Access storage engine through harness coordinator
+    pub fn storage(self: *Self) *StorageEngine {
+        return self.storage_harness.storage_engine;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.storage_harness.allocator.destroy(self.query_engine);
+        self.storage_harness.deinit();
+    }
+};
+
+/// Production storage harness for performance testing with real filesystem
+pub const ProductionStorageHarness = struct {
+    allocator: std.mem.Allocator,
+    prod_vfs: *ProductionVFS,
+    vfs_instance: VFS,
+    storage_engine: *StorageEngine,
+    db_path: []const u8, // Store database path for cleanup
+
+    const Self = @This();
+
+    /// Phase 1 initialization: memory allocation only, no I/O operations
+    pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        // Use backing allocator consistently - components manage their own arenas
+
+        // ProductionVFS manages its own internal arena
+        var prod_vfs = try allocator.create(ProductionVFS);
+        prod_vfs.* = ProductionVFS.init(allocator);
+
+        // Storage engine uses heap allocation to prevent struct copying corruption
+        const vfs_instance = prod_vfs.vfs();
+        const storage_engine = try allocator.create(StorageEngine);
+        storage_engine.* = try StorageEngine.init_default(allocator, vfs_instance, db_name);
+
+        // Store database path for cleanup
+        const db_path = try allocator.dupe(u8, db_name);
+
+        return Self{
+            .allocator = allocator,
+            .prod_vfs = prod_vfs,
+            .vfs_instance = vfs_instance,
+            .storage_engine = storage_engine,
+            .db_path = db_path,
+        };
+    }
+
+    /// Phase 2 startup: hot path initialization with I/O operations
+    pub fn startup(self: *Self) !void {
+        try self.storage_engine.startup();
+    }
+
+    /// Convenience method combining init and startup phases
+    pub fn init_and_startup(allocator: std.mem.Allocator, db_name: []const u8) !Self {
+        var harness = try Self.init(allocator, db_name);
+        try harness.startup();
+        return harness;
+    }
+
+    pub fn deinit(self: *Self) void {
+        // Shutdown storage engine first
+        self.storage_engine.deinit();
+        self.allocator.destroy(self.storage_engine);
+
+        // Clean up VFS
+        self.prod_vfs.deinit();
+        self.allocator.destroy(self.prod_vfs);
+
+        // Clean up database directory to prevent filesystem pollution
+        std.fs.cwd().deleteTree(self.db_path) catch |err| {
+            // Don't fail the test if directory cleanup fails, just log warning
+            std.log.warn("Failed to clean up test database directory '{s}': {}", .{ self.db_path, err });
+        };
+
+        // Free the database path string
+        self.allocator.free(self.db_path);
+    }
+};
+
+/// Simulation harness for integration testing with deterministic time control
+/// Coordinates simulation, storage, and query components
 pub const SimulationHarness = struct {
-    base: TestHarness,
-    sim: Simulation,
-    storage_harnesses: std.array_list.Managed(*StorageHarness),
+    allocator: std.mem.Allocator,
+    simulation: *Simulation,
+    storage_engine: *StorageEngine,
+    query_engine: *QueryEngine,
+    node_id: NodeId,
+    seed: u64,
+    vfs_instance: VFS,
 
-    /// Initialize simulation with deterministic seed.
-    pub fn init(allocator: std.mem.Allocator, name: []const u8, seed: u64) !SimulationHarness {
-        const base = TestHarness.init(allocator, name);
-        return .{
-            .base = base,
-            .sim = try Simulation.init(base.allocator, seed),
-            .storage_harnesses = std.array_list.Managed(*StorageHarness).init(base.allocator),
+    const Self = @This();
+
+    /// Phase 1 initialization with deterministic seed for reproducible behavior
+    pub fn init(allocator: std.mem.Allocator, seed: u64, db_name: []const u8) !Self {
+        // Use backing allocator consistently for all components
+
+        // Deterministic simulation ensures reproducible test behavior
+        var simulation_ptr = try allocator.create(Simulation);
+        simulation_ptr.* = try Simulation.init(allocator, seed);
+
+        // Single simulation node hosts storage engine
+        const node_id = try simulation_ptr.add_node();
+
+        // Stabilization period ensures consistent simulation state
+        simulation_ptr.tick_multiple(5);
+
+        const node_ptr = simulation_ptr.find_node(node_id);
+        const node_vfs = node_ptr.filesystem_interface();
+
+        // Storage engine uses simulation VFS for deterministic I/O
+        const storage_engine = try allocator.create(StorageEngine);
+        storage_engine.* = try StorageEngine.init_default(allocator, node_vfs, db_name);
+
+        // Query engine coordinates with storage engine
+        const query_engine_ptr = try allocator.create(QueryEngine);
+        query_engine_ptr.* = QueryEngine.init(allocator, storage_engine);
+
+        return Self{
+            .allocator = allocator,
+            .simulation = simulation_ptr,
+            .storage_engine = storage_engine,
+            .query_engine = query_engine_ptr,
+            .node_id = node_id,
+            .seed = seed,
+            .vfs_instance = node_vfs,
         };
     }
 
-    /// Start simulation environment.
-    pub fn startup(self: *SimulationHarness) !void {
-        try self.base.startup();
-        // Note: Simulation doesn't need explicit startup
-        // self.sim.startup();
+    /// Phase 2 initialization: perform I/O operations to complete startup
+    pub fn startup(self: *Self) !void {
+        try self.storage_engine.startup();
+        self.query_engine.startup();
     }
 
-    /// Run simulation for specified number of ticks.
-    pub fn run_ticks(self: *SimulationHarness, tick_count: u64) !void {
-        var i: u64 = 0;
-        while (i < tick_count) : (i += 1) {
-            self.sim.tick();
-        }
+    /// Clean up all harness resources
+    pub fn deinit(self: *Self) void {
+        self.query_engine.deinit();
+        self.allocator.destroy(self.query_engine);
+        self.storage_engine.deinit();
+        self.allocator.destroy(self.storage_engine);
+        self.simulation.deinit();
+        self.allocator.destroy(self.simulation);
     }
 
-    /// Create a simulated storage node.
-    pub fn create_node(self: *SimulationHarness, node_id: []const u8) !*StorageHarness {
-        const harness = try self.base.allocator.create(StorageHarness);
-        harness.* = try StorageHarness.init(self.base.allocator, node_id, true);
+    /// Convenience method combining init and startup phases
+    pub fn init_and_startup(allocator: std.mem.Allocator, seed: u64, db_name: []const u8) !Self {
+        var harness = try Self.init(allocator, seed, db_name);
         try harness.startup();
-        try self.storage_harnesses.append(harness);
         return harness;
     }
 
-    /// Inject network partition between nodes.
-    pub fn partition_nodes(self: *SimulationHarness, group1: []usize, group2: []usize) void {
-        _ = self;
-        _ = group1;
-        _ = group2;
-        // Network partition simulation would be implemented here
+    /// Advance simulation time by specified tick count
+    pub fn tick(self: *Self, count: u32) void {
+        self.simulation.tick_multiple(count);
     }
 
-    /// Inject random failures based on probability.
-    pub fn inject_random_failures(self: *SimulationHarness, probability: f32) !void {
-        for (self.storage_harnesses.items) |harness| {
-            if (self.sim.random.float(f32) < probability) {
-                try harness.inject_io_failure();
-            }
-        }
-    }
-
-    /// Validate all nodes eventually converge to same state.
-    pub fn validate_convergence(self: *SimulationHarness) !void {
-        if (self.storage_harnesses.items.len < 2) return;
-
-        // Compare block counts across all nodes
-        const first_count = self.storage_harnesses.items[0].storage_engine.block_count();
-        for (self.storage_harnesses.items[1..]) |harness| {
-            const count = harness.storage_engine.block_count();
-            fatal_assert(
-                count == first_count,
-                "Node divergence: {d} blocks vs {d}",
-                .{ count, first_count },
-            );
-        }
-    }
-
-    /// Shutdown all nodes and simulation.
-    pub fn shutdown(self: *SimulationHarness) !void {
-        for (self.storage_harnesses.items) |harness| {
-            harness.shutdown() catch {};
-        }
-        // Note: Simulation doesn't need explicit shutdown
-        // self.sim.shutdown();
-        self.base.shutdown();
-    }
-
-    /// Clean up all resources.
-    pub fn deinit(self: *SimulationHarness) void {
-        for (self.storage_harnesses.items) |harness| {
-            harness.deinit();
-            self.base.allocator.destroy(harness);
-        }
-        self.storage_harnesses.deinit();
-        self.sim.deinit();
-        self.base.deinit();
+    /// Access simulation node for network and filesystem operations
+    pub fn node(self: *Self) *Node {
+        return self.simulation.find_node(self.node_id);
     }
 };
 
-/// Performance measurement harness for benchmarking.
-pub const BenchmarkHarness = struct {
-    base: TestHarness,
-    samples: std.array_list.Managed(u64),
-    warmup_count: usize,
-    sample_count: usize,
+/// Fault injection configuration for systematic hostile condition testing
+pub const FaultInjectionConfig = struct {
+    /// I/O operation failure configuration
+    io_failures: struct {
+        enabled: bool = false,
+        failure_rate_per_thousand: u32 = 100, // 10% default failure rate
+        operations: struct {
+            read: bool = false,
+            write: bool = false,
+            create: bool = false,
+            remove: bool = false,
+            mkdir: bool = false,
+            sync: bool = false,
+        } = .{},
+    } = .{},
 
-    /// Initialize benchmark harness.
-    pub fn init(
+    /// Torn write configuration simulating power loss during writes
+    torn_writes: struct {
+        enabled: bool = false,
+        probability_per_thousand: u32 = 500, // 50% default probability
+        completion_threshold_percent: u8 = 70, // 70% completion before interruption
+        min_interruption_bytes: u32 = 1,
+    } = .{},
+
+    /// Data corruption injection configuration
+    data_corruption: struct {
+        enabled: bool = false,
+        corruption_rate_per_million: u32 = 100, // 0.01% default corruption rate
+        patterns: struct {
+            bit_flip: bool = true,
+            zero_bytes: bool = false,
+            random_bytes: bool = false,
+        } = .{},
+    } = .{},
+};
+
+/// Fault injection harness extending simulation harness with systematic fault injection
+/// Provides hostile condition testing capabilities
+pub const FaultInjectionHarness = struct {
+    simulation_harness: SimulationHarness,
+    fault_config: FaultInjectionConfig,
+    seed: u64,
+
+    const Self = @This();
+
+    /// Initialize harness with fault injection configuration
+    pub fn init_with_faults(
         allocator: std.mem.Allocator,
-        name: []const u8,
-        warmup: usize,
-        samples: usize,
-    ) BenchmarkHarness {
-        const base = TestHarness.init(allocator, name);
-        return .{
-            .base = base,
-            .samples = std.array_list.Managed(u64).init(base.allocator),
-            .warmup_count = warmup,
-            .sample_count = samples,
+        seed: u64,
+        db_name: []const u8,
+        fault_config: FaultInjectionConfig,
+    ) !Self {
+        const simulation_harness = try SimulationHarness.init(allocator, seed, db_name);
+        return Self{
+            .simulation_harness = simulation_harness,
+            .fault_config = fault_config,
+            .seed = seed,
         };
     }
 
-    /// Run benchmark with timing.
-    pub fn run_benchmark(
-        self: *BenchmarkHarness,
-        comptime func: fn (*BenchmarkHarness) anyerror!void,
-    ) !void {
-        // Warmup runs
-        var i: usize = 0;
-        while (i < self.warmup_count) : (i += 1) {
-            try func(self);
-        }
-
-        // Timed samples
-        i = 0;
-        while (i < self.sample_count) : (i += 1) {
-            const start = std.time.nanoTimestamp();
-            try func(self);
-            const elapsed = @as(u64, @intCast(std.time.nanoTimestamp() - start));
-            try self.samples.append(elapsed);
-        }
+    pub fn startup(self: *Self) !void {
+        try self.simulation_harness.startup();
+        try self.apply_fault_configuration();
     }
 
-    /// Calculate benchmark statistics.
-    pub fn calculate_stats(self: *BenchmarkHarness) BenchmarkStats {
-        std.sort.heap(u64, self.samples.items, {}, std.sort.asc(u64));
-
-        var sum: u64 = 0;
-        var min: u64 = std.math.maxInt(u64);
-        var max: u64 = 0;
-
-        for (self.samples.items) |sample| {
-            sum += sample;
-            min = @min(min, sample);
-            max = @max(max, sample);
-        }
-
-        const mean = sum / self.samples.items.len;
-        const median = self.samples.items[self.samples.items.len / 2];
-        const p99 = self.samples.items[
-            @min(
-                self.samples.items.len * 99 / 100,
-                self.samples.items.len - 1,
-            )
-        ];
-
-        return .{
-            .mean = mean,
-            .median = median,
-            .min = min,
-            .max = max,
-            .p99 = p99,
-            .samples = self.samples.items.len,
-        };
+    pub fn deinit(self: *Self) void {
+        self.simulation_harness.deinit();
     }
 
-    /// Clean up resources.
-    pub fn deinit(self: *BenchmarkHarness) void {
-        self.samples.deinit();
-        self.base.deinit();
+    /// Convenience method combining init_with_faults and startup phases
+    pub fn init_and_startup(
+        allocator: std.mem.Allocator,
+        seed: u64,
+        db_name: []const u8,
+    ) !Self {
+        const default_fault_config = FaultInjectionConfig{};
+        var harness = try Self.init_with_faults(allocator, seed, db_name, default_fault_config);
+        try harness.startup();
+        return harness;
     }
 
-    pub const BenchmarkStats = struct {
-        mean: u64,
-        median: u64,
-        min: u64,
-        max: u64,
-        p99: u64,
-        samples: usize,
+    /// Configure fault injection parameters in simulation VFS
+    pub fn apply_fault_configuration(self: *Self) !void {
+        const node = self.simulation_harness.node();
+        const node_vfs = node.filesystem;
 
-        pub fn format(
-            self: BenchmarkStats,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-            try writer.print(
-                "mean={d}ns median={d}ns min={d}ns max={d}ns p99={d}ns samples={d}",
-                .{ self.mean, self.median, self.min, self.max, self.p99, self.samples },
+        // I/O failure configuration based on fault settings
+        if (self.fault_config.io_failures.enabled) {
+            const operations = SimulationVFS.FaultInjectionState.IoFailureConfig.OperationType{
+                .read = self.fault_config.io_failures.operations.read,
+                .write = self.fault_config.io_failures.operations.write,
+                .create = self.fault_config.io_failures.operations.create,
+                .remove = self.fault_config.io_failures.operations.remove,
+                .mkdir = self.fault_config.io_failures.operations.mkdir,
+                .sync = self.fault_config.io_failures.operations.sync,
+            };
+            node_vfs.enable_io_failures(
+                self.fault_config.io_failures.failure_rate_per_thousand,
+                operations,
             );
         }
-    };
+
+        // Torn write configuration for power loss simulation
+        if (self.fault_config.torn_writes.enabled) {
+            node_vfs.enable_torn_writes(
+                self.fault_config.torn_writes.probability_per_thousand,
+                self.fault_config.torn_writes.min_interruption_bytes,
+                self.fault_config.torn_writes.completion_threshold_percent,
+            );
+        }
+
+        // Additional fault types configured based on requirements
+    }
+
+    /// Access storage engine through harness
+    pub fn storage(self: *Self) *StorageEngine {
+        return self.simulation_harness.storage_engine;
+    }
+
+    /// Access query engine through harness
+    pub fn query_engine(self: *Self) *QueryEngine {
+        return self.simulation_harness.query_engine;
+    }
+
+    /// Advance simulation time by specified tick count
+    pub fn tick(self: *Self, count: u32) void {
+        self.simulation_harness.tick(count);
+    }
+
+    /// Disable all fault injection to enable clean recovery testing
+    pub fn disable_all_faults(self: *Self) void {
+        const node = self.simulation_harness.node();
+        const node_vfs = node.filesystem;
+        node_vfs.disable_all_fault_injection();
+    }
+
+    /// Disable torn writes while keeping other fault types active
+    pub fn disable_torn_writes(self: *Self) void {
+        const node = self.simulation_harness.node();
+        const node_vfs = node.filesystem;
+        node_vfs.disable_torn_writes();
+    }
+
+    /// Access VFS for pipeline initialization compatibility
+    pub fn vfs_ptr(self: *Self) *VFS {
+        return &self.simulation_harness.vfs_instance;
+    }
+
+    /// Access simulation VFS for direct fault injection control
+    pub fn sim_vfs(self: *Self) *SimulationVFS {
+        const node = self.simulation_harness.node();
+        return node.filesystem;
+    }
+
+    /// Enable I/O failures with specified rate and operation types
+    pub fn enable_io_failures(
+        self: *Self,
+        rate_per_thousand: u32,
+        operations: struct {
+            read: bool = false,
+            write: bool = false,
+            create: bool = false,
+            remove: bool = false,
+            mkdir: bool = false,
+            sync: bool = false,
+        },
+    ) void {
+        const node = self.simulation_harness.node();
+        const node_vfs = node.filesystem;
+
+        const vfs_operations = SimulationVFS.FaultInjectionState.IoFailureConfig.OperationType{
+            .read = operations.read,
+            .write = operations.write,
+            .create = operations.create,
+            .remove = operations.remove,
+            .mkdir = operations.mkdir,
+            .sync = operations.sync,
+        };
+
+        node_vfs.enable_io_failures(rate_per_thousand, vfs_operations);
+    }
 };
-
-// Tests for the harness framework itself
-test "TestHarness lifecycle" {
-    var harness = TestHarness.init(std.testing.allocator, "test_lifecycle");
-    defer harness.deinit();
-
-    try harness.startup();
-    defer harness.shutdown();
-
-    const block = try harness.generate_block(42);
-    // Check the block ID is deterministic (compare first 8 bytes as u64)
-    const expected_bytes = std.mem.toBytes(@as(u64, 43)); // generate_block adds 1 to avoid zero IDs
-    try std.testing.expect(std.mem.eql(u8, block.id.bytes[0..8], &expected_bytes));
-}
-
-test "StorageHarness basic operations" {
-    var harness = try StorageHarness.init(std.testing.allocator, "test_storage", false);
-    defer harness.deinit();
-
-    try harness.startup();
-    defer harness.shutdown() catch {};
-
-    const block = try harness.base.generate_block(1);
-    try harness.write_and_verify_block(&block);
-}
-
-test "QueryHarness graph creation" {
-    var harness = try QueryHarness.init(std.testing.allocator, "test_query");
-    defer harness.deinit();
-
-    try harness.startup();
-    defer harness.shutdown() catch {};
-
-    try harness.create_block_graph(5);
-    // Verify blocks were created
-    const count = harness.storage_harness.storage_engine.block_count();
-    try std.testing.expectEqual(@as(u64, 5), count);
-}
-
-test "SimulationHarness deterministic behavior" {
-    var harness = try SimulationHarness.init(std.testing.allocator, "test_sim", 12345);
-    defer harness.deinit();
-
-    try harness.startup();
-    defer harness.shutdown() catch {};
-
-    _ = try harness.create_node("node1");
-    _ = try harness.create_node("node2");
-
-    try harness.run_ticks(10);
-    try harness.validate_convergence();
-}
-
-test "BenchmarkHarness statistics" {
-    var harness = BenchmarkHarness.init(std.testing.allocator, "test_bench", 5, 10);
-    defer harness.deinit();
-
-    // Add some sample data
-    try harness.samples.append(100);
-    try harness.samples.append(200);
-    try harness.samples.append(150);
-
-    const stats = harness.calculate_stats();
-    try std.testing.expect(stats.min == 100);
-    try std.testing.expect(stats.max == 200);
-    try std.testing.expect(stats.median == 150);
-}
