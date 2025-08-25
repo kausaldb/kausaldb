@@ -51,12 +51,15 @@ fn create_build_modules(
     const enable_ubsan = b.option(bool, "enable-ubsan", "Enable Undefined Behavior Sanitizer") orelse false;
     const enable_memory_guard = b.option(bool, "enable-memory-guard", "Enable memory guard for corruption detection") orelse false;
     const debug_tests = b.option(bool, "debug", "Enable debug test output (verbose logging and demo content)") orelse false;
+    const sanitizers_active = enable_thread_sanitizer or enable_ubsan;
 
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_statistics", enable_statistics);
     build_options.addOption(bool, "enable_detailed_logging", enable_detailed_logging);
     build_options.addOption(bool, "enable_fault_injection", enable_fault_injection);
     build_options.addOption(bool, "enable_memory_guard", enable_memory_guard);
+    build_options.addOption(bool, "debug_tests", debug_tests);
+    build_options.addOption(bool, "sanitizers_active", sanitizers_active);
 
     const kausaldb_module = b.createModule(.{
         .root_source_file = b.path("src/kausaldb.zig"),
@@ -403,13 +406,13 @@ pub fn build(b: *std.Build) void {
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/benchmark.zig"),
+            .root_source_file = b.path("src/dev/benchmark.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
     });
     benchmark_exe.linkLibC();
-    benchmark_exe.root_module.addImport("kausaldb", modules.kausaldb);
+    benchmark_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
     benchmark_exe.root_module.addImport("build_options", modules.build_options);
     b.installArtifact(benchmark_exe);
 
@@ -419,4 +422,44 @@ pub fn build(b: *std.Build) void {
     }
     const benchmark_step = b.step("benchmark", "Run performance benchmarks");
     benchmark_step.dependOn(&benchmark_cmd.step);
+
+    // Tidy executable for code quality checks
+    const tidy_exe = b.addExecutable(.{
+        .name = "tidy",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dev/tidy/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    tidy_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
+    tidy_exe.root_module.addImport("build_options", modules.build_options);
+    b.installArtifact(tidy_exe);
+
+    const tidy_cmd = b.addRunArtifact(tidy_exe);
+    if (b.args) |args| {
+        tidy_cmd.addArgs(args);
+    }
+    const tidy_step = b.step("tidy", "Run code quality and naming validation");
+    tidy_step.dependOn(&tidy_cmd.step);
+
+    // Fuzz executable for fuzz testing
+    const fuzz_exe = b.addExecutable(.{
+        .name = "fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dev/fuzz.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    fuzz_exe.root_module.addImport("kausaldb", modules.kausaldb_test);
+    fuzz_exe.root_module.addImport("build_options", modules.build_options);
+    b.installArtifact(fuzz_exe);
+
+    const fuzz_cmd = b.addRunArtifact(fuzz_exe);
+    if (b.args) |args| {
+        fuzz_cmd.addArgs(args);
+    }
+    const fuzz_step = b.step("fuzz", "Run fuzz testing");
+    fuzz_step.dependOn(&fuzz_cmd.step);
 }
