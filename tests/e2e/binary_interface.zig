@@ -11,7 +11,7 @@ const std = @import("std");
 const testing = std.testing;
 
 /// Execute KausalDB binary with given arguments and return result
-fn exec_kausaldb(allocator: std.mem.Allocator, args: []const []const u8) !std.process.Child.RunResult {
+pub fn exec_kausaldb(allocator: std.mem.Allocator, args: []const []const u8) !std.process.Child.RunResult {
     var argv = try std.ArrayList([]const u8).initCapacity(allocator, args.len + 1);
     defer argv.deinit(allocator);
 
@@ -27,14 +27,14 @@ fn exec_kausaldb(allocator: std.mem.Allocator, args: []const []const u8) !std.pr
 }
 
 /// Create temporary test directory for isolated testing
-fn create_test_dir(allocator: std.mem.Allocator, test_name: []const u8) ![]const u8 {
+pub fn create_test_dir(allocator: std.mem.Allocator, test_name: []const u8) ![]const u8 {
     const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/kausaldb_e2e_{s}_{d}", .{ test_name, std.time.timestamp() });
     try std.fs.makeDirAbsolute(tmp_dir); // tidy:ignore-simulation
     return tmp_dir;
 }
 
 /// Clean up test directory
-fn cleanup_test_dir(allocator: std.mem.Allocator, dir_path: []const u8) void {
+pub fn cleanup_test_dir(allocator: std.mem.Allocator, dir_path: []const u8) void {
     std.fs.deleteTreeAbsolute(dir_path) catch {}; // tidy:ignore-simulation
     allocator.free(dir_path);
 }

@@ -32,29 +32,25 @@ const SmokeTestContext = struct {
 
     /// Execute binary with basic timeout and capture result
     pub fn execute_command(self: *Self, args: []const []const u8) !CommandResult {
-        var arg_list = std.ArrayList([]const u8).init(self.allocator);
-        defer arg_list.deinit();
+        var arg_list = try std.ArrayList([]const u8).initCapacity(self.allocator, args.len + 1);
+        defer arg_list.deinit(self.allocator);
 
-        try arg_list.append(self.binary_path);
+        try arg_list.append(self.allocator, self.binary_path);
         for (args) |arg| {
-            try arg_list.append(arg);
+            try arg_list.append(self.allocator, arg);
         }
 
-        var child = ChildProcess.init(arg_list.items, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
+        const result = try ChildProcess.run(.{
+            .allocator = self.allocator,
+            .argv = arg_list.items,
+        });
 
-        try child.spawn();
-
-        // Use modest timeout for smoke tests
-        const stdout = try child.stdout.?.reader().readAllAlloc(self.allocator, 64 * 1024);
-        const stderr = try child.stderr.?.reader().readAllAlloc(self.allocator, 64 * 1024);
-
-        const result = try child.wait();
+        const stdout = result.stdout;
+        const stderr = result.stderr;
 
         return CommandResult{
             .allocator = self.allocator,
-            .exit_code = switch (result) {
+            .exit_code = switch (result.term) {
                 .Exited => |code| code,
                 else => 1,
             },

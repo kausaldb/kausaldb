@@ -1,359 +1,159 @@
-//! Integration tests for natural language CLI using SimulationVFS.
+//! End-to-end integration tests for natural language CLI binary interface.
 //!
-//! Tests the natural language CLI functionality through the programmatic
-//! interface using SimulationVFS for deterministic testing. This provides
-//! comprehensive coverage of CLI behavior without binary execution overhead.
+//! Tests natural language CLI functionality through binary execution to validate
+//! complete user experience and output formatting. These tests ensure the CLI
+//! behavior matches documentation and catches regressions in user-facing interface.
 
 const std = @import("std");
 const testing = std.testing;
 
-const natural_commands = @import("../../src/cli/natural_commands.zig");
-const natural_executor = @import("../../src/cli/natural_executor.zig");
-const simulation_vfs = @import("../../src/simulation_vfs.zig");
+const binary_interface = @import("binary_interface.zig");
 
-const NaturalCommand = natural_commands.NaturalCommand;
-const NaturalExecutionContext = natural_executor.NaturalExecutionContext;
-const OutputFormat = natural_commands.OutputFormat;
-const SimulationVFS = simulation_vfs.SimulationVFS;
-
-/// Test context using SimulationVFS for deterministic behavior
-const SimulationTestContext = struct {
-    allocator: std.mem.Allocator,
-    sim_vfs: *SimulationVFS,
-    context: NaturalExecutionContext,
-
-    const Self = @This();
-
-    pub fn init(allocator: std.mem.Allocator) !Self {
-        const sim_vfs = try allocator.create(SimulationVFS);
-        sim_vfs.* = SimulationVFS.init(allocator);
-
-        // Create test data directory structure in simulation
-        try sim_vfs.mkdir("kausal_data");
-        try sim_vfs.mkdir("kausal_data/wal");
-        try sim_vfs.mkdir("kausal_data/sstables");
-
-        var context = try NaturalExecutionContext.init(allocator, "kausal_data");
-        // Replace the production VFS with simulation VFS
-        context.vfs = sim_vfs.vfs();
-
-        return Self{
-            .allocator = allocator,
-            .sim_vfs = sim_vfs,
-            .context = context,
-        };
-    }
-
-    pub fn deinit(self: *Self) void {
-        self.context.deinit();
-        self.sim_vfs.deinit();
-        self.allocator.destroy(self.sim_vfs);
-    }
-
-    /// Create test project structure in simulation
-    pub fn create_test_project(self: *Self, project_name: []const u8) !void {
-        try self.sim_vfs.mkdir(project_name);
-
-        const main_zig_path = try std.fmt.allocPrint(self.allocator, "{s}/main.zig", .{project_name});
-        defer self.allocator.free(main_zig_path);
-
-        const main_zig_content =
-            \\const std = @import("std");
-            \\
-            \\pub fn main() void {
-            \\    init_system();
-            \\    run_main_loop();
-            \\}
-            \\
-            \\fn init_system() void {
-            \\    // System initialization
-            \\}
-            \\
-            \\fn run_main_loop() void {
-            \\    // Main application loop
-            \\}
-            \\
-        ;
-
-        try self.sim_vfs.write_file(main_zig_path, main_zig_content);
-
-        const lib_zig_path = try std.fmt.allocPrint(self.allocator, "{s}/lib.zig", .{project_name});
-        defer self.allocator.free(lib_zig_path);
-
-        const lib_zig_content =
-            \\const std = @import("std");
-            \\
-            \\pub fn calculate_sum(a: i32, b: i32) i32 {
-            \\    return a + b;
-            \\}
-            \\
-            \\pub const Config = struct {
-            \\    debug: bool = false,
-            \\    max_connections: u32 = 100,
-            \\    
-            \\    pub fn init() Config {
-            \\        return Config{};
-            \\    }
-            \\};
-            \\
-        ;
-
-        try self.sim_vfs.write_file(lib_zig_path, lib_zig_content);
-    }
-};
-
-test "simulation-based workspace management workflow" {
-    const allocator = testing.allocator;
-    var test_ctx = try SimulationTestContext.init(allocator);
-    defer test_ctx.deinit();
-
-    try test_ctx.create_test_project("test_project");
-
-    // Test initial status (should be empty)
-    {
-        const status_cmd = NaturalCommand{ .status = .{ .format = .human } };
-        try natural_executor.execute_natural_command(&test_ctx.context, status_cmd);
-    }
-
-    // Test linking the test project
-    {
-        const link_cmd = NaturalCommand{ .link = .{ .path = try allocator.dupe(u8, "test_project"), .name = try allocator.dupe(u8, "test_workspace"), .format = .human } };
-        defer {
-            allocator.free(link_cmd.link.path);
-            allocator.free(link_cmd.link.name.?);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, link_cmd);
-    }
-
-    // Test status after linking
-    {
-        const status_cmd = NaturalCommand{ .status = .{ .format = .human } };
-        try natural_executor.execute_natural_command(&test_ctx.context, status_cmd);
-    }
-
-    // Test JSON status output
-    {
-        const status_cmd = NaturalCommand{ .status = .{ .format = .json } };
-        try natural_executor.execute_natural_command(&test_ctx.context, status_cmd);
-    }
-
-    // Test sync command
-    {
-        const sync_cmd = NaturalCommand{ .sync = .{ .name = try allocator.dupe(u8, "test_workspace"), .all = false, .format = .human } };
-        defer allocator.free(sync_cmd.sync.name.?);
-
-        try natural_executor.execute_natural_command(&test_ctx.context, sync_cmd);
-    }
-
-    // Test unlinking
-    {
-        const unlink_cmd = NaturalCommand{ .unlink = .{ .name = try allocator.dupe(u8, "test_workspace"), .format = .human } };
-        defer allocator.free(unlink_cmd.unlink.name);
-
-        try natural_executor.execute_natural_command(&test_ctx.context, unlink_cmd);
-    }
+/// Execute KausalDB binary with natural language arguments
+fn exec_natural_command(allocator: std.mem.Allocator, command: []const u8) !std.process.Child.RunResult {
+    return binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "natural", command });
 }
 
-test "simulation-based semantic query workflow" {
-    const allocator = testing.allocator;
-    var test_ctx = try SimulationTestContext.init(allocator);
-    defer test_ctx.deinit();
+/// Create isolated test database for natural language testing
+fn create_test_database(allocator: std.mem.Allocator, db_name: []const u8) ![]const u8 {
+    const test_dir = try binary_interface.create_test_dir(allocator, db_name);
 
-    try test_ctx.create_test_project("query_project");
+    // Initialize database in test directory
+    const init_result = try binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "init", "--path", test_dir, "--name", db_name });
+    defer allocator.free(init_result.stdout);
+    defer allocator.free(init_result.stderr);
 
-    // Link a workspace for querying
-    {
-        const link_cmd = NaturalCommand{ .link = .{ .path = try allocator.dupe(u8, "query_project"), .name = try allocator.dupe(u8, "query_workspace"), .format = .human } };
-        defer {
-            allocator.free(link_cmd.link.path);
-            allocator.free(link_cmd.link.name.?);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, link_cmd);
-    }
-
-    // Test find command
-    {
-        const find_cmd = NaturalCommand{ .find = .{ .entity_type = try allocator.dupe(u8, "function"), .name = try allocator.dupe(u8, "main"), .workspace = try allocator.dupe(u8, "query_workspace"), .format = .human } };
-        defer {
-            allocator.free(find_cmd.find.entity_type);
-            allocator.free(find_cmd.find.name);
-            allocator.free(find_cmd.find.workspace.?);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, find_cmd);
-    }
-
-    // Test find command with JSON output
-    {
-        const find_cmd = NaturalCommand{ .find = .{ .entity_type = try allocator.dupe(u8, "struct"), .name = try allocator.dupe(u8, "Config"), .workspace = null, .format = .json } };
-        defer {
-            allocator.free(find_cmd.find.entity_type);
-            allocator.free(find_cmd.find.name);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, find_cmd);
-    }
-
-    // Test show command (relationship queries)
-    {
-        const show_cmd = NaturalCommand{ .show = .{ .relation_type = try allocator.dupe(u8, "callers"), .target = try allocator.dupe(u8, "init_system"), .workspace = try allocator.dupe(u8, "query_workspace"), .format = .human } };
-        defer {
-            allocator.free(show_cmd.show.relation_type);
-            allocator.free(show_cmd.show.target);
-            allocator.free(show_cmd.show.workspace.?);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, show_cmd);
-    }
-
-    // Test trace command (multi-hop traversal)
-    {
-        const trace_cmd = NaturalCommand{ .trace = .{ .direction = try allocator.dupe(u8, "callees"), .target = try allocator.dupe(u8, "main"), .workspace = null, .depth = 3, .format = .json } };
-        defer {
-            allocator.free(trace_cmd.trace.direction);
-            allocator.free(trace_cmd.trace.target);
-        }
-
-        try natural_executor.execute_natural_command(&test_ctx.context, trace_cmd);
-    }
+    try testing.expectEqual(@as(u32, 0), init_result.term.Exited);
+    return test_dir;
 }
 
-test "simulation-based error handling validation" {
+test "natural language basic query commands" {
     const allocator = testing.allocator;
-    var test_ctx = try SimulationTestContext.init(allocator);
-    defer test_ctx.deinit();
 
-    // Test invalid entity type
-    {
-        const find_cmd = NaturalCommand{ .find = .{ .entity_type = try allocator.dupe(u8, "invalid_type"), .name = try allocator.dupe(u8, "test"), .workspace = null, .format = .human } };
-        defer {
-            allocator.free(find_cmd.find.entity_type);
-            allocator.free(find_cmd.find.name);
-        }
+    // Build binary to ensure latest version
+    const build_result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "./zig/zig", "build" },
+    });
+    defer allocator.free(build_result.stdout);
+    defer allocator.free(build_result.stderr);
+    try testing.expectEqual(@as(u32, 0), build_result.term.Exited);
 
-        // Should handle invalid entity type gracefully
-        try natural_executor.execute_natural_command(&test_ctx.context, find_cmd);
-    }
+    const test_db = try create_test_database(allocator, "natural_test");
+    defer binary_interface.cleanup_test_dir(allocator, test_db);
 
-    // Test invalid relation type
-    {
-        const show_cmd = NaturalCommand{ .show = .{ .relation_type = try allocator.dupe(u8, "invalid_relation"), .target = try allocator.dupe(u8, "test"), .workspace = null, .format = .human } };
-        defer {
-            allocator.free(show_cmd.show.relation_type);
-            allocator.free(show_cmd.show.target);
-        }
+    // Test basic help for natural language commands
+    const help_result = try binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "natural", "--help" });
+    defer allocator.free(help_result.stdout);
+    defer allocator.free(help_result.stderr);
 
-        // Should handle invalid relation type gracefully
-        try natural_executor.execute_natural_command(&test_ctx.context, show_cmd);
-    }
-
-    // Test invalid direction
-    {
-        const trace_cmd = NaturalCommand{ .trace = .{ .direction = try allocator.dupe(u8, "invalid_direction"), .target = try allocator.dupe(u8, "test"), .workspace = null, .depth = null, .format = .human } };
-        defer {
-            allocator.free(trace_cmd.trace.direction);
-            allocator.free(trace_cmd.trace.target);
-        }
-
-        // Should handle invalid direction gracefully
-        try natural_executor.execute_natural_command(&test_ctx.context, trace_cmd);
-    }
-
-    // Test unlink non-existent codebase
-    {
-        const unlink_cmd = NaturalCommand{ .unlink = .{ .name = try allocator.dupe(u8, "non_existent"), .format = .human } };
-        defer allocator.free(unlink_cmd.unlink.name);
-
-        // Should handle gracefully with error message
-        try natural_executor.execute_natural_command(&test_ctx.context, unlink_cmd);
-    }
+    try testing.expectEqual(@as(u32, 0), help_result.term.Exited);
+    try testing.expect(std.mem.indexOf(u8, help_result.stdout, "natural language") != null);
 }
 
-test "simulation-based JSON output format validation" {
+test "natural language simple queries" {
     const allocator = testing.allocator;
-    var test_ctx = try SimulationTestContext.init(allocator);
-    defer test_ctx.deinit();
 
-    try test_ctx.create_test_project("json_test_project");
+    const test_db = try create_test_database(allocator, "simple_queries");
+    defer binary_interface.cleanup_test_dir(allocator, test_db);
 
-    // Test all commands support JSON output
-    const json_test_commands = [_]NaturalCommand{
-        .{ .status = .{ .format = .json } },
-        .{ .link = .{ .path = try allocator.dupe(u8, "json_test_project"), .name = try allocator.dupe(u8, "json_test"), .format = .json } },
-        .{ .find = .{ .entity_type = try allocator.dupe(u8, "function"), .name = try allocator.dupe(u8, "test"), .workspace = null, .format = .json } },
-        .{ .show = .{ .relation_type = try allocator.dupe(u8, "callers"), .target = try allocator.dupe(u8, "test"), .workspace = null, .format = .json } },
-        .{ .trace = .{ .direction = try allocator.dupe(u8, "callees"), .target = try allocator.dupe(u8, "test"), .workspace = null, .depth = null, .format = .json } },
+    // Test simple natural language query
+    const query_result = try exec_natural_command(allocator, "show me all functions");
+    defer allocator.free(query_result.stdout);
+    defer allocator.free(query_result.stderr);
+
+    // Should succeed even with empty database
+    try testing.expectEqual(@as(u32, 0), query_result.term.Exited);
+
+    // Test malformed natural language query
+    const malformed_result = try exec_natural_command(allocator, "asdfghjkl nonsense query");
+    defer allocator.free(malformed_result.stdout);
+    defer allocator.free(malformed_result.stderr);
+
+    // Should provide helpful error message
+    try testing.expect(malformed_result.term.Exited != 0);
+    try testing.expect(std.mem.indexOf(u8, malformed_result.stderr, "understand") != null or
+        std.mem.indexOf(u8, malformed_result.stderr, "parse") != null);
+}
+
+test "natural language output formatting" {
+    const allocator = testing.allocator;
+
+    const test_db = try create_test_database(allocator, "output_format");
+    defer binary_interface.cleanup_test_dir(allocator, test_db);
+
+    // Test JSON output format
+    const json_result = try binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "natural", "--format", "json", "find all blocks" });
+    defer allocator.free(json_result.stdout);
+    defer allocator.free(json_result.stderr);
+
+    try testing.expectEqual(@as(u32, 0), json_result.term.Exited);
+
+    // Output should be valid JSON structure
+    const parsed_json = std.json.parseFromSlice(std.json.Value, allocator, json_result.stdout, .{}) catch |err| {
+        std.debug.print("Invalid JSON output: {s}\nError: {}\n", .{ json_result.stdout, err });
+        return err;
     };
+    defer parsed_json.deinit();
 
-    // Execute each command - all should produce valid JSON output
-    for (json_test_commands) |command| {
-        try natural_executor.execute_natural_command(&test_ctx.context, command);
-    }
+    // Test table output format
+    const table_result = try binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "natural", "--format", "table", "find all blocks" });
+    defer allocator.free(table_result.stdout);
+    defer allocator.free(table_result.stderr);
 
-    // Clean up allocated strings
-    allocator.free(json_test_commands[1].link.path);
-    allocator.free(json_test_commands[1].link.name.?);
-    allocator.free(json_test_commands[2].find.entity_type);
-    allocator.free(json_test_commands[2].find.name);
-    allocator.free(json_test_commands[3].show.relation_type);
-    allocator.free(json_test_commands[3].show.target);
-    allocator.free(json_test_commands[4].trace.direction);
-    allocator.free(json_test_commands[4].trace.target);
+    try testing.expectEqual(@as(u32, 0), table_result.term.Exited);
+
+    // Table format should include headers and structured output
+    try testing.expect(std.mem.indexOf(u8, table_result.stdout, "│") != null or
+        std.mem.indexOf(u8, table_result.stdout, "|") != null);
 }
 
-test "simulation-based concurrent context isolation" {
+test "natural language error handling" {
     const allocator = testing.allocator;
 
-    // Create two separate contexts
-    var test_ctx1 = try SimulationTestContext.init(allocator);
-    defer test_ctx1.deinit();
-    var test_ctx2 = try SimulationTestContext.init(allocator);
-    defer test_ctx2.deinit();
+    // Test command without database initialization
+    const no_db_result = try exec_natural_command(allocator, "show all functions");
+    defer allocator.free(no_db_result.stdout);
+    defer allocator.free(no_db_result.stderr);
 
-    // Create separate project structures
-    try test_ctx1.create_test_project("project1");
-    try test_ctx2.create_test_project("project2");
+    // Should fail gracefully with informative error
+    try testing.expect(no_db_result.term.Exited != 0);
+    try testing.expect(std.mem.indexOf(u8, no_db_result.stderr, "database") != null or
+        std.mem.indexOf(u8, no_db_result.stderr, "init") != null);
 
-    // Link different codebases to each context
-    {
-        const link_cmd1 = NaturalCommand{ .link = .{ .path = try allocator.dupe(u8, "project1"), .name = try allocator.dupe(u8, "isolated_project1"), .format = .human } };
-        defer {
-            allocator.free(link_cmd1.link.path);
-            allocator.free(link_cmd1.link.name.?);
-        }
+    // Test invalid command line arguments
+    const invalid_args_result = try binary_interface.exec_kausaldb(allocator, &[_][]const u8{ "natural", "--invalid-flag", "query" });
+    defer allocator.free(invalid_args_result.stdout);
+    defer allocator.free(invalid_args_result.stderr);
 
-        const link_cmd2 = NaturalCommand{ .link = .{ .path = try allocator.dupe(u8, "project2"), .name = try allocator.dupe(u8, "isolated_project2"), .format = .human } };
-        defer {
-            allocator.free(link_cmd2.link.path);
-            allocator.free(link_cmd2.link.name.?);
-        }
+    try testing.expect(invalid_args_result.term.Exited != 0);
+    try testing.expect(std.mem.indexOf(u8, invalid_args_result.stderr, "flag") != null or
+        std.mem.indexOf(u8, invalid_args_result.stderr, "option") != null);
+}
 
-        // Link different projects to different contexts
-        try natural_executor.execute_natural_command(&test_ctx1.context, link_cmd1);
-        try natural_executor.execute_natural_command(&test_ctx2.context, link_cmd2);
-    }
+test "natural language query complexity handling" {
+    const allocator = testing.allocator;
 
-    // Verify contexts are isolated
-    {
-        const status_cmd = NaturalCommand{ .status = .{ .format = .human } };
+    const test_db = try create_test_database(allocator, "complexity_test");
+    defer binary_interface.cleanup_test_dir(allocator, test_db);
 
-        // Each context should show only its own workspace
-        try natural_executor.execute_natural_command(&test_ctx1.context, status_cmd);
-        try natural_executor.execute_natural_command(&test_ctx2.context, status_cmd);
-    }
+    // Test complex multi-part natural language query
+    const complex_result = try exec_natural_command(allocator, "find all functions that call other functions and show their dependencies");
+    defer allocator.free(complex_result.stdout);
+    defer allocator.free(complex_result.stderr);
 
-    // Test that operations on one context don't affect the other
-    {
-        const find_cmd = NaturalCommand{ .find = .{ .entity_type = try allocator.dupe(u8, "function"), .name = try allocator.dupe(u8, "test"), .workspace = null, .format = .human } };
-        defer {
-            allocator.free(find_cmd.find.entity_type);
-            allocator.free(find_cmd.find.name);
-        }
+    // Should parse and execute without crashing
+    try testing.expectEqual(@as(u32, 0), complex_result.term.Exited);
 
-        // Both contexts should handle queries independently
-        try natural_executor.execute_natural_command(&test_ctx1.context, find_cmd);
-        try natural_executor.execute_natural_command(&test_ctx2.context, find_cmd);
-    }
+    // Test very long query string
+    const long_query = "show me all the functions and classes and their relationships " ++
+        "including imports and dependencies and also their documentation " ++
+        "and metadata in a structured format with full details";
+
+    const long_result = try exec_natural_command(allocator, long_query);
+    defer allocator.free(long_result.stdout);
+    defer allocator.free(long_result.stderr);
+
+    // Should handle gracefully without buffer overflow or crash
+    try testing.expect(long_result.term.Exited == 0 or long_result.term.Exited == 1);
 }
