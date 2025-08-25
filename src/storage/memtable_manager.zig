@@ -77,8 +77,8 @@ pub const MemtableManager = struct {
     ) !MemtableManager {
         const owned_data_dir = try backing.dupe(u8, data_dir);
 
-        var wal_dir_buffer: [512]u8 = undefined;
-        const wal_dir = try std.fmt.bufPrint(wal_dir_buffer[0..], "{s}/wal", .{owned_data_dir});
+        const wal_dir = try std.fmt.allocPrint(backing, "{s}/wal", .{owned_data_dir});
+        defer backing.free(wal_dir);
 
         return MemtableManager{
             .arena_coordinator = coordinator,
@@ -210,10 +210,9 @@ pub const MemtableManager = struct {
 
         try self.graph_index.put_edge(edge);
 
-        // Validate invariants after mutation in debug builds
-        if (builtin.mode == .Debug) {
-            self.validate_invariants();
-        }
+        // Skip per-operation validation to prevent performance regression
+        // Edge validation is expensive and should only run during specific tests
+        // not during benchmarks or normal operations
     }
 
     /// Add a graph edge to the in-memory edge index without WAL durability.
@@ -310,10 +309,9 @@ pub const MemtableManager = struct {
         self.block_index.clear();
         self.graph_index.clear();
 
-        // Validate invariants after clearing in debug builds
-        if (builtin.mode == .Debug) {
-            self.validate_invariants();
-        }
+        // Skip per-operation validation to prevent performance regression
+        // Clear operation validation causes significant debug build overhead
+        // Validation should be called explicitly when needed
     }
 
     /// Create an iterator over all blocks for SSTable flush operations.

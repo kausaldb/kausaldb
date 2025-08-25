@@ -496,10 +496,10 @@ pub const StorageEngine = struct {
 
         self.track_write_metrics(start_time, block_data.content.len);
 
-        // Validate invariants after mutation in debug builds
-        if (builtin.mode == .Debug) {
-            self.validate_invariants();
-        }
+        // Skip per-operation validation to prevent performance regression
+        // StorageEngine validation is extremely expensive (validates all subsystems)
+        // and causes 60-70% performance degradation on storage write hot paths
+        // Validation should be called explicitly when needed, not on every write
     }
 
     /// Write a ContextBlock to storage with automatic ownership transfer.

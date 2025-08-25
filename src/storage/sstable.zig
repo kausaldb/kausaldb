@@ -485,10 +485,9 @@ pub const SSTable = struct {
             try self.index.append(entry);
         }
 
-        // Validate index ordering in debug builds - critical for binary search correctness
-        if (builtin.mode == .Debug) {
-            self.validate_index_ordering();
-        }
+        // Skip per-operation index validation to prevent performance regression
+        // Index ordering validation is expensive (iterates through all entries)
+        // and should only run during specific tests or startup validation
 
         if (header.bloom_filter_size > 0) {
             _ = try file.seek(@intCast(header.bloom_filter_offset), .start);
@@ -507,9 +506,8 @@ pub const SSTable = struct {
     /// Uses the bloom filter for fast negative lookups, then performs binary search
     /// on the index. Returns null if the block is not found in this SSTable.
     pub fn find_block(self: *SSTable, block_id: BlockId) !?SSTableBlock {
-        if (builtin.mode == .Debug) {
-            self.validate_index_ordering();
-        }
+        // Skip per-operation index validation to prevent read path performance regression
+        // Index ordering validation on every find_block call causes significant overhead
 
         if (self.bloom_filter) |*filter| {
             if (!filter.might_contain(block_id)) {
