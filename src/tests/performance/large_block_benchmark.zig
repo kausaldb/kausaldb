@@ -116,10 +116,6 @@ test "large block storage engine performance" {
             var harness = try ProductionHarness.init_and_startup(allocator, db_name);
             defer harness.deinit();
 
-            // Disable immediate sync for performance testing
-            // WARNING: This reduces durability guarantees but allows measuring optimal performance
-            harness.storage().configure_wal_immediate_sync(false);
-
             // Profile WAL entry creation separately
             const wal_start = std.time.nanoTimestamp();
             const wal_entry = try kausaldb.wal.WALEntry.create_put_block(allocator, test_block);

@@ -48,9 +48,6 @@ test "memory efficiency during large dataset operations" {
     var harness = try kausaldb.ProductionHarness.init_and_startup(allocator, db_name);
     defer harness.deinit();
 
-    // Disable immediate sync for performance testing
-    harness.storage().configure_wal_immediate_sync(false);
-
     // Phase 1: Memory baseline establishment - add a small block to establish non-zero baseline
     const baseline_block = ContextBlock{
         .id = TestData.deterministic_block_id(9999),
@@ -169,9 +166,6 @@ test "query engine performance benchmark" {
     defer allocator.free(db_name);
     var harness = try kausaldb.ProductionHarness.init_and_startup(allocator, db_name);
     defer harness.deinit();
-
-    // Disable immediate sync for performance testing
-    harness.storage().configure_wal_immediate_sync(false);
 
     test_config.debug_print("DEBUG: Harness initialized successfully\n", .{});
 
@@ -301,12 +295,6 @@ test "storage engine write throughput measurement" {
     var harness = try kausaldb.ProductionHarness.init_and_startup(allocator, db_name);
     defer harness.deinit();
 
-    // Disable immediate sync for performance testing
-    // WARNING: This reduces durability guarantees but allows measuring optimal performance
-    harness.storage().configure_wal_immediate_sync(false);
-
-    // Initialize performance assertion framework
-
     // Phase 1: Single block write performance
     var write_measurement = BatchPerformanceMeasurement.init(allocator);
     defer write_measurement.deinit();
@@ -395,9 +383,6 @@ test "streaming query result formatting performance" {
     var harness = try kausaldb.ProductionHarness.init_and_startup(allocator, db_name);
     defer harness.deinit();
 
-    // Disable immediate sync for performance testing
-    harness.storage().configure_wal_immediate_sync(false);
-
     // Phase 1: Setup diverse dataset
     const dataset_size = 200;
     var block_ids = std.array_list.Managed(BlockId).init(allocator);
@@ -480,9 +465,6 @@ test "memory usage growth patterns under load" {
     defer allocator.free(db_name);
     var harness = try kausaldb.ProductionHarness.init_and_startup(allocator, db_name);
     defer harness.deinit();
-
-    // Disable immediate sync for performance testing
-    harness.storage().configure_wal_immediate_sync(false);
 
     // Prevent unused variable warning until memory assertions are implemented
     _ = perf_assertion;

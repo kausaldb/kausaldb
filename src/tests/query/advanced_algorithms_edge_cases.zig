@@ -6,20 +6,33 @@
 
 const std = @import("std");
 
-const harness = @import("../harness.zig");
-const context_block = @import("../../core/types.zig");
-const query_engine = @import("../../query/engine.zig");
+const kausaldb = @import("kausaldb");
 
 const testing = std.testing;
 
-const ContextBlock = context_block.ContextBlock;
-const BlockId = context_block.BlockId;
-const GraphEdge = context_block.GraphEdge;
-const EdgeType = context_block.EdgeType;
-const QueryHarness = harness.QueryHarness;
+const ContextBlock = kausaldb.ContextBlock;
+const BlockId = kausaldb.BlockId;
+const GraphEdge = kausaldb.GraphEdge;
+const EdgeType = kausaldb.EdgeType;
+const QueryHarness = kausaldb.QueryHarness;
+const TestData = kausaldb.TestData;
+const TraversalQuery = kausaldb.TraversalQuery;
+const TraversalDirection = kausaldb.TraversalDirection;
+
+// Helper function for executing traversal queries
+fn execute_traversal(
+    allocator: std.mem.Allocator,
+    storage_engine: *kausaldb.StorageEngine,
+    query: TraversalQuery,
+) !kausaldb.TraversalResult {
+    var query_engine = kausaldb.QueryEngine.init(allocator, storage_engine);
+    defer query_engine.deinit();
+    query_engine.startup();
+    return try query_engine.execute_traversal(query);
+}
 
 // Helper for creating disconnected graph components
-fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) !struct {
+fn create_disconnected_components(query_harness: *QueryHarness, _: std.mem.Allocator) !struct {
     component_a: [3]BlockId,
     component_b: [3]BlockId,
     isolated: BlockId,
@@ -47,9 +60,9 @@ fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) 
         .content = "Disconnected component A3 test block content",
     };
 
-    try harness.storage().put_block(a1_block);
-    try harness.storage().put_block(a2_block);
-    try harness.storage().put_block(a3_block);
+    try query_harness.storage().put_block(a1_block);
+    try query_harness.storage().put_block(a2_block);
+    try query_harness.storage().put_block(a3_block);
 
     const edge_a1_a2 = GraphEdge{
         .source_id = a1_block.id,
@@ -61,8 +74,8 @@ fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) 
         .target_id = a3_block.id,
         .edge_type = EdgeType.calls,
     };
-    try harness.storage().put_edge(edge_a1_a2);
-    try harness.storage().put_edge(edge_a2_a3);
+    try query_harness.storage().put_edge(edge_a1_a2);
+    try query_harness.storage().put_edge(edge_a2_a3);
 
     // Component B: Linear chain B1 -> B2 -> B3
     const b1_block = ContextBlock{
@@ -87,22 +100,22 @@ fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) 
         .content = "Disconnected component B3 test block content",
     };
 
-    try harness.storage().put_block(b1_block);
-    try harness.storage().put_block(b2_block);
-    try harness.storage().put_block(b3_block);
+    try query_harness.storage().put_block(b1_block);
+    try query_harness.storage().put_block(b2_block);
+    try query_harness.storage().put_block(b3_block);
 
     const edge_b1_b2 = GraphEdge{
         .source_id = b1_block.id,
         .target_id = b2_block.id,
-        .edge_type = EdgeType.imports,
+        .edge_type = EdgeType.calls,
     };
     const edge_b2_b3 = GraphEdge{
         .source_id = b2_block.id,
         .target_id = b3_block.id,
-        .edge_type = EdgeType.imports,
+        .edge_type = EdgeType.calls,
     };
-    try harness.storage().put_edge(edge_b1_b2);
-    try harness.storage().put_edge(edge_b2_b3);
+    try query_harness.storage().put_edge(edge_b1_b2);
+    try query_harness.storage().put_edge(edge_b2_b3);
 
     // Isolated node with no connections
     const isolated_block = ContextBlock{
@@ -112,7 +125,7 @@ fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) 
         .metadata_json = "{\"test\":\"disconnected_components\",\"component\":\"isolated\"}",
         .content = "Isolated node test block content",
     };
-    try harness.storage().put_block(isolated_block);
+    try query_harness.storage().put_block(isolated_block);
 
     return .{
         .component_a = [3]BlockId{ a1_block.id, a2_block.id, a3_block.id },
@@ -122,7 +135,7 @@ fn create_disconnected_components(harness: *QueryHarness, _: std.mem.Allocator) 
 }
 
 // Helper for creating cyclic graph structure
-fn create_cyclic_graph(harness: *QueryHarness, _: std.mem.Allocator) !struct {
+fn create_cyclic_graph(query_harness: *QueryHarness, _: std.mem.Allocator) !struct {
     cycle: [3]BlockId,
     acyclic_branch: [2]BlockId,
 } {
@@ -149,9 +162,9 @@ fn create_cyclic_graph(harness: *QueryHarness, _: std.mem.Allocator) !struct {
         .content = "Cyclic graph C3 test block content",
     };
 
-    try harness.storage().put_block(c1_block);
-    try harness.storage().put_block(c2_block);
-    try harness.storage().put_block(c3_block);
+    try query_harness.storage().put_block(c1_block);
+    try query_harness.storage().put_block(c2_block);
+    try query_harness.storage().put_block(c3_block);
 
     const edge_c1_c2 = GraphEdge{
         .source_id = c1_block.id,
@@ -168,9 +181,9 @@ fn create_cyclic_graph(harness: *QueryHarness, _: std.mem.Allocator) !struct {
         .target_id = c1_block.id,
         .edge_type = EdgeType.calls,
     };
-    try harness.storage().put_edge(edge_c1_c2);
-    try harness.storage().put_edge(edge_c2_c3);
-    try harness.storage().put_edge(edge_c3_c1);
+    try query_harness.storage().put_edge(edge_c1_c2);
+    try query_harness.storage().put_edge(edge_c2_c3);
+    try query_harness.storage().put_edge(edge_c3_c1);
 
     // Acyclic branch: B1 -> B2
     const b1_block = ContextBlock{
@@ -188,15 +201,15 @@ fn create_cyclic_graph(harness: *QueryHarness, _: std.mem.Allocator) !struct {
         .content = "Acyclic branch B2 test block content",
     };
 
-    try harness.storage().put_block(b1_block);
-    try harness.storage().put_block(b2_block);
+    try query_harness.storage().put_block(b1_block);
+    try query_harness.storage().put_block(b2_block);
 
     const edge_b1_b2 = GraphEdge{
         .source_id = b1_block.id,
         .target_id = b2_block.id,
-        .edge_type = EdgeType.imports,
+        .edge_type = EdgeType.calls,
     };
-    try harness.storage().put_edge(edge_b1_b2);
+    try query_harness.storage().put_edge(edge_b1_b2);
 
     return .{
         .cycle = [3]BlockId{ c1_block.id, c2_block.id, c3_block.id },
@@ -207,17 +220,17 @@ fn create_cyclic_graph(harness: *QueryHarness, _: std.mem.Allocator) !struct {
 test "A* search disconnected component edge cases" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "astar_edge_test");
-    defer harness.deinit();
+    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "astar_edge_test");
+    defer query_harness.deinit();
 
-    const components = try create_disconnected_components(&harness, allocator);
+    const components = try create_disconnected_components(&query_harness, allocator);
 
     // Test A* search within Component A (should succeed)
     var query_a = TraversalQuery.init(components.component_a[0], TraversalDirection.outgoing);
     query_a.algorithm = .astar_search;
     query_a.max_depth = 10;
 
-    var result_a = try harness.query_engine.execute_traversal(query_a);
+    var result_a = try query_harness.query_engine.execute_traversal(query_a);
     defer result_a.deinit();
 
     try testing.expect(result_a.paths.len > 0);
@@ -240,7 +253,7 @@ test "A* search disconnected component edge cases" {
     query_component_a.algorithm = .astar_search;
     query_component_a.max_depth = 20;
 
-    var result_component_a = try execute_traversal(allocator, harness.storage(), query_component_a);
+    var result_component_a = try execute_traversal(allocator, query_harness.storage(), query_component_a);
     defer result_component_a.deinit();
 
     try testing.expectEqual(@as(usize, 3), result_component_a.paths.len);
@@ -250,7 +263,7 @@ test "A* search disconnected component edge cases" {
     query_isolated.algorithm = .astar_search;
     query_isolated.max_depth = 50;
 
-    var result_isolated = try execute_traversal(allocator, harness.storage(), query_isolated);
+    var result_isolated = try execute_traversal(allocator, query_harness.storage(), query_isolated);
     defer result_isolated.deinit();
 
     try testing.expectEqual(@as(usize, 1), result_isolated.paths.len);
@@ -260,17 +273,17 @@ test "A* search disconnected component edge cases" {
 test "bidirectional search disconnected component scenarios" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "bidirectional_edge_test");
-    defer harness.deinit();
+    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "bidirectional_edge_test");
+    defer query_harness.deinit();
 
-    const components = try create_disconnected_components(&harness, allocator);
+    const components = try create_disconnected_components(&query_harness, allocator);
 
     // Test bidirectional search within Component B (should succeed)
     var query_b = TraversalQuery.init(components.component_b[0], TraversalDirection.outgoing);
     query_b.algorithm = .breadth_first;
     query_b.max_depth = 10;
 
-    var result_b = try harness.query_engine.execute_traversal(query_b);
+    var result_b = try query_harness.query_engine.execute_traversal(query_b);
     defer result_b.deinit();
 
     try testing.expect(result_b.paths.len > 0);
@@ -293,7 +306,7 @@ test "bidirectional search disconnected component scenarios" {
     query_isolated_bfs.algorithm = .breadth_first;
     query_isolated_bfs.max_depth = 5;
 
-    var result_isolated_bfs = try execute_traversal(allocator, harness.storage(), query_isolated_bfs);
+    var result_isolated_bfs = try execute_traversal(allocator, query_harness.storage(), query_isolated_bfs);
     defer result_isolated_bfs.deinit();
 
     try testing.expectEqual(@as(usize, 1), result_isolated_bfs.paths.len);
@@ -302,28 +315,28 @@ test "bidirectional search disconnected component scenarios" {
 test "topological sort cycle detection edge cases" {
     const allocator = testing.allocator;
 
-    var harness = try QueryHarness.init_and_startup(allocator, "topo_sort_cycles_test");
-    defer harness.deinit();
+    var query_harness = try QueryHarness.init_and_startup(allocator, "test_db");
+    defer query_harness.deinit();
 
-    const graph = try create_cyclic_graph(&harness, allocator);
+    const cycle_graph = try create_cyclic_graph(&query_harness, allocator);
 
     // Test topological sort on cyclic subgraph (should detect cycle)
-    var cyclic_query = TraversalQuery.init(graph.cycle[0], TraversalDirection.outgoing);
+    var cyclic_query = TraversalQuery.init(cycle_graph.cycle[0], TraversalDirection.outgoing);
     cyclic_query.algorithm = .topological_sort;
     cyclic_query.max_depth = 10;
 
-    var topo_result_cyclic = try harness.query_engine.execute_traversal(cyclic_query);
+    var topo_result_cyclic = try query_harness.query_engine.execute_traversal(cyclic_query);
     defer topo_result_cyclic.deinit();
 
     // Should have empty result for cyclic graph
     try testing.expect(topo_result_cyclic.paths.len == 0);
 
     // Test topological sort on acyclic subgraph (should succeed)
-    var acyclic_query = TraversalQuery.init(graph.acyclic_branch[0], TraversalDirection.outgoing);
+    var acyclic_query = TraversalQuery.init(cycle_graph.acyclic_branch[0], TraversalDirection.outgoing);
     acyclic_query.algorithm = .topological_sort;
     acyclic_query.max_depth = 10;
 
-    var topo_result_acyclic = try harness.query_engine.execute_traversal(acyclic_query);
+    var topo_result_acyclic = try query_harness.query_engine.execute_traversal(acyclic_query);
     defer topo_result_acyclic.deinit();
 
     try testing.expect(topo_result_acyclic.paths.len > 0);
@@ -332,8 +345,8 @@ test "topological sort cycle detection edge cases" {
 test "SCC detection self loop edge cases" {
     const allocator = testing.allocator;
 
-    var harness = try QueryHarness.init_and_startup(allocator, "scc_self_loop_test");
-    defer harness.deinit();
+    var query_harness = try QueryHarness.init_and_startup(allocator, "scc_self_loop_test");
+    defer query_harness.deinit();
 
     // Create a self-loop block
     const self_loop_block = ContextBlock{
@@ -343,7 +356,7 @@ test "SCC detection self loop edge cases" {
         .metadata_json = "{\"test\":\"scc_detection\",\"component\":\"self_loop\"}",
         .content = "Self loop SCC test block content",
     };
-    try harness.storage().put_block(self_loop_block);
+    try query_harness.storage().put_block(self_loop_block);
 
     // Note: Self-loop edges are not supported by the storage engine
     // Testing SCC detection with valid multi-node cycles instead
@@ -363,28 +376,28 @@ test "SCC detection self loop edge cases" {
         .metadata_json = "{\"test\":\"scc_detection\",\"component\":\"two_node_2\"}",
         .content = "Two node SCC test block 2 content",
     };
-    try harness.storage().put_block(scc1_block);
-    try harness.storage().put_block(scc2_block);
+    try query_harness.storage().put_block(scc1_block);
+    try query_harness.storage().put_block(scc2_block);
 
     const edge_1_2 = GraphEdge{
         .source_id = scc1_block.id,
         .target_id = scc2_block.id,
-        .edge_type = EdgeType.imports,
+        .edge_type = EdgeType.calls,
     };
     const edge_2_1 = GraphEdge{
         .source_id = scc2_block.id,
         .target_id = scc1_block.id,
-        .edge_type = EdgeType.imports,
+        .edge_type = EdgeType.calls,
     };
-    try harness.storage().put_edge(edge_1_2);
-    try harness.storage().put_edge(edge_2_1);
+    try query_harness.storage().put_edge(edge_1_2);
+    try query_harness.storage().put_edge(edge_2_1);
 
     // Test SCC detection using traversal algorithm
     var scc_query = TraversalQuery.init(self_loop_block.id, TraversalDirection.bidirectional);
     scc_query.algorithm = .strongly_connected;
     scc_query.max_depth = 10;
 
-    var scc_result = try harness.query_engine.execute_traversal(scc_query);
+    var scc_result = try query_harness.query_engine.execute_traversal(scc_query);
     defer scc_result.deinit();
 
     // Should find strongly connected components
@@ -394,8 +407,8 @@ test "SCC detection self loop edge cases" {
 test "algorithm robustness malformed input edge cases" {
     const allocator = testing.allocator;
 
-    var harness = try QueryHarness.init_and_startup(allocator, "malformed_input_test");
-    defer harness.deinit();
+    var query_harness = try QueryHarness.init_and_startup(allocator, "malformed_input_test");
+    defer query_harness.deinit();
 
     // Test traversal with non-existent nodes
     var id_bytes: [16]u8 = undefined;
@@ -406,7 +419,7 @@ test "algorithm robustness malformed input edge cases" {
     query_nonexistent.algorithm = .breadth_first;
     query_nonexistent.max_depth = 5;
 
-    var result_nonexistent = try harness.query_engine.execute_traversal(query_nonexistent);
+    var result_nonexistent = try query_harness.query_engine.execute_traversal(query_nonexistent);
     defer result_nonexistent.deinit();
 
     try testing.expectEqual(@as(usize, 0), result_nonexistent.paths.len);
@@ -419,14 +432,14 @@ test "algorithm robustness malformed input edge cases" {
         .metadata_json = "{\"test\":\"malformed_input_edge_cases\",\"component\":\"single\"}",
         .content = "Single node graph test block content",
     };
-    try harness.storage().put_block(single_block);
+    try query_harness.storage().put_block(single_block);
 
     // Test topological sort on single node
     var single_topo_query = TraversalQuery.init(single_block.id, TraversalDirection.outgoing);
     single_topo_query.algorithm = .topological_sort;
     single_topo_query.max_depth = 5;
 
-    var single_topo_result = try harness.query_engine.execute_traversal(single_topo_query);
+    var single_topo_result = try query_harness.query_engine.execute_traversal(single_topo_query);
     defer single_topo_result.deinit();
 
     try testing.expect(single_topo_result.paths.len >= 0);
@@ -436,7 +449,7 @@ test "algorithm robustness malformed input edge cases" {
     single_scc_query.algorithm = .strongly_connected;
     single_scc_query.max_depth = 5;
 
-    var single_scc_result = try harness.query_engine.execute_traversal(single_scc_query);
+    var single_scc_result = try query_harness.query_engine.execute_traversal(single_scc_query);
     defer single_scc_result.deinit();
 
     try testing.expect(single_scc_result.paths.len >= 0);
@@ -445,8 +458,8 @@ test "algorithm robustness malformed input edge cases" {
 test "algorithm performance edge case timing validation" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "performance_edge_test");
-    defer harness.deinit();
+    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "performance_edge_test");
+    defer query_harness.deinit();
 
     // Create a moderately sized graph for performance testing
     const graph_size = 100;
@@ -463,7 +476,7 @@ test "algorithm performance edge case timing validation" {
             .metadata_json = "{\"test\":\"edge_case_dense_graph\"}",
             .content = "Edge case dense graph test block content",
         };
-        try harness.storage().put_block(block);
+        try query_harness.storage().put_block(block);
         try nodes.append(block.id);
     }
 
@@ -474,7 +487,7 @@ test "algorithm performance edge case timing validation" {
             .target_id = nodes.items[i + 1],
             .edge_type = EdgeType.calls,
         };
-        try harness.storage().put_edge(edge);
+        try query_harness.storage().put_edge(edge);
 
         // Add some cross-connections every 10 nodes
         if (i % 10 == 0 and i + 5 < graph_size) {
@@ -483,7 +496,7 @@ test "algorithm performance edge case timing validation" {
                 .target_id = nodes.items[i + 5],
                 .edge_type = EdgeType.imports,
             };
-            try harness.storage().put_edge(cross_edge);
+            try query_harness.storage().put_edge(cross_edge);
         }
     }
 
@@ -494,7 +507,7 @@ test "algorithm performance edge case timing validation" {
     query.algorithm = .astar_search;
     query.max_depth = 100;
 
-    var result = try harness.query_engine.execute_traversal(query);
+    var result = try query_harness.query_engine.execute_traversal(query);
     defer result.deinit();
 
     const end_time = std.time.nanoTimestamp();
@@ -515,7 +528,7 @@ test "algorithm performance edge case timing validation" {
     topo_query.algorithm = .topological_sort;
     topo_query.max_depth = 100; // Keep within validation limit
 
-    var topo_result = try harness.query_engine.execute_traversal(topo_query);
+    var topo_result = try query_harness.query_engine.execute_traversal(topo_query);
     defer topo_result.deinit();
 
     const topo_end_time = std.time.nanoTimestamp();
