@@ -124,13 +124,23 @@ pub const ProductionVFS = struct {
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
 
-        const file = std.fs.openFileAbsolute(path, .{
-            .mode = switch (mode) {
-                .read => .read_only,
-                .write => .write_only,
-                .read_write => .read_write,
-            },
-        }) catch |err| {
+        const is_absolute = std.fs.path.isAbsolute(path);
+        const file = switch (mode) {
+            .read => if (is_absolute)
+                std.fs.openFileAbsolute(path, .{ .mode = .read_only })
+            else
+                std.fs.cwd().openFile(path, .{ .mode = .read_only }),
+            .write => if (is_absolute)
+                std.fs.openFileAbsolute(path, .{ .mode = .write_only })
+            else
+                std.fs.cwd().openFile(path, .{ .mode = .write_only }),
+            .read_write => if (is_absolute)
+                std.fs.openFileAbsolute(path, .{ .mode = .read_write })
+            else
+                std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+        };
+
+        const opened_file = file catch |err| {
             return switch (err) {
                 error.FileNotFound => VFSError.FileNotFound,
                 error.AccessDenied => VFSError.AccessDenied,
@@ -142,7 +152,7 @@ pub const ProductionVFS = struct {
 
         return VFile{
             .impl = .{ .production = .{
-                .file = file,
+                .file = opened_file,
                 .closed = false,
             } },
         };
@@ -153,7 +163,25 @@ pub const ProductionVFS = struct {
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
 
-        const file = std.fs.createFileAbsolute(path, .{ .read = true, .exclusive = true }) catch |err| {
+        const is_absolute = std.fs.path.isAbsolute(path);
+        
+        // Create parent directories for relative paths
+        if (!is_absolute) {
+            if (std.fs.path.dirname(path)) |parent_dir| {
+                std.fs.cwd().makePath(parent_dir) catch |err| switch (err) {
+                    error.PathAlreadyExists => {}, // Directory exists, that's fine
+                    error.AccessDenied => return VFSError.AccessDenied,
+                    else => return VFSError.IoError,
+                };
+            }
+        }
+
+        const file = if (is_absolute)
+            std.fs.createFileAbsolute(path, .{ .read = true, .exclusive = true })
+        else
+            std.fs.cwd().createFile(path, .{ .read = true, .exclusive = true });
+
+        const created_file = file catch |err| {
             return switch (err) {
                 error.PathAlreadyExists => VFSError.FileExists,
                 error.AccessDenied => VFSError.AccessDenied,
@@ -165,7 +193,7 @@ pub const ProductionVFS = struct {
 
         return VFile{
             .impl = .{ .production = .{
-                .file = file,
+                .file = created_file,
                 .closed = false,
             } },
         };
@@ -189,7 +217,8 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        if (std.fs.path.isAbsolute(path)) {
+        const is_absolute = std.fs.path.isAbsolute(path);
+        if (is_absolute) {
             std.fs.accessAbsolute(path, .{}) catch return false;
         } else {
             std.fs.cwd().access(path, .{}) catch return false;
@@ -201,7 +230,8 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        if (std.fs.path.isAbsolute(path)) {
+        const is_absolute = std.fs.path.isAbsolute(path);
+        if (is_absolute) {
             std.fs.makeDirAbsolute(path) catch |err| {
                 return switch (err) {
                     error.PathAlreadyExists => VFSError.FileExists,
@@ -226,7 +256,8 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        if (std.fs.path.isAbsolute(path)) {
+        const is_absolute = std.fs.path.isAbsolute(path);
+        if (is_absolute) {
             std.fs.makeDirAbsolute(path) catch |err| {
                 return switch (err) {
                     error.PathAlreadyExists => VFSError.FileExists,
@@ -267,7 +298,8 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        var dir = if (std.fs.path.isAbsolute(path))
+        const is_absolute = std.fs.path.isAbsolute(path);
+        var dir = if (is_absolute)
             std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
                 return switch (err) {
                     error.FileNotFound => VFSError.FileNotFound,

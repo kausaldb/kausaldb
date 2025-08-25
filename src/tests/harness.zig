@@ -284,13 +284,16 @@ pub const ProductionStorageHarness = struct {
         var prod_vfs = try allocator.create(ProductionVFS);
         prod_vfs.* = ProductionVFS.init(allocator);
 
+        // Create test database path under .kausal_data/tests/
+        const test_db_path = try std.fmt.allocPrint(allocator, ".kausal_data/tests/{s}", .{db_name});
+
         // Storage engine uses heap allocation to prevent struct copying corruption
         const vfs_instance = prod_vfs.vfs();
         const storage_engine = try allocator.create(StorageEngine);
-        storage_engine.* = try StorageEngine.init_default(allocator, vfs_instance, db_name);
+        storage_engine.* = try StorageEngine.init_default(allocator, vfs_instance, test_db_path);
 
         // Store database path for cleanup
-        const db_path = try allocator.dupe(u8, db_name);
+        const db_path = test_db_path;
 
         return Self{
             .allocator = allocator,

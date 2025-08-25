@@ -21,3 +21,4 @@ test_data/
 
 # Where does this damn file come from?
 .DS_Store
+.kausal_data/
