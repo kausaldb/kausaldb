@@ -189,7 +189,11 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        std.fs.accessAbsolute(path, .{}) catch return false;
+        if (std.fs.path.isAbsolute(path)) {
+            std.fs.accessAbsolute(path, .{}) catch return false;
+        } else {
+            std.fs.cwd().access(path, .{}) catch return false;
+        }
         return true;
     }
 
@@ -197,27 +201,49 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        std.fs.makeDirAbsolute(path) catch |err| {
-            return switch (err) {
-                error.PathAlreadyExists => VFSError.FileExists,
-                error.AccessDenied => VFSError.AccessDenied,
-                error.FileNotFound => VFSError.FileNotFound,
-                else => VFSError.IoError,
+        if (std.fs.path.isAbsolute(path)) {
+            std.fs.makeDirAbsolute(path) catch |err| {
+                return switch (err) {
+                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.AccessDenied => VFSError.AccessDenied,
+                    error.FileNotFound => VFSError.FileNotFound,
+                    else => VFSError.IoError,
+                };
             };
-        };
+        } else {
+            std.fs.cwd().makeDir(path) catch |err| {
+                return switch (err) {
+                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.AccessDenied => VFSError.AccessDenied,
+                    error.FileNotFound => VFSError.FileNotFound,
+                    else => VFSError.IoError,
+                };
+            };
+        }
     }
 
     fn mkdir_all(ptr: *anyopaque, path: []const u8) VFSError!void {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        std.fs.makeDirAbsolute(path) catch |err| {
-            return switch (err) {
-                error.PathAlreadyExists => return, // Success - directory exists
-                error.AccessDenied => VFSError.AccessDenied,
-                else => VFSError.IoError,
+        if (std.fs.path.isAbsolute(path)) {
+            std.fs.makeDirAbsolute(path) catch |err| {
+                return switch (err) {
+                    error.PathAlreadyExists => VFSError.FileExists,
+                    error.AccessDenied => VFSError.AccessDenied,
+                    error.FileNotFound => VFSError.FileNotFound,
+                    else => VFSError.IoError,
+                };
             };
-        };
+        } else {
+            std.fs.cwd().makePath(path) catch |err| {
+                return switch (err) {
+                    error.PathAlreadyExists => return, // Success - directory exists
+                    error.AccessDenied => VFSError.AccessDenied,
+                    else => VFSError.IoError,
+                };
+            };
+        }
     }
 
     fn rmdir(ptr: *anyopaque, path: []const u8) VFSError!void {
@@ -241,14 +267,24 @@ pub const ProductionVFS = struct {
         _ = ptr;
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
-            return switch (err) {
-                error.FileNotFound => VFSError.FileNotFound,
-                error.AccessDenied => VFSError.AccessDenied,
-                error.NotDir => VFSError.NotDirectory,
-                else => VFSError.IoError,
+        var dir = if (std.fs.path.isAbsolute(path))
+            std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+                return switch (err) {
+                    error.FileNotFound => VFSError.FileNotFound,
+                    error.AccessDenied => VFSError.AccessDenied,
+                    error.NotDir => VFSError.NotDirectory,
+                    else => VFSError.IoError,
+                };
+            }
+        else
+            std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+                return switch (err) {
+                    error.FileNotFound => VFSError.FileNotFound,
+                    error.AccessDenied => VFSError.AccessDenied,
+                    error.NotDir => VFSError.NotDirectory,
+                    else => VFSError.IoError,
+                };
             };
-        };
         defer dir.close();
 
         var entries = std.array_list.Managed(DirectoryEntry).init(allocator);
