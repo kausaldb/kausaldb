@@ -198,6 +198,7 @@ pub const ScenarioExecutor = struct {
         defer self.allocator.free(dir_name);
 
         var storage_engine = try StorageEngine.init_default(self.allocator, sim_vfs.vfs(), dir_name);
+        defer storage_engine.deinit(); // Ensure proper cleanup
         try storage_engine.startup();
 
         // Baseline data population establishes pre-fault state
@@ -219,9 +220,6 @@ pub const ScenarioExecutor = struct {
 
         // Count blocks after all operations (including fault operations) for accurate survival rate
         const total_blocks_before_crash = storage_engine.block_count();
-
-        // Clean shutdown simulates system crash for recovery testing
-        storage_engine.deinit();
 
         // Fresh engine instance validates recovery from persisted state
         var recovered_engine = try StorageEngine.init_default(self.allocator, sim_vfs.vfs(), dir_name);
