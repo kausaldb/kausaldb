@@ -12,8 +12,9 @@ performance-baseline.json
 fuzz_reports/
 .fuzzing_monitoring
 
-# Data directory (runtime generated)
+# Data directories (runtime generated)
 .kausal-data/
+kausaldb_data
 
 # Where does this damn file come from?
 .DS_Store

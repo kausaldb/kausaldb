@@ -488,7 +488,7 @@ fn compute_crc64(data: []const u8) u64 {
 test "validate_block detects corruption" {
     // Skip validation tests in non-Debug builds since validation is compiled out
     if (builtin.mode != .Debug) return;
-    
+
     const invalid_block = ContextBlock{
         .id = BlockId.zero(), // Invalid: zero ID
         .version = 1,
@@ -505,7 +505,7 @@ test "validate_block detects corruption" {
 test "validate_edge detects self-loops" {
     // Skip validation tests in non-Debug builds since validation is compiled out
     if (builtin.mode != .Debug) return;
-    
+
     const self_loop = GraphEdge{
         .source_id = BlockId.from_u64(42),
         .target_id = BlockId.from_u64(42), // Self-loop
@@ -519,7 +519,7 @@ test "validate_edge detects self-loops" {
 test "validate_buffer detects poison pattern" {
     // Skip validation tests in non-Debug builds since validation is compiled out
     if (builtin.mode != .Debug) return;
-    
+
     var poisoned = [_]u8{0xDE} ** 64;
 
     const result = validate_buffer(&poisoned, null);
@@ -530,7 +530,7 @@ test "validate_buffer detects poison pattern" {
 test "validate_buffer detects canary values" {
     // Skip validation tests in non-Debug builds since validation is compiled out
     if (builtin.mode != .Debug) return;
-    
+
     var buffer: [16]u8 = undefined;
     std.mem.writeInt(u64, buffer[0..8], 0xDEADBEEF_CAFEBABE, .little);
     std.mem.writeInt(u64, buffer[8..16], 0x1234567890ABCDEF, .little);
@@ -543,7 +543,7 @@ test "validate_buffer detects canary values" {
 test "batch validation aggregates errors" {
     // Skip validation tests in non-Debug builds since validation is compiled out
     if (builtin.mode != .Debug) return;
-    
+
     const blocks = [_]ContextBlock{
         .{
             .id = BlockId.from_u64(1),
