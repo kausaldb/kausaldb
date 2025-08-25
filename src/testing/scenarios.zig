@@ -212,11 +212,18 @@ pub const ScenarioExecutor = struct {
             _ = golden_file;
         }
 
-        // Fault injection configuration matches scenario specification
-        try self.configure_fault_injection(&sim_vfs);
-
-        // Operations under hostile conditions test system resilience
-        try self.execute_fault_operations(&storage_engine);
+        // Special handling for read_corruption: apply only after all writes complete
+        if (self.scenario.fault_type == .read_corruption) {
+            // Execute fault operations first without corruption
+            try self.execute_fault_operations(&storage_engine);
+            // Then enable read corruption for recovery phase only
+            try self.configure_fault_injection(&sim_vfs);
+        } else {
+            // Standard fault injection: enable faults before operations
+            try self.configure_fault_injection(&sim_vfs);
+            // Operations under hostile conditions test system resilience
+            try self.execute_fault_operations(&storage_engine);
+        }
 
         // Count blocks after all operations (including fault operations) for accurate survival rate
         const total_blocks_before_crash = storage_engine.block_count();
