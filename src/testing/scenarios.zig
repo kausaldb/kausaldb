@@ -10,19 +10,26 @@
 
 const std = @import("std");
 
-const kausaldb = @import("../testing_api.zig");
+const golden_master = @import("golden_master.zig");
+const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const storage = @import("../storage/engine.zig");
+const types = @import("../core/types.zig");
 
-const golden_master = kausaldb.golden_master;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
-const TestData = kausaldb.TestData;
 const StorageEngine = storage.StorageEngine;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
+
+/// Generate deterministic BlockId from seed ensuring non-zero result
+/// All-zero BlockId is invalid per storage engine requirements
+fn deterministic_block_id(seed: u32) BlockId {
+    var bytes: [16]u8 = undefined;
+    // Use seed + 1 to ensure non-zero BlockId
+    std.mem.writeInt(u128, &bytes, seed + 1, .little);
+    return BlockId.from_bytes(bytes);
+}
 
 /// Fault injection scenario configuration with explicit parameters for reproducibility
 pub const FaultScenario = struct {
@@ -284,7 +291,7 @@ pub const ScenarioExecutor = struct {
     fn populate_initial_data(self: Self, storage_engine: *StorageEngine) !void {
         for (0..self.scenario.initial_blocks) |i| {
             const block = ContextBlock{
-                .id = TestData.deterministic_block_id(@intCast(i)),
+                .id = deterministic_block_id(@intCast(i)),
                 .version = 1,
                 .source_uri = "test://fault_injection_block.zig",
                 .metadata_json = "{\"fault_injection_test\":true}",
@@ -330,7 +337,7 @@ pub const ScenarioExecutor = struct {
         for (0..self.scenario.fault_operations) |i| {
             const operation_index = self.scenario.initial_blocks + @as(u32, @intCast(i));
             const block = ContextBlock{
-                .id = TestData.deterministic_block_id(operation_index),
+                .id = deterministic_block_id(operation_index),
                 .version = 1,
                 .source_uri = "test://fault_operation.zig",
                 .metadata_json = "{\"fault_operation\":true}",
@@ -369,7 +376,7 @@ pub const ScenarioExecutor = struct {
         // New operations validate complete recovery and functionality
         const recovery_test_index = self.scenario.initial_blocks + self.scenario.fault_operations + 1000;
         const recovery_block = ContextBlock{
-            .id = TestData.deterministic_block_id(recovery_test_index),
+            .id = deterministic_block_id(recovery_test_index),
             .version = 1,
             .source_uri = "test://recovery_validation.zig",
             .metadata_json = "{\"test\":\"recovery_validation\"}",

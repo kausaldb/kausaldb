@@ -5,8 +5,7 @@
 //! Exports core types, storage engine, query engine, and server components.
 //!
 //! Design rationale: Single entry point prevents API sprawl and enables
-//! controlled evolution of public interfaces. Separation from testing_api.zig
-//! maintains clean boundaries between production and development usage.
+//! controlled evolution of public interfaces.
 
 const builtin = @import("builtin");
 const std = @import("std");
@@ -71,7 +70,6 @@ pub const handler = @import("server/handler.zig");
 pub const Server = handler.Server;
 
 pub const Allocator = std.mem.Allocator;
-
 
 pub const version = .{
     .major = 0,

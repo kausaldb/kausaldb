@@ -17,14 +17,6 @@ pub fn build(b: *std.Build) void {
     });
     kausaldb_module.addImport("build_options", build_options.createModule());
 
-    // Testing API module for integration tests
-    const testing_api_module = b.createModule(.{
-        .root_source_file = b.path("src/testing_api.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    testing_api_module.addImport("build_options", build_options.createModule());
-
     // === MAIN EXECUTABLE ===
     const exe = b.addExecutable(.{
         .name = "kausaldb",
@@ -132,7 +124,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     benchmark_exe.linkLibC();
-    benchmark_exe.root_module.addImport("kausaldb", testing_api_module);
     benchmark_exe.root_module.addImport("build_options", build_options.createModule());
     b.installArtifact(benchmark_exe);
 
@@ -169,7 +160,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    fuzz_exe.root_module.addImport("kausaldb", testing_api_module);
     fuzz_exe.root_module.addImport("build_options", build_options.createModule());
     b.installArtifact(fuzz_exe);
 

@@ -176,7 +176,6 @@ const quine =
     \\        // Skip special files
     \\        if (std.mem.eql(u8, entry.basename, "unit_tests.zig")) continue;
     \\        if (std.mem.eql(u8, entry.basename, "integration_tests.zig")) continue;
-    \\        if (std.mem.eql(u8, entry.basename, "testing_api.zig")) continue;
     \\        if (std.mem.eql(u8, entry.basename, "kausaldb.zig")) continue;
     \\        if (std.mem.eql(u8, entry.basename, "main.zig")) continue;
     \\

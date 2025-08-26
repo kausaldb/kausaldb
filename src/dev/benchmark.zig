@@ -26,7 +26,7 @@ pub const zig_parser = kausaldb.zig_parser;
 // Custom assert module
 pub const assert = kausaldb.assert;
 
-// Re-export testing utilities (available via testing_api module)
+// Re-export testing utilities
 pub const QueryHarness = kausaldb.QueryHarness;
 pub const StatisticalSampler = kausaldb.StatisticalSampler;
 pub const WarmupUtils = kausaldb.WarmupUtils;
