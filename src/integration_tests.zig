@@ -49,8 +49,11 @@ comptime {
     _ = @import("tests/simulation/network.zig");
     _ = @import("tests/simulation/ownership_hardening.zig");
     _ = @import("tests/storage/bloom_filter_validation.zig");
+    _ = @import("tests/storage/defensive_integration.zig");
     _ = @import("tests/storage/enhanced_compaction_strategies.zig");
+    _ = @import("tests/storage/fuzz_tests.zig");
     _ = @import("tests/storage/memtable_simple_operations.zig");
+    _ = @import("tests/storage/property_tests.zig");
     _ = @import("tests/storage/tiered_compaction_validation.zig");
     _ = @import("tests/storage/wal_entry_stream.zig");
     _ = @import("tests/storage/wal_streaming_writes.zig");
