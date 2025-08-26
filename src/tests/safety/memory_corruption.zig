@@ -4,9 +4,8 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const debug_allocator = @import("../../dev/debug_allocator.zig");
 
-const debug_allocator = kausaldb.debug_allocator;
 const testing = std.testing;
 
 const DebugAllocator = debug_allocator.DebugAllocator;

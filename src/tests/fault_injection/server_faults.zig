@@ -10,18 +10,21 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const connection_manager = @import("../../server/connection_manager.zig");
+const handler = @import("../../server/handler.zig");
+const query_engine_mod = @import("../../query/engine.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
 
-const simulation_vfs = kausaldb.simulation_vfs;
 const testing = std.testing;
-const handler = kausaldb.handler;
 
-const SimulationVFS = simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.StorageEngine;
-const QueryEngine = kausaldb.QueryEngine;
+const ConnectionManager = handler.ConnectionManager;
+const ConnectionManagerConfig = connection_manager.ConnectionManagerConfig;
+const QueryEngine = query_engine_mod.QueryEngine;
 const Server = handler.Server;
 const ServerConfig = handler.ServerConfig;
-const ConnectionManager = handler.ConnectionManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
 
 // Test configuration for various server scenarios
 const TestServerConfig = struct {
@@ -96,13 +99,13 @@ test "server coordinator pattern basic functionality" {
 }
 
 test "connection manager isolation and independence" {
-    const config1 = kausaldb.connection_manager.ConnectionManagerConfig{
+    const config1 = ConnectionManagerConfig{
         .max_connections = 3,
         .connection_timeout_sec = 30,
         .poll_timeout_ms = 500,
     };
 
-    const config2 = kausaldb.connection_manager.ConnectionManagerConfig{
+    const config2 = ConnectionManagerConfig{
         .max_connections = 7,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,
@@ -181,7 +184,7 @@ test "arena per subsystem memory isolation under stress" {
     var managers: [3]ConnectionManager = undefined;
 
     for (&managers, 0..) |*manager, i| {
-        const config = kausaldb.connection_manager.ConnectionManagerConfig{
+        const config = ConnectionManagerConfig{
             .max_connections = @as(u32, @intCast(i + 2)), // 2, 3, 4 connections
             .connection_timeout_sec = @as(u32, @intCast((i + 1) * 10)), // 10, 20, 30 seconds
         };
@@ -282,7 +285,7 @@ test "connection manager overhead characteristics" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const config = kausaldb.connection_manager.ConnectionManagerConfig{
+    const config = ConnectionManagerConfig{
         .max_connections = 100, // Larger scale for performance testing
         .connection_timeout_sec = 300,
         .poll_timeout_ms = 10, // Short timeout for performance
@@ -297,7 +300,7 @@ test "connection manager overhead characteristics" {
     const startup_time = std.time.nanoTimestamp() - startup_start;
 
     // Use environment-aware performance assertion for startup time
-    const perf = kausaldb.PerformanceAssertion.init("connection_manager_startup");
+    const perf = @import("../../testing/performance_assertions.zig").PerformanceAssertion.init("connection_manager_startup");
     try perf.assert_latency(@intCast(startup_time), 1_000_000, "ConnectionManager startup for 100 connections");
 
     // Measure statistics collection overhead

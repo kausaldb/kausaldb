@@ -7,21 +7,19 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const performance_assertions = @import("../../testing/performance_assertions.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
 const testing = std.testing;
 
-// Configure test output - use debug_print for simulation debug info
-const test_config = kausaldb.test_config;
-const simulation = kausaldb.simulation;
-const vfs = kausaldb.vfs;
-const storage = kausaldb.storage;
-const types = kausaldb.types;
-const assert = kausaldb.assert.assert;
-const fatal_assert = kausaldb.assert.fatal_assert;
-
-const PerformanceTier = kausaldb.PerformanceTier;
-const PerformanceThresholds = kausaldb.performance_assertions.PerformanceThresholds;
+const assert = assert_mod.assert;
+const fatal_assert = assert_mod.fatal_assert;
+const PerformanceTier = performance_assertions.PerformanceTier;
+const PerformanceThresholds = performance_assertions.PerformanceThresholds;
 const Simulation = simulation.Simulation;
 const NodeId = simulation.NodeId;
 const MessageType = simulation.MessageType;
@@ -409,14 +407,14 @@ test "performance regression detection" {
 
         // Always log comprehensive performance data for debugging
         std.debug.print("\n=== PERFORMANCE DEBUG INFO ===\n", .{});
-        test_config.debug_print("Platform: {s}, Tier: {}, Build: ReleaseSafe\n", .{ @tagName(builtin.os.tag), tier });
-        test_config.debug_print("BASELINE - count: 50, min: {}ns, max: {}ns, median: {}ns, avg: {}ns\n", .{ baseline_min, baseline_max, baseline_median, baseline_per_op });
-        test_config.debug_print("STRESS - count: {}, failed: {}, min: {}ns, max: {}ns, median: {}ns, avg: {}ns\n", .{ successful_ops, failed_ops, stress_min, stress_max, stress_median, stress_per_op });
-        test_config.debug_print("DEGRADATION - ratio: {d:.2}x, max_single_op: {}ns\n", .{ @as(f64, @floatFromInt(stress_per_op)) / @as(f64, @floatFromInt(baseline_per_op)), stress_max });
+        std.debug.print("Platform: {s}, Tier: {}, Build: ReleaseSafe\n", .{ @tagName(builtin.os.tag), tier });
+        std.debug.print("BASELINE - count: 50, min: {}ns, max: {}ns, median: {}ns, avg: {}ns\n", .{ baseline_min, baseline_max, baseline_median, baseline_per_op });
+        std.debug.print("STRESS - count: {}, failed: {}, min: {}ns, max: {}ns, median: {}ns, avg: {}ns\n", .{ successful_ops, failed_ops, stress_min, stress_max, stress_median, stress_per_op });
+        std.debug.print("DEGRADATION - ratio: {d:.2}x, max_single_op: {}ns\n", .{ @as(f64, @floatFromInt(stress_per_op)) / @as(f64, @floatFromInt(baseline_per_op)), stress_max });
 
         const thresholds = PerformanceThresholds.for_tier(@as(u64, @intCast(baseline_per_op)), 0, tier);
-        test_config.debug_print("THRESHOLD - expected_max: {}ns, actual: {}ns, status: {s}\n", .{ thresholds.max_latency_ns, stress_per_op, if (stress_per_op < thresholds.max_latency_ns) "PASS" else "FAIL" });
-        test_config.debug_print("===============================\n\n", .{});
+        std.debug.print("THRESHOLD - expected_max: {}ns, actual: {}ns, status: {s}\n", .{ thresholds.max_latency_ns, stress_per_op, if (stress_per_op < thresholds.max_latency_ns) "PASS" else "FAIL" });
+        std.debug.print("===============================\n\n", .{});
 
         // Performance assertion re-enabled after fixing simulation framework O(n²) bottleneck
         // The O(1) hash map optimization eliminated 45x degradation in file handle lookups
@@ -436,7 +434,7 @@ test "performance regression detection" {
 
     // Always log recovery performance data for CI threshold calibration
     const tier = PerformanceTier.detect();
-    test_config.debug_print("RECOVERY_DATA: tier={}, baseline_per_op={}ns, recovery_time={}ns, ratio={d:.2}\n", .{ tier, baseline_per_op, recovery_time, @as(f64, @floatFromInt(recovery_time)) / @as(f64, @floatFromInt(baseline_per_op)) });
+    std.debug.print("RECOVERY_DATA: tier={}, baseline_per_op={}ns, recovery_time={}ns, ratio={d:.2}\n", .{ tier, baseline_per_op, recovery_time, @as(f64, @floatFromInt(recovery_time)) / @as(f64, @floatFromInt(baseline_per_op)) });
 
     // Recovery performance assertion re-enabled after simulation framework optimization
     const thresholds = PerformanceThresholds.for_tier(@as(u64, @intCast(baseline_per_op)), 0, tier);

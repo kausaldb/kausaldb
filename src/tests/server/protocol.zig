@@ -5,29 +5,30 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const query_engine_mod = @import("../../query/engine.zig");
+const server_handler = @import("../../server/handler.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
+
+const testing = std.testing;
 
 const net = std.net;
-const query_engine = kausaldb.query_engine;
-const server_handler = kausaldb.handler;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
-const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
-
-const StorageEngine = storage.StorageEngine;
-const QueryEngine = query_engine.QueryEngine;
-const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
-const SimulationVFS = simulation_vfs.SimulationVFS;
-const Server = server_handler.Server;
-const ServerConfig = server_handler.ServerConfig;
-const MessageHeader = server_handler.MessageHeader;
-const MessageType = server_handler.MessageType;
 const ClientConnection = server_handler.ClientConnection;
 const ConnectionState = server_handler.ConnectionState;
-const TestData = kausaldb.TestData;
+const ContextBlock = types.ContextBlock;
+const MessageHeader = server_handler.MessageHeader;
+const MessageType = server_handler.MessageType;
+const QueryEngine = query_engine_mod.QueryEngine;
+const QueryHarness = test_harness.QueryHarness;
+const Server = server_handler.Server;
+const ServerConfig = server_handler.ServerConfig;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
 
 test "config default values" {
     const config = ServerConfig{};
@@ -101,7 +102,7 @@ test "server initialization" {
     const allocator = testing.allocator;
 
     // Use QueryHarness for coordinated setup
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "test_server_db");
+    var harness = try QueryHarness.init_and_startup(allocator, "test_server_db");
     defer harness.deinit();
 
     const config = ServerConfig{
@@ -176,7 +177,7 @@ test "connection limit configuration" {
     const allocator = testing.allocator;
 
     // Use QueryHarness for coordinated setup
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "connection_limit_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "connection_limit_test");
     defer harness.deinit();
 
     const config = ServerConfig{
@@ -196,7 +197,7 @@ test "stats initial values" {
     const allocator = testing.allocator;
 
     // Use QueryHarness for coordinated setup
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "stats_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "stats_test");
     defer harness.deinit();
 
     const config = ServerConfig{};
@@ -262,7 +263,7 @@ test "engine references basic" {
     const allocator = testing.allocator;
 
     // Use QueryHarness for coordinated setup
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "engine_refs_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "engine_refs_test");
     defer harness.deinit();
 
     const config = ServerConfig{};

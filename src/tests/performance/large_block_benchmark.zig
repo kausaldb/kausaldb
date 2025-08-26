@@ -5,15 +5,17 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const types = @import("../../core/types.zig");
+const performance_assertions = @import("../../testing/performance_assertions.zig");
+const test_harness = @import("../harness.zig");
+const wal = @import("../../storage/wal/entry.zig");
 
 const testing = std.testing;
-const types = kausaldb.types;
 
-const PerformanceAssertion = kausaldb.PerformanceAssertion;
-const PerformanceThresholds = kausaldb.PerformanceThresholds;
-const SimulationHarness = kausaldb.test_harness.SimulationHarness;
-const TestData = kausaldb.test_harness.TestData;
+const PerformanceAssertion = performance_assertions.PerformanceAssertion;
+const PerformanceThresholds = performance_assertions.PerformanceThresholds;
+const SimulationHarness = test_harness.SimulationHarness;
+const TestData = test_harness.TestData;
 const ContextBlock = types.ContextBlock;
 
 // Base performance targets (local development, optimal conditions)
@@ -114,7 +116,7 @@ test "large block storage engine performance" {
 
             // Profile WAL entry creation separately
             const wal_start = std.time.nanoTimestamp();
-            const wal_entry = try kausaldb.wal.WALEntry.create_put_block(allocator, test_block);
+            const wal_entry = try wal.WALEntry.create_put_block(allocator, test_block);
             const wal_end = std.time.nanoTimestamp();
             defer wal_entry.deinit(allocator);
 

@@ -7,14 +7,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const profiler = @import("../../dev/profiler.zig");
+const test_harness = @import("../harness.zig");
 
 const testing = std.testing;
-const test_config = kausaldb.test_config;
-const assert = kausaldb.assert.assert;
-const query_current_rss_memory = kausaldb.profiler.query_current_rss_memory;
 
-const MemoryProfiler = kausaldb.profiler.MemoryProfiler;
+const assert = assert_mod.assert;
+const query_current_rss_memory = profiler.query_current_rss_memory;
+
+const MemoryProfiler = profiler.MemoryProfiler;
 
 // Test RSS measurement accuracy
 test "memory profiler RSS measurement accuracy" {
@@ -93,10 +95,10 @@ test "memory profiler performance overhead" {
     try testing.expect(time_per_sample_ns < MAX_SAMPLE_TIME_NS);
 
     // Log performance for debugging
-    test_config.debug_print("\nMemory profiling performance:\n", .{});
-    test_config.debug_print("Total samples: {}\n", .{NUM_SAMPLES});
-    test_config.debug_print("Total time: {}ns\n", .{total_time_ns});
-    test_config.debug_print("Time per sample: {}ns ({}µs)\n", .{ time_per_sample_ns, time_per_sample_ns / 1000 });
+    std.debug.print("\nMemory profiling performance:\n", .{});
+    std.debug.print("Total samples: {}\n", .{NUM_SAMPLES});
+    std.debug.print("Total time: {}ns\n", .{total_time_ns});
+    std.debug.print("Time per sample: {}ns ({}µs)\n", .{ time_per_sample_ns, time_per_sample_ns / 1000 });
 }
 
 // Test memory efficiency calculation
@@ -131,20 +133,20 @@ test "memory profiler cross platform RSS query" {
         std.posix.getenv("CONTINUOUS_INTEGRATION") != null;
 
     if (is_ci) {
-        test_config.debug_print("Skipping RSS validation in CI environment\n", .{});
+        std.debug.print("Skipping RSS validation in CI environment\n", .{});
         return;
     }
 
     const rss_bytes = query_current_rss_memory();
 
     // Always debug the RSS value on all platforms
-    test_config.debug_print("RSS DEBUG: platform={}, rss_bytes={} ({} MB)\n", .{ builtin.os.tag, rss_bytes, rss_bytes / (1024 * 1024) });
+    std.debug.print("RSS DEBUG: platform={}, rss_bytes={} ({} MB)\n", .{ builtin.os.tag, rss_bytes, rss_bytes / (1024 * 1024) });
 
     // RSS should work on development platforms
     switch (builtin.os.tag) {
         .linux, .macos => {
             if (rss_bytes == 0) {
-                test_config.debug_print("RSS ERROR: Got 0 bytes on {}, this should not happen\n", .{builtin.os.tag});
+                std.debug.print("RSS ERROR: Got 0 bytes on {}, this should not happen\n", .{builtin.os.tag});
                 return error.RSSQueryFailed;
             }
 
@@ -153,7 +155,7 @@ test "memory profiler cross platform RSS query" {
             // Realistic thresholds for optimized builds - they can be very memory efficient
             const min_rss = if (builtin.os.tag == .linux) 256 * 1024 else 512 * 1024; // 256KB on Linux, 512KB on macOS
             if (rss_bytes < min_rss) {
-                test_config.debug_print("RSS WARNING: Got {} bytes, expected at least {} bytes (but this may be normal for optimized builds)\n", .{ rss_bytes, min_rss });
+                std.debug.print("RSS WARNING: Got {} bytes, expected at least {} bytes (but this may be normal for optimized builds)\n", .{ rss_bytes, min_rss });
                 // Still allow the test to pass if RSS is reasonable but below our conservative threshold
                 try testing.expect(rss_bytes >= 64 * 1024); // Absolute minimum: 64KB
             } else {
@@ -161,7 +163,7 @@ test "memory profiler cross platform RSS query" {
             }
             try testing.expect(rss_bytes <= 1024 * 1024 * 1024); // Less than 1GB
 
-            test_config.debug_print("RSS query successful: {} bytes ({} MB)\n", .{ rss_bytes, rss_bytes / (1024 * 1024) });
+            std.debug.print("RSS query successful: {} bytes ({} MB)\n", .{ rss_bytes, rss_bytes / (1024 * 1024) });
         },
         .windows => {
             // Windows implementation returns 0 for now (placeholder)
@@ -269,8 +271,8 @@ test "memory profiler production workload simulation" {
 
     try testing.expect(growth_per_op <= max_growth_per_op);
 
-    test_config.debug_print("\nProduction workload simulation results:\n", .{});
-    test_config.debug_print("Total operations: {}\n", .{total_operations});
-    test_config.debug_print("Memory growth: {} bytes ({} KB)\n", .{ memory_growth, memory_growth / 1024 });
-    test_config.debug_print("Growth per operation: {} bytes\n", .{growth_per_op});
+    std.debug.print("\nProduction workload simulation results:\n", .{});
+    std.debug.print("Total operations: {}\n", .{total_operations});
+    std.debug.print("Memory growth: {} bytes ({} KB)\n", .{ memory_growth, memory_growth / 1024 });
+    std.debug.print("Growth per operation: {} bytes\n", .{growth_per_op});
 }

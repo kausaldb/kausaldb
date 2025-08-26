@@ -7,29 +7,29 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const query_engine = @import("../../query/engine.zig");
+const query_operations = @import("../../query/operations.zig");
+const query_traversal = @import("../../query/traversal.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const operations = kausaldb.query_operations;
-const query_engine = kausaldb.query_engine;
-const query_traversal = kausaldb.query_traversal;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
-const FindBlocksQuery = kausaldb.FindBlocksQuery;
+const FindBlocksQuery = query_operations.FindBlocksQuery;
 const TraversalQuery = query_traversal.TraversalQuery;
 const TraversalDirection = query_traversal.TraversalDirection;
-const QueryResult = operations.QueryResult;
-const TestData = kausaldb.TestData;
-const QueryHarness = kausaldb.QueryHarness;
+const QueryResult = query_operations.QueryResult;
+const TestData = test_harness.TestData;
+const QueryHarness = test_harness.QueryHarness;
 
 test "streaming query results with large datasets" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "streaming_large_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "streaming_large_test");
     defer harness.deinit();
 
     // Create large dataset to test streaming behavior
@@ -54,7 +54,7 @@ test "streaming query results with large datasets" {
 
     // Query all blocks using streaming
     const query = FindBlocksQuery{ .block_ids = stored_block_ids.items };
-    var result = try operations.execute_find_blocks(allocator, harness.storage(), query);
+    var result = try query_operations.execute_find_blocks(allocator, harness.storage(), query);
     defer result.deinit();
 
     // Verify streaming behavior with memory efficiency
@@ -70,7 +70,7 @@ test "streaming query results with large datasets" {
 test "query result caching with identical queries" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "caching_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "caching_test");
     defer harness.deinit();
 
     // Create test blocks
@@ -155,7 +155,7 @@ test "query result caching with identical queries" {
 test "memory efficient graph traversal with depth limits" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "memory_efficient_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "memory_efficient_test");
     defer harness.deinit();
 
     // Create a deep chain of nodes
@@ -226,7 +226,7 @@ test "memory efficient graph traversal with depth limits" {
 test "query optimization with different algorithms" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "optimization_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "optimization_test");
     defer harness.deinit();
 
     // Create a small graph for algorithm comparison
@@ -346,7 +346,7 @@ test "query optimization with different algorithms" {
 test "streaming result pagination and memory bounds" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "pagination_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "pagination_test");
     defer harness.deinit();
 
     // Create test blocks for pagination
@@ -369,7 +369,7 @@ test "streaming result pagination and memory bounds" {
 
     // Test streaming with result limits
     const query = FindBlocksQuery{ .block_ids = block_ids.items };
-    var result = try operations.execute_find_blocks(allocator, harness.storage(), query);
+    var result = try query_operations.execute_find_blocks(allocator, harness.storage(), query);
     defer result.deinit();
 
     // Count streamed results
@@ -398,7 +398,7 @@ test "streaming result pagination and memory bounds" {
 test "complex graph scenario performance characteristics" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "complex_scenario_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "complex_scenario_test");
     defer harness.deinit();
 
     // Create a complex graph with multiple components

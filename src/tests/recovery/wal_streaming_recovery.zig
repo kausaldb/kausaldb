@@ -6,13 +6,12 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
 
 const log = std.log.scoped(.streaming_wal_recovery);
-const simulation = kausaldb.simulation;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const StorageEngine = storage.StorageEngine;
 const ContextBlock = types.ContextBlock;

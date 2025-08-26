@@ -74,7 +74,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     integration_tests.root_module.addImport("build_options", build_options.createModule());
-    integration_tests.root_module.addImport("kausaldb", testing_api_module);
     integration_tests.linkLibC();
 
     const run_integration_tests = b.addRunArtifact(integration_tests);

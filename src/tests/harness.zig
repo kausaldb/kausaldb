@@ -6,17 +6,18 @@
 
 const std = @import("std");
 
-const kausaldb = @import("../testing_api.zig");
-
+const assert_mod = @import("../core/assert.zig");
 const production_vfs = @import("../core/production_vfs.zig");
+const query_engine = @import("../query/engine.zig");
+const simulation = @import("../sim/simulation.zig");
+const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const storage = @import("../storage/engine.zig");
+const types = @import("../core/types.zig");
+const vfs = @import("../core/vfs.zig");
 
-const assert = kausaldb.assert;
-const query_engine = kausaldb.query_engine;
-const simulation = kausaldb.simulation;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
+
+const assert = assert_mod.assert;
 
 const ProductionVFS = production_vfs.ProductionVFS;
 const StorageEngine = storage.StorageEngine;
@@ -25,7 +26,7 @@ const Node = simulation.Node;
 const QueryEngine = query_engine.QueryEngine;
 const Simulation = simulation.Simulation;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const VFS = kausaldb.VFS;
+const VFS = vfs.VFS;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;

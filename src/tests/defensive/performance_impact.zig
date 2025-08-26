@@ -8,18 +8,20 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const performance_assertions = @import("../../testing/performance_assertions.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert;
-const simulation = kausaldb.simulation;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
+const assert = assert_mod;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
+const PerformanceAssertion = performance_assertions.PerformanceAssertion;
 const StorageEngine = storage.StorageEngine;
 const Simulation = simulation.Simulation;
 
@@ -323,7 +325,7 @@ test "storage operations performance with defensive programming" {
     try testing.expect(read_result.throughput_ops_per_sec >= 50); // At least 50 reads/sec
 
     // Use environment-aware performance assertions for latency validation
-    const perf = kausaldb.PerformanceAssertion.init("storage_operations_performance");
+    const perf = PerformanceAssertion.init("storage_operations_performance");
     try perf.assert_latency(write_result.mean_ns, 200_000_000, "mean write latency with defensive programming");
     try perf.assert_latency(read_result.mean_ns, 10_000_000, "mean read latency with defensive programming");
 }

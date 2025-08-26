@@ -6,27 +6,33 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const pipeline = @import("../../ingestion/pipeline.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const BackpressureConfig = kausaldb.pipeline.BackpressureConfig;
-const BlockId = kausaldb.types.BlockId;
-const Chunker = kausaldb.pipeline.Chunker;
-const ContextBlock = kausaldb.types.ContextBlock;
-const EdgeType = kausaldb.types.EdgeType;
-const IngestionError = kausaldb.pipeline.IngestionError;
-const IngestionPipeline = kausaldb.pipeline.IngestionPipeline;
-const ParsedUnit = kausaldb.pipeline.ParsedUnit;
-const Parser = kausaldb.pipeline.Parser;
-const PipelineConfig = kausaldb.pipeline.PipelineConfig;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const Source = kausaldb.pipeline.Source;
-const SourceContent = kausaldb.pipeline.SourceContent;
-const SourceIterator = kausaldb.pipeline.SourceIterator;
-const StorageMetrics = kausaldb.storage.StorageMetrics;
-const TestData = kausaldb.TestData;
-const VFS = kausaldb.VFS;
+const BackpressureConfig = pipeline.BackpressureConfig;
+const BlockId = types.BlockId;
+const Chunker = pipeline.Chunker;
+const ContextBlock = types.ContextBlock;
+const EdgeType = types.EdgeType;
+const IngestionError = pipeline.IngestionError;
+const IngestionPipeline = pipeline.IngestionPipeline;
+const ParsedUnit = pipeline.ParsedUnit;
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const vfs = @import("../../core/vfs.zig");
+
+const Parser = pipeline.Parser;
+const PipelineConfig = pipeline.PipelineConfig;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const Source = pipeline.Source;
+const SourceContent = pipeline.SourceContent;
+const SourceIterator = pipeline.SourceIterator;
+const StorageMetrics = storage.StorageMetrics;
+const TestData = test_harness.TestData;
+const VFS = vfs.VFS;
 
 // Mock source that generates configurable number of content items
 const MockSource = struct {
@@ -46,8 +52,8 @@ const MockSource = struct {
         };
     }
 
-    fn fetch(ptr: *anyopaque, allocator: std.mem.Allocator, vfs: *VFS) IngestionError!SourceIterator {
-        _ = vfs;
+    fn fetch(ptr: *anyopaque, allocator: std.mem.Allocator, vfs_ptr: *VFS) IngestionError!SourceIterator {
+        _ = vfs_ptr;
         const self: *Self = @ptrCast(@alignCast(ptr));
         const iterator = try allocator.create(MockSourceIterator);
         iterator.* = MockSourceIterator{
@@ -144,7 +150,7 @@ const MockParser = struct {
     fn parse(ptr: *anyopaque, allocator: std.mem.Allocator, content: SourceContent) IngestionError![]ParsedUnit {
         const self: *Self = @ptrCast(@alignCast(ptr));
 
-        var edges = std.array_list.Managed(kausaldb.pipeline.ParsedEdge).init(allocator);
+        var edges = std.array_list.Managed(pipeline.ParsedEdge).init(allocator);
         if (self.blocks_per_unit > 1) {
             try edges.ensureTotalCapacity(self.blocks_per_unit - 1);
         }
@@ -166,7 +172,7 @@ const MockParser = struct {
         const units = try allocator.alloc(ParsedUnit, self.blocks_per_unit);
 
         for (0..self.blocks_per_unit) |i| {
-            var unit_edges = std.array_list.Managed(kausaldb.pipeline.ParsedEdge).init(allocator);
+            var unit_edges = std.array_list.Managed(pipeline.ParsedEdge).init(allocator);
             if (i == 0) {
                 unit_edges = edges;
             }
@@ -275,7 +281,7 @@ const MockChunker = struct {
 test "backpressure under normal memory conditions maintains full batch size" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "backpressure_normal");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "backpressure_normal");
     defer harness.deinit();
 
     // Configure backpressure with generous memory limits
@@ -296,23 +302,23 @@ test "backpressure under normal memory conditions maintains full batch size" {
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 100;
 
-    var pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
-    defer pipeline.deinit();
+    var ingestion_pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
+    defer ingestion_pipeline.deinit();
 
     // Register components
     var source = MockSource{ .content_count = 25 }; // Small workload
     var parser = MockParser{ .blocks_per_unit = 1 };
     var chunker = MockChunker{ .chunk_size = 256 };
 
-    try pipeline.register_source(source.source());
-    try pipeline.register_parser(parser.parser());
-    try pipeline.register_chunker(chunker.chunker());
+    try ingestion_pipeline.register_source(source.source());
+    try ingestion_pipeline.register_parser(parser.parser());
+    try ingestion_pipeline.register_chunker(chunker.chunker());
 
     // Execute with backpressure - should maintain full batch size under low pressure
     const storage_ref = harness.storage_engine;
-    try pipeline.execute_with_backpressure(storage_ref);
+    try ingestion_pipeline.execute_with_backpressure(storage_ref);
 
-    const stats = pipeline.stats();
+    const stats = ingestion_pipeline.stats();
 
     // Should have processed all sources
     try testing.expectEqual(@as(u32, 1), stats.sources_processed);
@@ -330,7 +336,7 @@ test "backpressure under normal memory conditions maintains full batch size" {
 test "backpressure under memory pressure reduces batch sizes appropriately" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "backpressure_pressure");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "backpressure_pressure");
     defer harness.deinit();
 
     // Pre-fill storage to create memory pressure
@@ -366,23 +372,23 @@ test "backpressure under memory pressure reduces batch sizes appropriately" {
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 100;
 
-    var pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
-    defer pipeline.deinit();
+    var ingestion_pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
+    defer ingestion_pipeline.deinit();
 
     // Register components for large content generation
     var source = MockSource{ .content_count = 150 }; // Large workload
     var parser = MockParser{ .blocks_per_unit = 2 };
     var chunker = MockChunker{ .chunk_size = 1024 };
 
-    try pipeline.register_source(source.source());
-    try pipeline.register_parser(parser.parser());
-    try pipeline.register_chunker(chunker.chunker());
+    try ingestion_pipeline.register_source(source.source());
+    try ingestion_pipeline.register_parser(parser.parser());
+    try ingestion_pipeline.register_chunker(chunker.chunker());
 
     // Execute with backpressure - should adapt batch sizes under pressure
     const storage_ref = harness.storage_engine;
-    try pipeline.execute_with_backpressure(storage_ref);
+    try ingestion_pipeline.execute_with_backpressure(storage_ref);
 
-    const stats = pipeline.stats();
+    const stats = ingestion_pipeline.stats();
 
     // Should have completed ingestion
     try testing.expectEqual(@as(u32, 1), stats.sources_processed);
@@ -399,7 +405,7 @@ test "backpressure under memory pressure reduces batch sizes appropriately" {
 test "backpressure recovers batch size after pressure relief" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "backpressure_recovery");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "backpressure_recovery");
     defer harness.deinit();
 
     // Configure moderate backpressure settings
@@ -420,8 +426,8 @@ test "backpressure recovers batch size after pressure relief" {
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 80;
 
-    var pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
-    defer pipeline.deinit();
+    var ingestion_pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
+    defer ingestion_pipeline.deinit();
 
     // Phase 1: Create initial pressure with large blocks
     for (0..20) |i| {
@@ -447,14 +453,14 @@ test "backpressure recovers batch size after pressure relief" {
     var parser = MockParser{ .blocks_per_unit = 1 };
     var chunker = MockChunker{ .chunk_size = 512 };
 
-    try pipeline.register_source(source.source());
-    try pipeline.register_parser(parser.parser());
-    try pipeline.register_chunker(chunker.chunker());
+    try ingestion_pipeline.register_source(source.source());
+    try ingestion_pipeline.register_parser(parser.parser());
+    try ingestion_pipeline.register_chunker(chunker.chunker());
 
     const final_storage_ref = harness.storage_engine;
-    try pipeline.execute_with_backpressure(final_storage_ref);
+    try ingestion_pipeline.execute_with_backpressure(final_storage_ref);
 
-    const stats = pipeline.stats();
+    const stats = ingestion_pipeline.stats();
 
     // Should have completed successfully
     try testing.expectEqual(@as(u32, 1), stats.sources_processed);
@@ -473,7 +479,7 @@ test "backpressure recovers batch size after pressure relief" {
 test "adaptive batch sizing responds proportionally to pressure levels" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "backpressure_adaptive");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "backpressure_adaptive");
     defer harness.deinit();
 
     // Configure fine-grained pressure thresholds
@@ -527,21 +533,21 @@ test "adaptive batch sizing responds proportionally to pressure levels" {
             try filler_storage.put_block(filler_block);
         }
 
-        var pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
-        defer pipeline.deinit();
+        var ingestion_pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
+        defer ingestion_pipeline.deinit();
 
         var source = MockSource{ .content_count = 40 };
         var parser = MockParser{ .blocks_per_unit = 1 };
         var chunker = MockChunker{ .chunk_size = 256 };
 
-        try pipeline.register_source(source.source());
-        try pipeline.register_parser(parser.parser());
-        try pipeline.register_chunker(chunker.chunker());
+        try ingestion_pipeline.register_source(source.source());
+        try ingestion_pipeline.register_parser(parser.parser());
+        try ingestion_pipeline.register_chunker(chunker.chunker());
 
         const exec_storage_ref = harness.storage_engine;
-        try pipeline.execute_with_backpressure(exec_storage_ref);
+        try ingestion_pipeline.execute_with_backpressure(exec_storage_ref);
 
-        const stats = pipeline.stats();
+        const stats = ingestion_pipeline.stats();
 
         // Verify adaptive behavior based on pressure level
         if (scenario.expected_max_reduction) {
@@ -564,7 +570,7 @@ test "adaptive batch sizing responds proportionally to pressure levels" {
 test "memory recovery behavior stabilizes after sustained pressure" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "backpressure_sustained");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "backpressure_sustained");
     defer harness.deinit();
 
     // Configure for sustained pressure testing
@@ -606,13 +612,13 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
 
     // Manual setup required because: Ingestion fault testing needs precise control
     // over when faults are injected relative to pipeline stages to test recovery
-    var fault_config = kausaldb.FaultInjectionConfig{};
+    var fault_config = test_harness.FaultInjectionConfig{};
     fault_config.io_failures.enabled = true;
     fault_config.io_failures.failure_rate_per_thousand = 50; // 5% failure rate (reduced for stability)
     fault_config.io_failures.operations.write = true;
     fault_config.io_failures.operations.read = false; // Disable read failures to ensure pipeline can execute
 
-    var harness = try kausaldb.FaultInjectionHarness.init_with_faults(allocator, 0xF4017, "ingestion_fault_test", fault_config);
+    var harness = try test_harness.FaultInjectionHarness.init_with_faults(allocator, 0xF4017, "ingestion_fault_test", fault_config);
     defer harness.deinit();
     try harness.startup();
 
@@ -636,8 +642,8 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
     pipeline_config.continue_on_error = true; // Test recovery behavior
     pipeline_config.backpressure = backpressure_config;
 
-    var pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
-    defer pipeline.deinit();
+    var ingestion_pipeline = try IngestionPipeline.init(allocator, harness.vfs_ptr(), pipeline_config);
+    defer ingestion_pipeline.deinit();
 
     // Add multiple mock sources to test fault recovery across sources
     const source_configs = [_]struct { count: u32, name: []const u8 }{
@@ -648,15 +654,15 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
 
     for (source_configs) |config| {
         var mock_source = MockSource{ .content_count = config.count };
-        try pipeline.register_source(mock_source.source());
+        try ingestion_pipeline.register_source(mock_source.source());
     }
 
     // Register parser and chunker
     var mock_parser = MockParser{ .blocks_per_unit = 1 };
     var mock_chunker = MockChunker{ .chunk_size = 256 };
 
-    try pipeline.register_parser(mock_parser.parser());
-    try pipeline.register_chunker(mock_chunker.chunker());
+    try ingestion_pipeline.register_parser(mock_parser.parser());
+    try ingestion_pipeline.register_chunker(mock_chunker.chunker());
 
     // Execute pipeline under fault conditions
     const storage_ref = harness.storage();
@@ -664,7 +670,7 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
     const initial_blocks = initial_stats.blocks_written.load();
 
     const exec_storage = harness.storage();
-    try pipeline.execute_with_backpressure(exec_storage);
+    try ingestion_pipeline.execute_with_backpressure(exec_storage);
 
     // Validate that despite faults, some data was successfully ingested
     const final_storage = harness.storage();
@@ -679,7 +685,7 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
     try testing.expect(blocks_ingested > 0); // Some data must survive
 
     // Validate pipeline statistics reflect fault handling
-    const final_pipeline_stats = pipeline.stats();
+    const final_pipeline_stats = ingestion_pipeline.stats();
 
     // Relaxed expectations for fault injection testing
     try testing.expect(final_pipeline_stats.sources_processed > 0); // Some sources should complete

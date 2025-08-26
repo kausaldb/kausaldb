@@ -7,18 +7,23 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const memory = @import("../../core/memory.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const fatal_assert = kausaldb.assert.fatal_assert;
+const assert = assert_mod.assert;
+const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
-const ArenaCoordinator = kausaldb.memory.ArenaCoordinator;
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const SSTableManager = kausaldb.storage.SSTableManager;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const TestData = kausaldb.TestData;
+const ArenaCoordinator = memory.ArenaCoordinator;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const SSTableManager = storage.SSTableManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const TestData = test_harness.TestData;
 
 /// Validate ArrayList integrity and detect string corruption patterns
 fn validate_path_integrity(manager: *SSTableManager, context: []const u8) !void {

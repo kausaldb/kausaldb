@@ -6,18 +6,17 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
-
-const simulation_vfs = kausaldb.simulation_vfs;
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const test_harness = @import("../harness.zig");
 const testing = std.testing;
-const types = kausaldb.types;
+const types = @import("../../core/types.zig");
 
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const TestData = kausaldb.TestData;
+const TestData = test_harness.TestData;
 
 // Helper to create valid serialized ContextBlock for corruption testing
 fn create_valid_serialized_block(allocator: std.mem.Allocator) ![]u8 {

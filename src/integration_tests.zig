@@ -64,8 +64,8 @@ comptime {
 const quine =
     \\const std = @import("std");
     \\const builtin = @import("builtin");
-    \\const kausaldb = @import("kausaldb");
-    \\const assert = kausaldb.assert.assert;
+    \\const assert_mod = @import("core/assert.zig");
+    \\const assert = assert_mod.assert;
     \\
     \\const MiB = 1024 * 1024;
     \\
@@ -190,8 +190,8 @@ const quine =
 
 const std = @import("std");
 const builtin = @import("builtin");
-const kausaldb = @import("kausaldb");
-const assert = kausaldb.assert.assert;
+const assert_mod = @import("core/assert.zig");
+const assert = assert_mod.assert;
 
 const MiB = 1024 * 1024;
 

@@ -6,19 +6,24 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const memory = @import("../../core/memory.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const tiered_compaction = @import("../../storage/tiered_compaction.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const ArenaCoordinator = kausaldb.memory.ArenaCoordinator;
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const SSTableManager = kausaldb.storage.SSTableManager;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
-const TieredCompactionManager = kausaldb.storage.TieredCompactionManager;
+const ArenaCoordinator = memory.ArenaCoordinator;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const SSTableManager = storage.SSTableManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
+const TieredCompactionManager = tiered_compaction.TieredCompactionManager;
 
 // Helper for managing path lifetimes in TieredCompactionManager tests
 const TestPathManager = struct {

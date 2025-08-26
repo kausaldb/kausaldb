@@ -9,22 +9,29 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const memtable_manager = @import("../../storage/memtable_manager.zig");
+const memory = @import("../../core/memory.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const log = std.log.scoped(.memory_fault_injection);
-const test_config = kausaldb.test_config;
 const testing = std.testing;
 
-const ArenaCoordinator = kausaldb.memory.ArenaCoordinator;
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const EdgeType = kausaldb.types.EdgeType;
-const GraphEdge = kausaldb.types.GraphEdge;
-const MemtableManager = kausaldb.storage.MemtableManager;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const TestData = kausaldb.TestData;
+const assert = assert_mod.assert;
+const log = std.log.scoped(.memory_fault_injection);
+// Simple no-op functions for test configuration
+fn enable_corruption_test_mode() void {}
+const ArenaCoordinator = memory.ArenaCoordinator;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+const MemtableManager = memtable_manager.MemtableManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
 
 /// Failing allocator that simulates memory pressure conditions
 const FailingAllocator = struct {
@@ -81,7 +88,7 @@ const FailingAllocator = struct {
 
 test "allocation failure during memtable operations" {
     // Enable debug logging for memory tests
-    test_config.debug_print("Starting allocation failure test\n", .{});
+    std.debug.print("Starting allocation failure test\n", .{});
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
@@ -150,7 +157,7 @@ test "allocation failure during memtable operations" {
 
 test "I/O errors during memory operations" {
     // Memory test mode enabled via build-level configuration
-    test_config.debug_print("I/O error testing enabled\n", .{});
+    std.debug.print("I/O error testing enabled\n", .{});
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
@@ -166,15 +173,15 @@ test "I/O errors during memory operations" {
     var sim_vfs_mut = &sim_vfs;
     sim_vfs_mut.enable_io_failures(100, .{ .write = true, .read = true, .create = false, .remove = false, .mkdir = false, .sync = false }); // 10% failure rate
 
-    var storage = StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_data") catch |err| {
+    var storage_engine = StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_data") catch |err| {
         // Expected failure during initialization under fault injection
         try testing.expect(err == error.AccessDenied or err == error.FileNotFound or err == error.IoError);
         return;
     };
-    defer storage.deinit();
+    defer storage_engine.deinit();
 
     // Try storage operations that should fail gracefully
-    storage.startup() catch |err| {
+    storage_engine.startup() catch |err| {
         // Expected I/O failure under fault injection, verify memory cleanup
         try testing.expect(err == error.AccessDenied or err == error.FileNotFound or err == error.IoError);
         return;
@@ -190,7 +197,7 @@ test "I/O errors during memory operations" {
     };
 
     // This may fail due to injected write failure or succeed gracefully
-    const result = storage.put_block(test_block);
+    const result = storage_engine.put_block(test_block);
     if (result) |_| {
         // Operation succeeded despite I/O stress - this is acceptable
     } else |err| {
@@ -199,12 +206,12 @@ test "I/O errors during memory operations" {
     }
 
     // Verify storage engine state remains consistent after failure
-    const memory_usage = storage.memory_usage();
+    const memory_usage = storage_engine.memory_usage();
     try testing.expect(memory_usage.total_bytes >= 0); // Basic sanity check
 }
 
 test "arena corruption detection" {
-    test_config.enable_corruption_test_mode();
+    enable_corruption_test_mode();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     defer {
@@ -298,15 +305,15 @@ test "error path cleanup validation" {
             sim_vfs_mut.enable_read_corruption(1, 3); // 1 bit flip per KB
         }
 
-        var storage = StorageEngine.init_default(allocator, sim_vfs.vfs(), "error_test") catch |err| {
+        var storage_engine = StorageEngine.init_default(allocator, sim_vfs.vfs(), "error_test") catch |err| {
             // Expected initialization failure
             try testing.expect(err == error.AccessDenied or err == error.FileNotFound);
             continue;
         };
-        defer storage.deinit();
+        defer storage_engine.deinit();
 
         // Try to start storage engine
-        storage.startup() catch |err| {
+        storage_engine.startup() catch |err| {
             // Expected startup failure under fault injection
             try testing.expect(err == error.AccessDenied or err == error.FileNotFound or err == error.IoError);
             continue;
@@ -331,12 +338,12 @@ test "error path cleanup validation" {
         };
 
         // Operation should fail gracefully
-        storage.put_block(block) catch |err| {
+        storage_engine.put_block(block) catch |err| {
             try testing.expect(err == error.AccessDenied or err == error.CorruptedData or err == error.IoError);
         };
 
         // Verify memory state remains consistent
-        const final_usage = storage.memory_usage();
+        const final_usage = storage_engine.memory_usage();
         try testing.expect(final_usage.total_bytes >= 0);
 
         log.debug("Error path scenario {} completed: name={s}, file={s}", .{ scenario_idx, scenario.name, scenario.file_pattern });
@@ -444,9 +451,9 @@ test "graph edge operations under stress" {
     var sim_vfs = try SimulationVFS.init_with_fault_seed(allocator, 0x5000000);
     defer sim_vfs.deinit();
 
-    var storage = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "graph_stress_data");
-    defer storage.deinit();
-    try storage.startup();
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "graph_stress_data");
+    defer storage_engine.deinit();
+    try storage_engine.startup();
 
     // Create blocks for edge testing
     // Create non-zero block IDs for stress testing
@@ -474,7 +481,7 @@ test "graph edge operations under stress" {
             .content = owned_content,
         };
 
-        try storage.put_block(block);
+        try storage_engine.put_block(block);
     }
 
     // Create edges between blocks under memory stress
@@ -494,7 +501,7 @@ test "graph edge operations under stress" {
                 };
                 // GraphEdge doesn't have metadata_json field
 
-                storage.put_edge(edge) catch |err| {
+                storage_engine.put_edge(edge) catch |err| {
                     // May fail under memory pressure, should be graceful
                     try testing.expect(err == error.OutOfMemory);
                     continue;
@@ -506,7 +513,7 @@ test "graph edge operations under stress" {
     }
 
     // Verify graph structure survives stress testing
-    const memory_usage = storage.memory_usage();
+    const memory_usage = storage_engine.memory_usage();
     try testing.expect(memory_usage.total_bytes > 0);
     try testing.expect(memory_usage.block_count == block_ids.len);
 

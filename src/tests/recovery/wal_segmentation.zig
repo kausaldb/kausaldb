@@ -6,15 +6,16 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
 const testing = std.testing;
-const test_config = kausaldb.test_config;
-const assert = kausaldb.assert.assert;
-const types = kausaldb.types;
-const storage = kausaldb.storage;
-const simulation = kausaldb.simulation;
-const vfs = kausaldb.vfs;
+
+const assert = assert_mod.assert;
 
 const StorageEngine = storage.StorageEngine;
 const ContextBlock = types.ContextBlock;
@@ -22,11 +23,12 @@ const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 const Simulation = simulation.Simulation;
+const SimulationHarness = test_harness.SimulationHarness;
 
 test "rotation at size limit" {
     const allocator = std.testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 54321, "wal_segment_rotation");
+    var harness = try SimulationHarness.init_and_startup(allocator, 54321, "wal_segment_rotation");
     defer harness.deinit();
 
     // Create a large block that will trigger rotation
@@ -85,7 +87,7 @@ test "rotation at size limit" {
 test "cleanup after sstable flush" {
     const allocator = std.testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 98765, "wal_cleanup_test");
+    var harness = try SimulationHarness.init_and_startup(allocator, 98765, "wal_cleanup_test");
     defer harness.deinit();
 
     // Write enough small blocks to trigger rotation but not flush
@@ -113,7 +115,7 @@ test "cleanup after sstable flush" {
 
     // Debug: Check how many blocks are in memtable before flush
     const blocks_before_flush = harness.storage_engine.block_count();
-    test_config.debug_print("DEBUG: Blocks in memtable before flush: {}\n", .{blocks_before_flush});
+    std.debug.print("DEBUG: Blocks in memtable before flush: {}\n", .{blocks_before_flush});
 
     // Check WAL segments before flush
     const wal_dir = try std.fmt.allocPrint(allocator, "{s}/wal", .{"wal_cleanup_test"});
@@ -180,7 +182,7 @@ test "cleanup after sstable flush" {
 
     // Debug: Check final metrics before search
     const final_metrics = harness.storage_engine.metrics();
-    test_config.debug_print("DEBUG: SSTables written: {}, Blocks in memtable: {}\n", .{ final_metrics.sstable_writes.load(), harness.storage_engine.block_count() });
+    std.debug.print("DEBUG: SSTables written: {}, Blocks in memtable: {}\n", .{ final_metrics.sstable_writes.load(), harness.storage_engine.block_count() });
 
     // Debug: Check if SSTables exist on filesystem
     const sstable_dir = try std.fmt.allocPrint(allocator, "{s}/sst", .{"wal_cleanup_test"});
@@ -192,42 +194,42 @@ test "cleanup after sstable flush" {
     while (sstable_iterator.next()) |entry| {
         if (std.mem.endsWith(u8, entry.name, ".sst")) {
             sstable_count += 1;
-            test_config.debug_print("DEBUG: Found SSTable: {s}\n", .{entry.name});
+            std.debug.print("DEBUG: Found SSTable: {s}\n", .{entry.name});
         }
     }
-    test_config.debug_print("DEBUG: Total SSTables found: {}\n", .{sstable_count});
+    std.debug.print("DEBUG: Total SSTables found: {}\n", .{sstable_count});
 
     // Debug: Check internal SSTableManager state
     const sstable_paths_count = harness.storage_engine.sstable_manager.sstable_paths.items.len;
-    test_config.debug_print("DEBUG: SSTableManager has {} paths registered\n", .{sstable_paths_count});
+    std.debug.print("DEBUG: SSTableManager has {} paths registered\n", .{sstable_paths_count});
     for (harness.storage_engine.sstable_manager.sstable_paths.items, 0..) |path, idx| {
-        test_config.debug_print("DEBUG: SSTable path {}: {s}\n", .{ idx, path });
+        std.debug.print("DEBUG: SSTable path {}: {s}\n", .{ idx, path });
 
         // Check if the SSTable file exists and get its size
         if (node_vfs.exists(path)) {
             var file = node_vfs.open(path, .read) catch |err| {
-                test_config.debug_print("DEBUG: Could not open SSTable {s}: {}\n", .{ path, err });
+                std.debug.print("DEBUG: Could not open SSTable {s}: {}\n", .{ path, err });
                 continue;
             };
             defer file.close();
 
             const file_size = file.file_size() catch |err| {
-                test_config.debug_print("DEBUG: Could not get size of SSTable {s}: {}\n", .{ path, err });
+                std.debug.print("DEBUG: Could not get size of SSTable {s}: {}\n", .{ path, err });
                 continue;
             };
-            test_config.debug_print("DEBUG: SSTable {s} size: {} bytes\n", .{ path, file_size });
+            std.debug.print("DEBUG: SSTable {s} size: {} bytes\n", .{ path, file_size });
         } else {
-            test_config.debug_print("DEBUG: SSTable file {s} does not exist!\n", .{path});
+            std.debug.print("DEBUG: SSTable file {s} does not exist!\n", .{path});
         }
     }
 
     // Verify blocks can be found after WAL flush creates SSTable
     // Both first and last blocks should be findable from SSTable
-    test_config.debug_print("DEBUG: Searching for first block ID: {any}\n", .{first_block_id.bytes});
+    std.debug.print("DEBUG: Searching for first block ID: {any}\n", .{first_block_id.bytes});
 
     const first_result = try harness.storage_engine.find_block(first_block_id, .query_engine);
     if (first_result == null) {
-        test_config.debug_print("DEBUG: Could not find first block (ID=1)\n", .{});
+        std.debug.print("DEBUG: Could not find first block (ID=1)\n", .{});
 
         // SSTable shows 100 blocks but lookup fails - indicates SSTable find_block bug
 
@@ -237,7 +239,7 @@ test "cleanup after sstable flush" {
         // First block found - SSTable lookup partially working
     }
 
-    test_config.debug_print("DEBUG: Searching for last block ID: {any}\n", .{last_block_id.bytes});
+    std.debug.print("DEBUG: Searching for last block ID: {any}\n", .{last_block_id.bytes});
     const last_result = try harness.storage_engine.find_block(last_block_id, .query_engine);
     if (last_result == null) {
         try testing.expect(false); // STRICT: Block must be found - no corruption tolerance
@@ -247,7 +249,7 @@ test "cleanup after sstable flush" {
 test "recovery from mixed segments and sstables" {
     const allocator = std.testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 11111, "wal_mixed_recovery");
+    var harness = try SimulationHarness.init_and_startup(allocator, 11111, "wal_mixed_recovery");
     defer harness.deinit();
 
     // Phase 1: Write blocks that will be flushed to SSTable (start from 1)
@@ -289,7 +291,7 @@ test "recovery from mixed segments and sstables" {
     // Debug: Check post-flush state
     const memtable_blocks = harness.storage_engine.block_count();
     const sstable_metrics = harness.storage_engine.metrics();
-    test_config.debug_print("DEBUG: After phase 2 - Memtable blocks: {}, SSTable writes: {}\n", .{ memtable_blocks, sstable_metrics.sstable_writes.load() });
+    std.debug.print("DEBUG: After phase 2 - Memtable blocks: {}, SSTable writes: {}\n", .{ memtable_blocks, sstable_metrics.sstable_writes.load() });
 
     // Verify all blocks are recoverable (blocks in SSTable + WAL)
     // Note: block_count() only shows memtable blocks, not SSTable blocks
@@ -311,9 +313,9 @@ test "recovery from mixed segments and sstables" {
         }
     }
 
-    test_config.debug_print("DEBUG: Found {}/75 blocks\n", .{found_blocks});
+    std.debug.print("DEBUG: Found {}/75 blocks\n", .{found_blocks});
     if (not_found_list.items.len > 0) {
-        test_config.debug_print("DEBUG: Missing blocks: ", .{});
+        std.debug.print("DEBUG: Missing blocks: ", .{});
         for (not_found_list.items, 0..) |block_id, idx| {
             if (idx > 0) std.debug.print(", ", .{});
             std.debug.print("{}", .{block_id});
@@ -348,7 +350,7 @@ test "recovery from mixed segments and sstables" {
 test "segment number persistence" {
     const allocator = std.testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 22222, "wal_segment_persistence");
+    var harness = try SimulationHarness.init_and_startup(allocator, 22222, "wal_segment_persistence");
     defer harness.deinit();
 
     // Write enough to create multiple segments
@@ -418,7 +420,7 @@ test "segment number persistence" {
 test "empty segment handling" {
     const allocator = std.testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 33333, "wal_empty_segments");
+    var harness = try SimulationHarness.init_and_startup(allocator, 33333, "wal_empty_segments");
     defer harness.deinit();
 
     // Just flush without writing anything

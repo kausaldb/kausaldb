@@ -6,17 +6,20 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
 const log = std.log.scoped(.stress_memory);
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const Simulation = kausaldb.simulation.Simulation;
-const SimulationHarness = kausaldb.SimulationHarness;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const TestData = kausaldb.TestData;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const Simulation = simulation.Simulation;
+const SimulationHarness = test_harness.SimulationHarness;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
 
 test "memory isolation with 5 storage cycles" {
     var cycle: u32 = 0;

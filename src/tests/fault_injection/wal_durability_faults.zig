@@ -14,14 +14,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const scenarios = @import("../../testing/scenarios.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
 const testing = std.testing;
-const test_config = kausaldb.test_config;
-const vfs = kausaldb.vfs;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
-const types = kausaldb.types;
 
 const StorageEngine = storage.StorageEngine;
 const WAL = storage.WAL;
@@ -29,8 +29,8 @@ const WALEntry = storage.WALEntry;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const TestData = kausaldb.TestData;
-const StorageHarness = kausaldb.StorageHarness;
+const TestData = test_harness.TestData;
+const StorageHarness = test_harness.StorageHarness;
 
 /// Generate random BlockId for testing purposes
 fn random_block_id() BlockId {
@@ -639,22 +639,22 @@ test "systematic WAL durability scenarios" {
     const allocator = testing.allocator;
 
     // Run predefined scenario for I/O failures during flush operations
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .io_flush_failures);
+    try scenarios.run_wal_durability_scenario(allocator, .io_flush_failures);
 }
 
 test "systematic WAL torn write scenarios" {
     const allocator = testing.allocator;
 
     // Run predefined scenario for torn writes during WAL entry serialization
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .torn_writes);
+    try scenarios.run_wal_durability_scenario(allocator, .torn_writes);
 }
 
 test "all WAL durability scenario types" {
     const allocator = testing.allocator;
 
     // Demonstrate all available scenario types with explicit enum values
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .io_flush_failures);
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .disk_space_exhaustion);
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .torn_writes);
-    try kausaldb.scenarios.run_wal_durability_scenario(allocator, .sequential_faults);
+    try scenarios.run_wal_durability_scenario(allocator, .io_flush_failures);
+    try scenarios.run_wal_durability_scenario(allocator, .disk_space_exhaustion);
+    try scenarios.run_wal_durability_scenario(allocator, .torn_writes);
+    try scenarios.run_wal_durability_scenario(allocator, .sequential_faults);
 }

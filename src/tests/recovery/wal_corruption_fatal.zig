@@ -6,15 +6,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const wal_corruption_tracker = @import("../../storage/wal/corruption_tracker.zig");
 
-const corruption_tracker_mod = kausaldb.wal.corruption_tracker;
 const testing = std.testing;
 
-const CorruptionTracker = corruption_tracker_mod.CorruptionTracker;
+const CorruptionTracker = wal_corruption_tracker.CorruptionTracker;
 
-const WAL_MAGIC_NUMBER = corruption_tracker_mod.WAL_MAGIC_NUMBER;
-const WAL_ENTRY_MAGIC = corruption_tracker_mod.WAL_ENTRY_MAGIC;
+const WAL_MAGIC_NUMBER = wal_corruption_tracker.WAL_MAGIC_NUMBER;
+const WAL_ENTRY_MAGIC = wal_corruption_tracker.WAL_ENTRY_MAGIC;
 
 test "normal operation no fatal assertions" {
     var tracker = CorruptionTracker.init_testing();

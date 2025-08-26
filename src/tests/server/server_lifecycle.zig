@@ -9,21 +9,21 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const production_vfs = @import("../../core/production_vfs.zig");
+const query_engine_mod = @import("../../query/engine.zig");
+const server_handler = @import("../../server/handler.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const vfs = @import("../../core/vfs.zig");
 
 const testing = std.testing;
 
-const test_config = kausaldb.test_config;
-const vfs = kausaldb.vfs;
-const production_vfs = kausaldb.production_vfs;
-const simulation_vfs = kausaldb.simulation_vfs;
-
-const StorageEngine = kausaldb.StorageEngine;
-const QueryEngine = kausaldb.QueryEngine;
-const Server = kausaldb.handler.Server;
-const ServerConfig = kausaldb.handler.ServerConfig;
-const SimulationVFS = simulation_vfs.SimulationVFS;
 const ProductionVFS = production_vfs.ProductionVFS;
+const QueryEngine = query_engine_mod.QueryEngine;
+const Server = server_handler.Server;
+const ServerConfig = server_handler.ServerConfig;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
 
 /// Test server with complete lifecycle management
 const TestServer = struct {
@@ -131,7 +131,7 @@ test "server startup and shutdown with ProductionVFS" {
     try testing.expect(bound_port > 0);
     try testing.expect(bound_port != server_config.port); // Should be different from 0
 
-    test_config.debug_print("Server bound to port: {d}\n", .{bound_port});
+    std.debug.print("Server bound to port: {d}\n", .{bound_port});
 
     // Test graceful shutdown
     test_server.shutdown();

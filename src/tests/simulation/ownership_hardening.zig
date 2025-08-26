@@ -6,18 +6,21 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const ownership = @import("../../core/ownership.zig");
+const simulation = @import("../../sim/simulation.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const ownership = kausaldb.ownership;
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const Simulation = kausaldb.simulation.Simulation;
-const SimulationHarness = kausaldb.SimulationHarness;
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
+const assert = assert_mod.assert;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const Simulation = simulation.Simulation;
+const SimulationHarness = test_harness.SimulationHarness;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 test "cross-subsystem memory access violation detection" {
     const allocator = testing.allocator;
@@ -194,7 +197,7 @@ test "fail-fast behavior verification" {
     const owned_block = ownership.OwnedBlock.take_ownership(test_block, .storage_engine);
 
     // Test various violation types
-    const violation_types = [_]kausaldb.simulation.OwnershipViolationInjector.ViolationType{
+    const violation_types = [_]simulation.OwnershipViolationInjector.ViolationType{
         .cross_subsystem_read,
         .cross_subsystem_write,
         .dangling_arena_access,

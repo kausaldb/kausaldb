@@ -10,23 +10,24 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const simulation = kausaldb.simulation;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
+const assert = assert_mod.assert;
+const ContextBlock = types.ContextBlock;
+const BlockId = types.BlockId;
 const StorageEngine = storage.StorageEngine;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 const WAL = storage.WAL;
 const WALEntry = storage.WALEntry;
 const WALEntryType = storage.WALEntryType;
 const WALError = storage.WALError;
-const ContextBlock = types.ContextBlock;
-const BlockId = types.BlockId;
-const TestData = kausaldb.TestData;
-const StorageHarness = kausaldb.StorageHarness;
 
 // WAL constants from corruption_tracker.zig
 const WAL_MAGIC_NUMBER: u32 = 0x574C4147; // "WLAG"
@@ -44,7 +45,7 @@ const MAX_SEGMENT_SIZE: u64 = 64 * 1024 * 1024; // 64MB
 test "segment header magic corruption detection" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "segment_header_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "segment_header_test");
     defer harness.deinit();
 
     const wal_dir = "segment_header_test";
@@ -121,7 +122,7 @@ test "segment header magic corruption detection" {
 test "cross-segment entry corruption recovery" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "cross_segment_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "cross_segment_test");
     defer harness.deinit();
 
     const wal_dir = "cross_segment_test";
@@ -227,7 +228,7 @@ test "cross-segment entry corruption recovery" {
 test "inter-segment boundary checksum corruption" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "boundary_checksum_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "boundary_checksum_test");
     defer harness.deinit();
 
     const wal_dir = "boundary_checksum_test";
@@ -340,7 +341,7 @@ test "inter-segment boundary checksum corruption" {
 test "segment rotation during corruption scenario" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "rotation_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "rotation_corruption_test");
     defer harness.deinit();
 
     const wal_dir = "rotation_corruption_test";
@@ -445,7 +446,7 @@ test "segment rotation during corruption scenario" {
 test "partial segment recovery with mixed corruption" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "mixed_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "mixed_corruption_test");
     defer harness.deinit();
 
     const wal_dir = "mixed_corruption_test";

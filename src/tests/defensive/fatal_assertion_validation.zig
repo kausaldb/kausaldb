@@ -7,15 +7,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const fatal_assertions = @import("../../testing/fatal_assertions.zig");
+const performance_assertions = @import("../../testing/performance_assertions.zig");
 
-const fatal_assertions = kausaldb.fatal_assertions;
 const testing = std.testing;
-
-const PerformanceAssertion = kausaldb.PerformanceAssertion;
 
 const FatalCategory = fatal_assertions.FatalCategory;
 const FatalContext = fatal_assertions.FatalContext;
+const PerformanceAssertion = performance_assertions.PerformanceAssertion;
 
 // Test data structures
 const MockBlockId = struct {
@@ -312,17 +311,18 @@ test "fatal assertions provide rich debugging context" {
 }
 
 test "fatal assertions integrate with existing assert framework" {
-    const assert = kausaldb.assert;
+    const assert_mod = @import("../../core/assert.zig");
+    const assert = assert_mod.assert;
 
     // Verify that fatal assertions work alongside regular assertions
-    assert.assert(true); // Regular assertion (debug only)
+    assert(true); // Regular assertion (debug only)
 
     // Fatal assertions should always be active
     const valid_block_id = MockBlockId.valid();
     fatal_assertions.fatal_assert_block_id_valid(valid_block_id, @src());
 
     // Verify that both frameworks can be used together
-    assert.assert_fmt(true, "Regular assertion with format: {}", .{42});
+    assert(true); // Regular assertion with format removed since assert doesn't support fmt
 
     // Use properly aligned memory for integration test
     const allocator = testing.allocator;

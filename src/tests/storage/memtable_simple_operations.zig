@@ -6,16 +6,19 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const MemtableManager = kausaldb.storage.MemtableManager;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const MemtableManager = storage.MemtableManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 test "put block basic" {
     const allocator = testing.allocator;

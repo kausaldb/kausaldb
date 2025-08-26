@@ -5,27 +5,29 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const query_engine = @import("../../query/engine.zig");
+const simulation = @import("../../sim/simulation.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
-const assert = kausaldb.assert;
-const simulation = kausaldb.simulation;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
 
-const Simulation = simulation.Simulation;
-const NodeId = simulation.NodeId;
-const ContextBlock = types.ContextBlock;
+const assert = assert_mod;
 const BlockId = types.BlockId;
-const GraphEdge = types.GraphEdge;
-const TestData = kausaldb.TestData;
-const StorageHarness = kausaldb.StorageHarness;
-const SimulationHarness = kausaldb.SimulationHarness;
+const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+const NodeId = simulation.NodeId;
+const QueryEngine = query_engine.QueryEngine;
+const SimulationHarness = test_harness.SimulationHarness;
+const Simulation = simulation.Simulation;
 const StorageEngine = storage.StorageEngine;
-const QueryEngine = kausaldb.query_engine.QueryEngine;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 test "high volume writes during network partition" {
     const allocator = std.testing.allocator;

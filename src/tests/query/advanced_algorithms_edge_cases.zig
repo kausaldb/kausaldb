@@ -6,26 +6,33 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const query_engine_mod = @import("../../query/engine.zig");
+const query_traversal = @import("../../query/traversal.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const ContextBlock = kausaldb.ContextBlock;
-const BlockId = kausaldb.BlockId;
-const GraphEdge = kausaldb.GraphEdge;
-const EdgeType = kausaldb.EdgeType;
-const QueryHarness = kausaldb.QueryHarness;
-const TestData = kausaldb.TestData;
-const TraversalQuery = kausaldb.TraversalQuery;
-const TraversalDirection = kausaldb.TraversalDirection;
+const ContextBlock = types.ContextBlock;
+const BlockId = types.BlockId;
+const GraphEdge = types.GraphEdge;
+const EdgeType = types.EdgeType;
+const QueryEngine = query_engine_mod.QueryEngine;
+const QueryHarness = test_harness.QueryHarness;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
+const TraversalQuery = query_traversal.TraversalQuery;
+const TraversalDirection = query_traversal.TraversalDirection;
+const TraversalResult = query_traversal.TraversalResult;
 
 // Helper function for executing traversal queries
 fn execute_traversal(
     allocator: std.mem.Allocator,
-    storage_engine: *kausaldb.StorageEngine,
+    storage_engine: *StorageEngine,
     query: TraversalQuery,
-) !kausaldb.TraversalResult {
-    var query_engine = kausaldb.QueryEngine.init(allocator, storage_engine);
+) !TraversalResult {
+    var query_engine = QueryEngine.init(allocator, storage_engine);
     defer query_engine.deinit();
     query_engine.startup();
     return try query_engine.execute_traversal(query);
@@ -220,7 +227,7 @@ fn create_cyclic_graph(query_harness: *QueryHarness, _: std.mem.Allocator) !stru
 test "A* search disconnected component edge cases" {
     const allocator = testing.allocator;
 
-    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "astar_edge_test");
+    var query_harness = try QueryHarness.init_and_startup(allocator, "astar_edge_test");
     defer query_harness.deinit();
 
     const components = try create_disconnected_components(&query_harness, allocator);
@@ -273,7 +280,7 @@ test "A* search disconnected component edge cases" {
 test "bidirectional search disconnected component scenarios" {
     const allocator = testing.allocator;
 
-    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "bidirectional_edge_test");
+    var query_harness = try QueryHarness.init_and_startup(allocator, "bidirectional_edge_test");
     defer query_harness.deinit();
 
     const components = try create_disconnected_components(&query_harness, allocator);
@@ -458,7 +465,7 @@ test "algorithm robustness malformed input edge cases" {
 test "algorithm performance edge case timing validation" {
     const allocator = testing.allocator;
 
-    var query_harness = try kausaldb.QueryHarness.init_and_startup(allocator, "performance_edge_test");
+    var query_harness = try QueryHarness.init_and_startup(allocator, "performance_edge_test");
     defer query_harness.deinit();
 
     // Create a moderately sized graph for performance testing

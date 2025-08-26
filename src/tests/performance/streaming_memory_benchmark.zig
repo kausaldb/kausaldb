@@ -5,24 +5,25 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const operations = @import("../../query/operations.zig");
+const types = @import("../../core/types.zig");
+const performance_assertions = @import("../../testing/performance_assertions.zig");
+const test_harness = @import("../harness.zig");
 
-const assert = kausaldb.assert.assert;
 const log = std.log.scoped(.streaming_memory_benchmark);
-const operations = kausaldb.query_operations;
-const test_config = kausaldb.test_config;
 const testing = std.testing;
-const types = kausaldb.types;
 
-const BatchPerformanceMeasurement = kausaldb.BatchPerformanceMeasurement;
-const PerformanceAssertion = kausaldb.PerformanceAssertion;
-const PerformanceThresholds = kausaldb.PerformanceThresholds;
+const assert = assert_mod.assert;
+const BatchPerformanceMeasurement = performance_assertions.BatchPerformanceMeasurement;
+const PerformanceAssertion = performance_assertions.PerformanceAssertion;
+const PerformanceThresholds = performance_assertions.PerformanceThresholds;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
-const TestData = kausaldb.TestData;
-const FindBlocksQuery = kausaldb.FindBlocksQuery;
+const TestData = test_harness.TestData;
+const FindBlocksQuery = operations.FindBlocksQuery;
 
 // Performance targets aligned with ProductionVFS benchmark results
 // Base performance targets (local development, optimal conditions)
@@ -43,7 +44,7 @@ test "memory efficiency during large dataset operations" {
 
     // Use simple test database name for simulation
     const db_name = "memory_efficiency_test";
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 0x12345, db_name);
+    var harness = try test_harness.SimulationHarness.init_and_startup(allocator, 0x12345, db_name);
     defer harness.deinit();
 
     // Phase 1: Memory baseline establishment - add a small block to establish non-zero baseline
@@ -156,13 +157,13 @@ test "memory efficiency during large dataset operations" {
 test "query engine performance benchmark" {
     const allocator = testing.allocator;
 
-    test_config.debug_print("DEBUG: Starting query engine performance benchmark\n", .{});
+    std.debug.print("DEBUG: Starting query engine performance benchmark\n", .{});
 
     // Use simulation harness for deterministic testing per architecture standards
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
     defer harness.deinit();
 
-    test_config.debug_print("DEBUG: Harness initialized successfully\n", .{});
+    std.debug.print("DEBUG: Harness initialized successfully\n", .{});
 
     // Phase 1: Setup test data with relationships
     const block_count = 500;
@@ -170,7 +171,7 @@ test "query engine performance benchmark" {
     defer block_ids.deinit();
     try block_ids.ensureTotalCapacity(block_count);
 
-    test_config.debug_print("DEBUG: Starting to create {} blocks\n", .{block_count});
+    std.debug.print("DEBUG: Starting to create {} blocks\n", .{block_count});
 
     // Create blocks using TestData
     for (0..block_count) |i| {
@@ -186,13 +187,13 @@ test "query engine performance benchmark" {
         try block_ids.append(block.id);
 
         if (i % 100 == 0) {
-            test_config.debug_print("DEBUG: Created {} blocks so far\n", .{i + 1});
+            std.debug.print("DEBUG: Created {} blocks so far\n", .{i + 1});
         }
     }
 
-    test_config.debug_print("DEBUG: Finished creating {} blocks\n", .{block_count});
+    std.debug.print("DEBUG: Finished creating {} blocks\n", .{block_count});
 
-    test_config.debug_print("DEBUG: Starting to create {} edges\n", .{block_count - 1});
+    std.debug.print("DEBUG: Starting to create {} edges\n", .{block_count - 1});
 
     // Create edges for graph traversal testing
     for (0..block_count - 1) |i| {
@@ -204,11 +205,11 @@ test "query engine performance benchmark" {
         try harness.storage().put_edge(edge);
 
         if (i % 100 == 0) {
-            test_config.debug_print("DEBUG: Created {} edges so far\n", .{i + 1});
+            std.debug.print("DEBUG: Created {} edges so far\n", .{i + 1});
         }
     }
 
-    test_config.debug_print("DEBUG: Finished creating edges, starting single query tests\n", .{});
+    std.debug.print("DEBUG: Finished creating edges, starting single query tests\n", .{});
 
     // Phase 3: Single block query performance
     var single_measurement = BatchPerformanceMeasurement.init(allocator);
@@ -269,11 +270,11 @@ test "query engine performance benchmark" {
     }
 
     // Pass base requirement directly to assert_statistics - it will apply tier multiplier internally
-    test_config.debug_print("DEBUG: About to call assert_statistics with target={}ns (base: {}ns)\n", .{ BASE_BATCH_QUERY_LATENCY_NS * 2, BASE_BATCH_QUERY_LATENCY_NS });
+    std.debug.print("DEBUG: About to call assert_statistics with target={}ns (base: {}ns)\n", .{ BASE_BATCH_QUERY_LATENCY_NS * 2, BASE_BATCH_QUERY_LATENCY_NS });
 
     try batch_measurement.assert_statistics("query_engine_batch", BASE_BATCH_QUERY_LATENCY_NS, "batch block query");
 
-    test_config.debug_print("DEBUG: Successfully completed batch query assertions\n", .{});
+    std.debug.print("DEBUG: Successfully completed batch query assertions\n", .{});
 
     log.info("Query performance completed successfully", .{});
 }
@@ -284,7 +285,7 @@ test "storage engine write throughput measurement" {
     var perf_assertion = PerformanceAssertion.init("write_throughput");
 
     // Use simulation harness for deterministic testing per architecture standards
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
     defer harness.deinit();
 
     // Phase 1: Single block write performance
@@ -369,7 +370,7 @@ test "streaming query result formatting performance" {
     var perf_assertion = PerformanceAssertion.init("streaming_format");
 
     // Use simulation harness for deterministic testing per architecture standards
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
     defer harness.deinit();
 
     // Phase 1: Setup diverse dataset
@@ -449,7 +450,7 @@ test "memory usage growth patterns under load" {
     const perf_assertion = PerformanceAssertion.init("memory_growth");
 
     // Use simulation harness for deterministic testing per architecture standards
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "streaming_memory_test");
     defer harness.deinit();
 
     // Prevent unused variable warning until memory assertions are implemented

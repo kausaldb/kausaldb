@@ -10,19 +10,22 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const log = std.log.scoped(.arena_safety);
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const MemtableManager = kausaldb.storage.MemtableManager;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
+const assert = assert_mod.assert;
+const log = std.log.scoped(.arena_safety);
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 test "memtable manager lifecycle safety" {
     // Use GPA with safety checks to detect any memory corruption
@@ -112,7 +115,7 @@ test "error path memory cleanup" {
 test "memory fragmentation stress" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "frag_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "frag_test");
     defer harness.deinit();
 
     // Create varied-size allocations to test fragmentation handling

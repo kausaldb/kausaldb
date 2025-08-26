@@ -10,10 +10,7 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
-
 const testing = std.testing;
-const test_config = kausaldb.test_config;
 
 // Create mock CLI interface for testing since CLI module is not exposed through kausaldb
 const MockCLI = struct {
@@ -839,5 +836,5 @@ test "CLI performance characteristics" {
     const max_time_per_parse_ns = 10_000; // 10µs
     try testing.expect(avg_time_per_parse < max_time_per_parse_ns);
 
-    test_config.debug_print("CLI parsing performance: {} ns average per parse\n", .{avg_time_per_parse});
+    std.debug.print("CLI parsing performance: {} ns average per parse\n", .{avg_time_per_parse});
 }

@@ -5,20 +5,26 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const query_engine_mod = @import("../../query/engine.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
+const assert = assert_mod.assert;
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const EdgeType = kausaldb.types.EdgeType;
-const GraphEdge = kausaldb.types.GraphEdge;
-const QueryEngine = kausaldb.query_engine.QueryEngine;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+const QueryEngine = query_engine_mod.QueryEngine;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const SimulationHarness = test_harness.SimulationHarness;
+const StorageEngine = storage.StorageEngine;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 /// Test recovery context to capture recovered entries
 const RecoveryContext = struct {
@@ -59,7 +65,7 @@ const RecoveryContext = struct {
 test "streaming recovery basic" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 0xDEADBEEF, "streaming_test_dir");
+    var harness = try SimulationHarness.init_and_startup(allocator, 0xDEADBEEF, "streaming_test_dir");
     defer harness.deinit();
 
     // Create and store test data using standardized TestData
@@ -116,7 +122,7 @@ test "streaming recovery basic" {
 test "streaming recovery large entries" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 0xCAFEBABE, "large_entries_test_dir");
+    var harness = try SimulationHarness.init_and_startup(allocator, 0xCAFEBABE, "large_entries_test_dir");
     defer harness.deinit();
 
     // Create block with large content that exceeds typical buffer sizes
@@ -169,7 +175,7 @@ test "streaming recovery large entries" {
 test "streaming recovery memory efficiency" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 0xFEEDFACE, "memory_efficiency_test_dir");
+    var harness = try SimulationHarness.init_and_startup(allocator, 0xFEEDFACE, "memory_efficiency_test_dir");
     defer harness.deinit();
 
     // Create many entries to test memory efficiency
@@ -211,7 +217,7 @@ test "streaming recovery memory efficiency" {
 test "streaming recovery empty WAL" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.SimulationHarness.init_and_startup(allocator, 0xBEEFFEED, "empty_wal_test_dir");
+    var harness = try SimulationHarness.init_and_startup(allocator, 0xBEEFFEED, "empty_wal_test_dir");
     defer harness.deinit();
 
     // Don't write any data - WAL should be empty

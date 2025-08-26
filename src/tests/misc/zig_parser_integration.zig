@@ -5,16 +5,20 @@
 //! without depending on implementation-specific methods.
 
 const std = @import("std");
-const kausaldb = @import("kausaldb");
+
+const pipeline = @import("../../ingestion/pipeline.zig");
+const types = @import("../../core/types.zig");
+const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
+
 const testing = std.testing;
 
-const IngestionPipeline = kausaldb.pipeline.IngestionPipeline;
-const Parser = kausaldb.pipeline.Parser;
-const ParsedUnit = kausaldb.pipeline.ParsedUnit;
-const SourceContent = kausaldb.pipeline.SourceContent;
-const ZigParser = kausaldb.zig_parser.ZigParser;
-const ZigParserConfig = kausaldb.zig_parser.ZigParserConfig;
-const EdgeType = kausaldb.types.EdgeType;
+const IngestionPipeline = pipeline.IngestionPipeline;
+const Parser = pipeline.Parser;
+const ParsedUnit = pipeline.ParsedUnit;
+const SourceContent = pipeline.SourceContent;
+const ZigParser = zig_parser_mod.ZigParser;
+const ZigParserConfig = zig_parser_mod.ZigParserConfig;
+const EdgeType = types.EdgeType;
 
 test "parser extracts functions and creates call edges" {
     const allocator = testing.allocator;

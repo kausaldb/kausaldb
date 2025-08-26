@@ -10,20 +10,21 @@
 //! development cycles.
 
 const std = @import("std");
+
+const golden_master = @import("../testing/golden_master.zig");
+const harness = @import("harness.zig");
+const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const storage = @import("../storage/engine.zig");
+const types = @import("../core/types.zig");
+const vfs = @import("../core/vfs.zig");
+
 const testing = std.testing;
 
-const kausaldb = @import("kausaldb");
-
-const golden_master = kausaldb.golden_master;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
-const types = kausaldb.types;
-
-const StorageEngine = storage.StorageEngine;
-const SimulationVFS = simulation_vfs.SimulationVFS;
 const ContextBlock = types.ContextBlock;
-const TestData = kausaldb.TestData;
-const VFS = kausaldb.VFS;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const TestData = harness.TestData;
+const VFS = vfs.VFS;
 
 const GoldenMasterSuite = struct {
     allocator: std.mem.Allocator,
@@ -32,10 +33,10 @@ const GoldenMasterSuite = struct {
 
     const Self = @This();
 
-    fn init(allocator: std.mem.Allocator, vfs: *const VFS) Self {
+    fn init(allocator: std.mem.Allocator, vfs_instance: *const VFS) Self {
         return .{
             .allocator = allocator,
-            .vfs = vfs,
+            .vfs = vfs_instance,
             .golden_masters_dir = "tests/golden_masters",
         };
     }
@@ -206,8 +207,8 @@ test "validate all golden masters" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    const vfs = sim_vfs.vfs();
-    var suite = GoldenMasterSuite.init(allocator, &vfs);
+    const vfs_instance = sim_vfs.vfs();
+    var suite = GoldenMasterSuite.init(allocator, &vfs_instance);
     try suite.run_all_golden_masters();
 }
 
@@ -218,8 +219,8 @@ test "wal single block recovery golden master" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    const vfs = sim_vfs.vfs();
-    var suite = GoldenMasterSuite.init(allocator, &vfs);
+    const vfs_instance = sim_vfs.vfs();
+    var suite = GoldenMasterSuite.init(allocator, &vfs_instance);
 
     // Execute specific golden master for focused testing
     suite.execute_recovery_scenario("wal_single_block_recovery") catch |err| switch (err) {

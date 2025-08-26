@@ -6,17 +6,19 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const arena = @import("../../core/arena.zig");
+const ownership = @import("../../core/ownership.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const ArenaOwnership = kausaldb.arena.ArenaOwnership;
-const BlockId = kausaldb.core_types.BlockId;
-const BlockOwnership = kausaldb.ownership.BlockOwnership;
-const ContextBlock = kausaldb.core_types.ContextBlock;
-const OwnedBlock = kausaldb.ownership.OwnedBlock;
-const OwnedBlockCollection = kausaldb.ownership.OwnedBlockCollection;
-const TypedArenaType = kausaldb.arena.TypedArenaType;
+const ArenaOwnership = arena.ArenaOwnership;
+const BlockId = types.BlockId;
+const BlockOwnership = ownership.BlockOwnership;
+const ContextBlock = types.ContextBlock;
+const OwnedBlock = ownership.OwnedBlock;
+const OwnedBlockCollection = ownership.OwnedBlockCollection;
+const TypedArenaType = arena.TypedArenaType;
 
 // Test subsystem simulators
 const MemtableSubsystem = struct {
@@ -306,27 +308,27 @@ test "large scale ownership operations" {
 test "memory accounting accuracy" {
     if (builtin.mode != .Debug) return; // Debug info only available in debug mode
 
-    var arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
-    defer arena.deinit();
+    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    defer test_arena.deinit();
 
     // Check initial state
-    var info = arena.debug_info();
+    var info = test_arena.debug_info();
     try testing.expect(info.allocation_count == 0);
     try testing.expect(info.total_bytes == 0);
 
     // Allocate some blocks
-    _ = try arena.alloc(); // 1 block
-    _ = try arena.alloc_slice(3); // 3 blocks
-    _ = try arena.alloc(); // 1 more block
+    _ = try test_arena.alloc(); // 1 block
+    _ = try test_arena.alloc_slice(3); // 3 blocks
+    _ = try test_arena.alloc(); // 1 more block
 
     // Check accounting
-    info = arena.debug_info();
+    info = test_arena.debug_info();
     try testing.expect(info.allocation_count == 5); // 1 + 3 + 1
     try testing.expect(info.total_bytes == 5 * @sizeOf(ContextBlock));
 
     // Reset and verify cleanup
-    arena.reset();
-    info = arena.debug_info();
+    test_arena.reset();
+    info = test_arena.debug_info();
     try testing.expect(info.allocation_count == 0);
     try testing.expect(info.total_bytes == 0);
 }

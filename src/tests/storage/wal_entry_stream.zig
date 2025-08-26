@@ -6,20 +6,21 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const vfs = @import("../../core/vfs.zig");
+const wal_stream = @import("../../storage/wal/stream.zig");
 
-const assert = kausaldb.assert.assert;
-const simulation_vfs = kausaldb.simulation_vfs;
 const testing = std.testing;
-const vfs = kausaldb.vfs;
 
-const StreamEntry = kausaldb.wal.stream.StreamEntry;
-const StreamError = kausaldb.wal.stream.StreamError;
-const WALEntryStream = kausaldb.wal.stream.WALEntryStream;
+const assert = assert_mod.assert;
+const StreamEntry = wal_stream.StreamEntry;
+const StreamError = wal_stream.StreamError;
+const WALEntryStream = wal_stream.WALEntryStream;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 
 /// Helper to create a valid WAL entry header + payload using VFile directly
-fn create_wal_entry(file: *kausaldb.vfs.VFile, entry_type: u8, payload: []const u8) !void {
+fn create_wal_entry(file: *vfs.VFile, entry_type: u8, payload: []const u8) !void {
     // Calculate checksum over type + payload (matching WAL implementation)
     var hasher = std.hash.Wyhash.init(0);
     hasher.update(&[_]u8{entry_type});

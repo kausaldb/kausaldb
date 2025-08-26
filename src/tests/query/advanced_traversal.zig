@@ -10,23 +10,26 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const query_traversal = @import("../../query/traversal.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const execute_traversal = kausaldb.query.traversal.execute_traversal;
-const test_config = kausaldb.test_config;
 const testing = std.testing;
 
-const BlockId = kausaldb.BlockId;
-const ContextBlock = kausaldb.ContextBlock;
-const EdgeType = kausaldb.EdgeType;
-const GraphEdge = kausaldb.GraphEdge;
-const QueryHarness = kausaldb.QueryHarness;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.StorageEngine;
-const TestData = kausaldb.TestData;
-const TraversalAlgorithm = kausaldb.query.traversal.TraversalAlgorithm;
-const TraversalDirection = kausaldb.query.traversal.TraversalDirection;
-const TraversalQuery = kausaldb.query.traversal.TraversalQuery;
+const execute_traversal = query_traversal.execute_traversal;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+const QueryHarness = test_harness.QueryHarness;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
+const TraversalAlgorithm = query_traversal.TraversalAlgorithm;
+const TraversalDirection = query_traversal.TraversalDirection;
+const TraversalQuery = query_traversal.TraversalQuery;
 
 test "A* search integration with storage engine" {
     // Arena allocator for complex graph traversal test with many temporary allocations
@@ -91,7 +94,7 @@ test "A* search integration with storage engine" {
     };
 
     // Execute A* search (use testing.allocator for result to ensure proper cleanup detection)
-    const result = try kausaldb.query.traversal.execute_traversal(testing.allocator, harness.storage(), astar_query);
+    const result = try execute_traversal(testing.allocator, harness.storage(), astar_query);
     defer result.deinit();
 
     // Verify A* found optimal paths
@@ -109,7 +112,7 @@ test "A* search integration with storage engine" {
     }
     try testing.expect(found_main);
 
-    test_config.debug_print("A* search found {} blocks, traversed {} nodes\n", .{ result.count(), result.blocks_traversed });
+    std.debug.print("A* search found {} blocks, traversed {} nodes\n", .{ result.count(), result.blocks_traversed });
 }
 
 test "bidirectional search integration and performance" {
@@ -161,7 +164,7 @@ test "bidirectional search integration and performance" {
     };
 
     const start_time = std.time.nanoTimestamp();
-    const result = try kausaldb.query.traversal.execute_traversal(testing.allocator, harness.storage(), bidirectional_query);
+    const result = try execute_traversal(testing.allocator, harness.storage(), bidirectional_query);
     defer result.deinit();
     const end_time = std.time.nanoTimestamp();
 
@@ -176,7 +179,7 @@ test "bidirectional search integration and performance" {
     const max_time_us = 5000; // 5ms for 20 nodes should be plenty
     try testing.expect(execution_time_us < max_time_us);
 
-    test_config.debug_print("Bidirectional search: {} blocks found, {} traversed, {}μs execution time\n", .{ result.count(), result.blocks_traversed, execution_time_us });
+    std.debug.print("Bidirectional search: {} blocks found, {} traversed, {}μs execution time\n", .{ result.count(), result.blocks_traversed, execution_time_us });
 }
 
 test "algorithm comparison BFS vs DFS vs A* vs Bidirectional" {
@@ -234,7 +237,7 @@ test "algorithm comparison BFS vs DFS vs A* vs Bidirectional" {
         };
 
         const start_time = std.time.nanoTimestamp();
-        const result = try kausaldb.query.traversal.execute_traversal(testing.allocator, harness.storage(), traversal_query);
+        const result = try execute_traversal(testing.allocator, harness.storage(), traversal_query);
         defer result.deinit();
         const end_time = std.time.nanoTimestamp();
 
@@ -249,7 +252,7 @@ test "algorithm comparison BFS vs DFS vs A* vs Bidirectional" {
             try testing.expect(execution_time_us < 10000); // All should be under 10ms
         }
 
-        test_config.debug_print("{s}: {} blocks, {} traversed, {}μs\n", .{ name, result.count(), result.blocks_traversed, execution_time_us });
+        std.debug.print("{s}: {} blocks, {} traversed, {}μs\n", .{ name, result.count(), result.blocks_traversed, execution_time_us });
     }
 }
 
@@ -304,7 +307,7 @@ test "large graph traversal with new algorithms" {
     };
 
     const start_time = std.time.nanoTimestamp();
-    const result = try kausaldb.query.traversal.execute_traversal(testing.allocator, harness.storage(), astar_query);
+    const result = try execute_traversal(testing.allocator, harness.storage(), astar_query);
     defer result.deinit();
     const end_time = std.time.nanoTimestamp();
 
@@ -322,14 +325,14 @@ test "large graph traversal with new algorithms" {
     try testing.expect(result.count() <= 100); // Respects max_results
     try testing.expect(result.max_depth_reached <= 6); // Respects max_depth
 
-    test_config.debug_print("Large graph A* search: {} blocks found in {}ms\n", .{ result.count(), execution_time_ms });
+    std.debug.print("Large graph A* search: {} blocks found in {}ms\n", .{ result.count(), execution_time_ms });
 }
 
 test "edge type filtering integration" {
     const allocator = testing.allocator;
 
     // Use StorageHarness for coordinated VFS and storage setup
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "test_edge_filtering");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "test_edge_filtering");
     defer harness.deinit();
 
     // Create blocks
@@ -393,14 +396,14 @@ test "edge type filtering integration" {
     // Should find blocks 1, 3, 6 (connected by imports edges)
     try testing.expect(imports_result.count() >= 3);
 
-    test_config.debug_print("Edge filtering: {} calls-filtered, {} imports-filtered\n", .{ calls_result.count(), imports_result.count() });
+    std.debug.print("Edge filtering: {} calls-filtered, {} imports-filtered\n", .{ calls_result.count(), imports_result.count() });
 }
 
 test "memory safety under stress with new algorithms" {
     const allocator = testing.allocator;
 
     // Use StorageHarness for coordinated VFS and storage setup
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "test_memory_safety");
+    var harness = try test_harness.StorageHarness.init_and_startup(allocator, "test_memory_safety");
     defer harness.deinit();
 
     // Create a moderate graph
@@ -469,5 +472,5 @@ test "memory safety under stress with new algorithms" {
 
     // If we reach here, memory management is working correctly
     try testing.expect(true);
-    test_config.debug_print("Memory safety stress test: 40 traversals completed successfully\n", .{});
+    std.debug.print("Memory safety stress test: 40 traversals completed successfully\n", .{});
 }

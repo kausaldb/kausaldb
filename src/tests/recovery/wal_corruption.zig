@@ -6,14 +6,15 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const fatal_assert = kausaldb.assert.fatal_assert;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
+const assert = assert_mod.assert;
+const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const WAL = storage.WAL;
 const WALEntry = storage.WALEntry;
@@ -23,8 +24,8 @@ const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
-const TestData = kausaldb.TestData;
-const StorageHarness = kausaldb.StorageHarness;
+const TestData = test_harness.TestData;
+const StorageHarness = test_harness.StorageHarness;
 
 // Defensive limits to prevent runaway tests
 const MAX_TEST_DURATION_MS = 5000;
@@ -45,7 +46,7 @@ fn create_test_block_from_int(id_int: u32, content: []const u8) ContextBlock {
 test "magic number detection" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "magic_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "magic_corruption_test");
     defer harness.deinit();
 
     const wal_dir = "magic_corruption_test";
@@ -119,7 +120,7 @@ test "magic number detection" {
 test "systematic checksum failures" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "systematic_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "systematic_corruption_test");
     defer harness.deinit();
 
     // Write enough entries to trigger systematic corruption detection
@@ -175,7 +176,7 @@ test "systematic checksum failures" {
 test "boundary conditions" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "boundary_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "boundary_corruption_test");
     defer harness.deinit();
 
     const wal_dir = "boundary_corruption_test";
@@ -229,7 +230,7 @@ test "boundary conditions" {
 test "recovery partial success" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "partial_recovery_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "partial_recovery_test");
     defer harness.deinit();
 
     const wal_dir = "partial_recovery_test";
@@ -334,7 +335,7 @@ test "recovery partial success" {
 test "large entry handling" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "large_entry_corruption_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "large_entry_corruption_test");
     defer harness.deinit();
 
     const wal_dir = "large_entry_corruption_test";
@@ -413,7 +414,7 @@ test "defensive timeout recovery" {
 
     const start_time = std.time.milliTimestamp();
 
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "timeout_recovery_test");
+    var harness = try StorageHarness.init_and_startup(allocator, "timeout_recovery_test");
     defer harness.deinit();
 
     const wal_dir = "timeout_recovery_test";

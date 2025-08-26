@@ -11,14 +11,13 @@
 //! in error handling and recovery mechanisms.
 
 const std = @import("std");
+
+const scenarios = @import("../testing/scenarios.zig");
+const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const storage = @import("../storage/engine.zig");
+const types = @import("../core/types.zig");
+
 const testing = std.testing;
-
-const kausaldb = @import("kausaldb");
-
-const scenarios = kausaldb.scenarios;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
-const types = kausaldb.types;
 
 const StorageEngine = storage.StorageEngine;
 const SimulationVFS = simulation_vfs.SimulationVFS;

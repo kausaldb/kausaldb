@@ -12,10 +12,10 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
 
-const assert = kausaldb.assert;
-const assert_fmt = assert.assert_fmt;
+const assert = assert_mod;
+const assert_fmt = assert_mod.assert_fmt;
 
 /// Configuration for torture test parameters
 pub const TortureTestConfig = struct {

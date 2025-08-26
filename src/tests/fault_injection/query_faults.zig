@@ -12,13 +12,12 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = storage.StorageEngine;

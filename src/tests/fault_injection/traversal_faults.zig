@@ -15,14 +15,15 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const query_engine = @import("../../query/engine.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert;
-const query_engine = kausaldb.query_engine;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
+
+const assert = assert_mod.assert;
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = storage.StorageEngine;

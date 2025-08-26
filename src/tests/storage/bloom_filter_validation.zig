@@ -5,13 +5,15 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const bloom_filter_mod = @import("../../storage/bloom_filter.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
-const types = kausaldb.types;
 
-const BloomFilter = kausaldb.bloom_filter.BloomFilter;
+const BloomFilter = bloom_filter_mod.BloomFilter;
 const BlockId = types.BlockId;
+const TestData = test_harness.TestData;
 
 test "add query basic" {
     const allocator = testing.allocator;
@@ -21,7 +23,7 @@ test "add query basic" {
     defer filter.deinit();
 
     // Create test block ID using standardized test data
-    const test_id = kausaldb.TestData.deterministic_block_id(1);
+    const test_id = TestData.deterministic_block_id(1);
 
     // Test add operation
     filter.add(test_id);
@@ -38,7 +40,7 @@ test "query missing item" {
     defer filter.deinit();
 
     // Test querying item that was never added using standardized test data
-    const missing_id = kausaldb.TestData.deterministic_block_id(99);
+    const missing_id = TestData.deterministic_block_id(99);
 
     // Should return false (no false negatives in Bloom filters)
     try testing.expect(!filter.might_contain(missing_id));
@@ -54,7 +56,7 @@ test "multiple items basic" {
     // Add multiple items using standardized test data
     var test_ids: [5]BlockId = undefined;
     for (&test_ids, 0..) |*id, i| {
-        id.* = kausaldb.TestData.deterministic_block_id(@intCast(i + 1));
+        id.* = TestData.deterministic_block_id(@intCast(i + 1));
         filter.add(id.*);
     }
 

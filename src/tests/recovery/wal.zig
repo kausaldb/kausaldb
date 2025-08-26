@@ -5,13 +5,13 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const golden_master = @import("../../testing/golden_master.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const golden_master = kausaldb.golden_master;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
@@ -19,14 +19,14 @@ const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = storage.StorageEngine;
-const TestData = kausaldb.TestData;
-const StorageHarness = kausaldb.StorageHarness;
+const TestData = test_harness.TestData;
+const StorageHarness = test_harness.StorageHarness;
 
 test "wal recovery with empty directory" {
     const allocator = testing.allocator;
 
     // Use StorageHarness for coordinated setup
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "wal_empty_data");
+    var harness = try StorageHarness.init_and_startup(allocator, "wal_empty_data");
     defer harness.deinit();
 
     try testing.expectEqual(@as(u32, 0), harness.storage_engine.block_count());
@@ -36,7 +36,7 @@ test "wal recovery with missing wal directory" {
     const allocator = testing.allocator;
 
     // Use StorageHarness for coordinated setup
-    var harness = try kausaldb.StorageHarness.init_and_startup(allocator, "wal_missing_data");
+    var harness = try StorageHarness.init_and_startup(allocator, "wal_missing_data");
     defer harness.deinit();
 
     // Don't call startup() to avoid creating WAL directory

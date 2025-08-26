@@ -7,14 +7,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert;
-const simulation = kausaldb.simulation;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
+const assert = assert_mod;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const GraphEdge = types.GraphEdge;

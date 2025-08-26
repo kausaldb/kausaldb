@@ -12,15 +12,15 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const memory = @import("../../core/memory.zig");
+const ownership = @import("../../core/ownership.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const stdx = @import("../../core/stdx.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
-const ownership = kausaldb.ownership;
-const simulation_vfs = kausaldb.simulation_vfs;
-const stdx = kausaldb.stdx;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
 
 const StorageEngine = storage.StorageEngine;
 const MemtableManager = storage.MemtableManager;
@@ -247,7 +247,7 @@ test "WAL cleanup isolated memtable manager fault injection" {
 
     var test_arena = std.heap.ArenaAllocator.init(allocator);
     defer test_arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&test_arena);
+    const coordinator = memory.ArenaCoordinator.init(&test_arena);
     var memtable = try MemtableManager.init(&coordinator, allocator, sim_vfs.vfs(), "/test/isolated_wal_4", 64 * 1024);
     defer memtable.deinit();
     try memtable.startup();

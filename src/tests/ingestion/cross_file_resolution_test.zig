@@ -4,13 +4,17 @@
 //! Tests semantic extraction, error handling, and basic edge creation.
 
 const std = @import("std");
-const kausaldb = @import("kausaldb");
+
+const pipeline = @import("../../ingestion/pipeline.zig");
+const types = @import("../../core/types.zig");
+const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
+
 const testing = std.testing;
 
-const ZigParser = kausaldb.zig_parser.ZigParser;
-const ZigParserConfig = kausaldb.zig_parser.ZigParserConfig;
-const SourceContent = kausaldb.pipeline.SourceContent;
-const EdgeType = kausaldb.types.EdgeType;
+const ZigParser = zig_parser_mod.ZigParser;
+const ZigParserConfig = zig_parser_mod.ZigParserConfig;
+const SourceContent = pipeline.SourceContent;
+const EdgeType = types.EdgeType;
 
 test "parser handles realistic zig file structure" {
     const allocator = testing.allocator;

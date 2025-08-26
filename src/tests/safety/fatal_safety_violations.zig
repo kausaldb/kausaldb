@@ -6,17 +6,19 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
-const storage = kausaldb.storage;
 const testing = std.testing;
 
-const BlockId = kausaldb.BlockId;
-const ContextBlock = kausaldb.ContextBlock;
-const SimulationVFS = kausaldb.SimulationVFS;
-const StorageEngine = kausaldb.StorageEngine;
-const VFS = kausaldb.VFS;
-const VFile = kausaldb.VFile;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const VFS = vfs.VFS;
+const VFile = vfs.VFile;
 
 // Test that arena state validation triggers fatal assertion in storage components
 test "arena corruption detection through storage engine" {

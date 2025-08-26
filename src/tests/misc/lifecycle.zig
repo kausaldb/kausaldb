@@ -8,18 +8,22 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
+const test_harness = @import("../harness.zig");
 
-const assert = kausaldb.assert.assert;
 const log = std.log.scoped(.integration_lifecycle);
 const testing = std.testing;
 
-const BlockId = kausaldb.BlockId;
-const ContextBlock = kausaldb.ContextBlock;
-const EdgeType = kausaldb.EdgeType;
-const GraphEdge = kausaldb.GraphEdge;
-const SimulationHarness = kausaldb.SimulationHarness;
-const TestData = kausaldb.TestData;
+const assert = assert_mod.assert;
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const StorageEngine = storage.StorageEngine;
+const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+const SimulationHarness = test_harness.SimulationHarness;
+const TestData = test_harness.TestData;
 
 // Deterministic seed for reproducible testing
 const DETERMINISTIC_SEED: u64 = 0x5EC7E571;
@@ -217,7 +221,7 @@ test "full data lifecycle with compaction" {
     // Validate performance characteristics (be generous with timing in tests)
     try testing.expect(final_metrics.average_write_latency_ns() > 0);
     // Use environment-aware performance assertions for latency validation
-    const perf = kausaldb.PerformanceAssertion.init("data_lifecycle_performance");
+    const perf = @import("../../testing/performance_assertions.zig").PerformanceAssertion.init("data_lifecycle_performance");
     if (final_metrics.average_read_latency_ns() > 0) {
         try perf.assert_latency(final_metrics.average_read_latency_ns(), 50_000_000, "average read latency after compaction");
     }
@@ -353,12 +357,12 @@ test "storage recovery and query consistency" {
     // - SimulationHarness creates separate VFS instances per harness
     // - Recovery needs shared VFS so second engine can read first engine's WAL files
     // - This follows the pattern used by all working recovery tests in tests/recovery/
-    var sim_vfs = try kausaldb.simulation_vfs.SimulationVFS.init(allocator);
+    var sim_vfs = try @import("../../sim/simulation_vfs.zig").SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     // Phase 1: Initial data creation using standardized test data
     {
-        var storage_engine1 = try kausaldb.storage.StorageEngine.init_default(
+        var storage_engine1 = try StorageEngine.init_default(
             allocator,
             sim_vfs.vfs(),
             "recovery_consistency_data",
@@ -400,7 +404,7 @@ test "storage recovery and query consistency" {
     }
 
     // Phase 2: Recovery and consistency validation with shared VFS
-    var storage_engine2 = try kausaldb.storage.StorageEngine.init_default(
+    var storage_engine2 = try StorageEngine.init_default(
         allocator,
         sim_vfs.vfs(),
         "recovery_consistency_data",
@@ -486,7 +490,7 @@ test "large scale performance characteristics" {
     const metrics = harness.storage_engine.metrics();
 
     // Use environment-aware performance assertions for ingestion performance
-    const perf = kausaldb.PerformanceAssertion.init("large_scale_performance");
+    const perf = @import("../../testing/performance_assertions.zig").PerformanceAssertion.init("large_scale_performance");
     const ingestion_rate = (@as(f64, @floatFromInt(large_block_count)) * 1_000_000_000.0) /
         @as(f64, @floatFromInt(ingestion_time));
     try perf.assert_throughput(@intFromFloat(ingestion_rate), 100, "ingestion rate (blocks/second)");

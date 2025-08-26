@@ -9,23 +9,28 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const connection_manager = @import("../../server/connection_manager.zig");
+const handler = @import("../../server/handler.zig");
+const query_engine_mod = @import("../../query/engine.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
 
-const simulation_vfs = kausaldb.simulation_vfs;
 const testing = std.testing;
 
-const SimulationVFS = simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.StorageEngine;
-const QueryEngine = kausaldb.QueryEngine;
-const handler = kausaldb.handler;
+const ConnectionManager = handler.ConnectionManager;
+const ConnectionManagerConfig = connection_manager.ConnectionManagerConfig;
+const QueryEngine = query_engine_mod.QueryEngine;
+const QueryHarness = test_harness.QueryHarness;
 const Server = handler.Server;
 const ServerConfig = handler.ServerConfig;
-const ConnectionManager = handler.ConnectionManager;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
 
 test "server decomposition maintains coordinator pattern" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "decomp_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "decomp_test");
     defer harness.deinit();
 
     // Test server initialization follows coordinator pattern
@@ -48,7 +53,7 @@ test "server decomposition maintains coordinator pattern" {
 }
 
 test "connection manager operates independently" {
-    const config = kausaldb.connection_manager.ConnectionManagerConfig{
+    const config = ConnectionManagerConfig{
         .max_connections = 3,
         .connection_timeout_sec = 10,
         .poll_timeout_ms = 100,
@@ -77,7 +82,7 @@ test "connection manager operates independently" {
 test "server coordinator delegates to connection manager" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "delegation_test");
+    var harness = try QueryHarness.init_and_startup(allocator, "delegation_test");
     defer harness.deinit();
 
     const config = ServerConfig{

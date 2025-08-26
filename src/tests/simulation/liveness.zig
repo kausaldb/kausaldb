@@ -8,18 +8,18 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
 const testing = std.testing;
-const types = kausaldb.types;
 
-const FaultInjectionConfig = kausaldb.test_harness.FaultInjectionConfig;
-const FaultInjectionHarness = kausaldb.test_harness.FaultInjectionHarness;
-const TestData = kausaldb.test_harness.TestData;
-const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
-const GraphEdge = types.GraphEdge;
+const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
+const FaultInjectionConfig = test_harness.FaultInjectionConfig;
+const FaultInjectionHarness = test_harness.FaultInjectionHarness;
+const GraphEdge = types.GraphEdge;
+const TestData = test_harness.TestData;
 
 test "system liveness under fault conditions" {
     const allocator = testing.allocator;

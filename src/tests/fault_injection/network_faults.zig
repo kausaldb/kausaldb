@@ -15,16 +15,17 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const query_engine_mod = @import("../../query/engine.zig");
+const server_handler = @import("../../server/handler.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
 
-const server_handler = kausaldb.handler;
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const StorageEngine = storage.StorageEngine;
-const QueryEngine = kausaldb.QueryEngine;
+const QueryEngine = query_engine_mod.QueryEngine;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
@@ -106,7 +107,7 @@ test "server config validation" {
         .{ .name = "high capacity", .config = ServerConfig{ .max_connections = 1000, .max_request_size = 1024 * 1024, .max_response_size = 16 * 1024 * 1024 }, .should_initialize = true },
     };
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "network_fault_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "network_fault_test");
     defer harness.deinit();
 
     for (config_tests) |test_case| {
@@ -219,7 +220,7 @@ test "message type validation" {
 test "concurrent server configuration" {
     const allocator = testing.allocator;
 
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "concurrent_test");
+    var harness = try test_harness.QueryHarness.init_and_startup(allocator, "concurrent_test");
     defer harness.deinit();
 
     // Test various server configurations for robustness

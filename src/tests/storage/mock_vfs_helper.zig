@@ -7,11 +7,10 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const vfs_mod = @import("../../core/vfs.zig");
 
-const simulation_vfs = kausaldb.simulation_vfs;
 const testing = std.testing;
-const vfs_mod = kausaldb.vfs;
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const VFS = vfs_mod.VFS;

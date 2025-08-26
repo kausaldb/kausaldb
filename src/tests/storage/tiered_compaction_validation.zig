@@ -6,15 +6,15 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const memory = @import("../../core/memory.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const types = @import("../../core/types.zig");
 
-const simulation_vfs = kausaldb.simulation_vfs;
-const storage = kausaldb.storage;
 const testing = std.testing;
-const types = kausaldb.types;
 
 const TieredCompactionManager = storage.TieredCompactionManager;
-const ArenaCoordinator = kausaldb.memory.ArenaCoordinator;
+const ArenaCoordinator = memory.ArenaCoordinator;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;

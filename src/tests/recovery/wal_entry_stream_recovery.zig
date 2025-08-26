@@ -7,22 +7,25 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const types = @import("../../core/types.zig");
 
-const assert = kausaldb.assert.assert;
-const simulation_vfs = kausaldb.simulation_vfs;
+const assert = assert_mod.assert;
 const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
-const wal = kausaldb.wal;
+const vfs = @import("../../core/vfs.zig");
+const wal_core = @import("../../storage/wal/core.zig");
+const wal_entry = @import("../../storage/wal/entry.zig");
+const wal_types = @import("../../storage/wal/types.zig");
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
-const WAL = wal.WAL;
-const WALEntry = wal.WALEntry;
+const WAL = wal_core.WAL;
+const WALEntry = wal_entry.WALEntry;
+const WALError = wal_types.WALError;
 
 /// Test recovery context to capture recovered entries for validation
 const RecoveryContext = struct {
@@ -45,7 +48,7 @@ const RecoveryContext = struct {
 };
 
 /// Recovery callback that stores entries for test validation
-fn recovery_callback(entry: WALEntry, context: *anyopaque) wal.WALError!void {
+fn recovery_callback(entry: WALEntry, context: *anyopaque) WALError!void {
     const recovery_context: *RecoveryContext = @ptrCast(@alignCast(context));
 
     // Clone entry for storage since original will be freed by caller
@@ -318,10 +321,10 @@ test "streaming recovery callback error propagation" {
     try test_wal.write_entry(entry);
 
     const error_callback = struct {
-        fn callback(cb_entry: WALEntry, context: *anyopaque) wal.WALError!void {
+        fn callback(cb_entry: WALEntry, context: *anyopaque) WALError!void {
             _ = cb_entry;
             _ = context;
-            return wal.WALError.OutOfMemory;
+            return WALError.OutOfMemory;
         }
     }.callback;
 
@@ -329,7 +332,7 @@ test "streaming recovery callback error propagation" {
 
     const result = test_wal.recover_entries(error_callback, &dummy_context);
 
-    try testing.expectError(wal.WALError.OutOfMemory, result);
+    try testing.expectError(WALError.OutOfMemory, result);
 }
 
 test "streaming vs buffered recovery equivalence" {

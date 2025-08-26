@@ -11,17 +11,22 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+// TODO: Convert to relative imports
 
 const testing = std.testing;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const FaultInjectionConfig = kausaldb.FaultInjectionConfig;
-const FaultInjectionHarness = kausaldb.FaultInjectionHarness;
-const SimulationVFS = kausaldb.simulation_vfs.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const TestData = kausaldb.TestData;
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const FaultInjectionConfig = test_harness.FaultInjectionConfig;
+const FaultInjectionHarness = test_harness.FaultInjectionHarness;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+const StorageEngine = storage.StorageEngine;
+const TestData = test_harness.TestData;
 
 test "ingestion handles source file read errors gracefully" {
     const allocator = testing.allocator;

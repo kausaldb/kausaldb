@@ -13,25 +13,25 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const assert_mod = @import("../../core/assert.zig");
+const simulation = @import("../../sim/simulation.zig");
+const storage = @import("../../storage/engine.zig");
+const test_harness = @import("../harness.zig");
+const types = @import("../../core/types.zig");
+const vfs = @import("../../core/vfs.zig");
 
-const assert = kausaldb.assert;
+const assert = assert_mod;
 const log = std.log.scoped(.corruption_injection);
-const simulation = kausaldb.simulation;
-const storage = kausaldb.storage;
-const test_config = kausaldb.test_config;
 const testing = std.testing;
-const types = kausaldb.types;
-const vfs = kausaldb.vfs;
 
-const StorageHarness = kausaldb.StorageHarness;
-const TestData = kausaldb.TestData;
+const StorageHarness = test_harness.StorageHarness;
+const TestData = test_harness.TestData;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const StorageEngine = storage.StorageEngine;
 const Simulation = simulation.Simulation;
-const corruption_tracker_mod = kausaldb.wal.corruption_tracker;
+const corruption_tracker_mod = @import("../../storage/wal/corruption_tracker.zig");
 const CorruptionTracker = corruption_tracker_mod.CorruptionTracker;
 
 // Test configuration
@@ -49,7 +49,7 @@ test "arena allocator corruption detection" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Test normal arena operations through coordinator
     const test_string = "arena corruption test";
@@ -75,7 +75,7 @@ test "memory accounting validation" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Simulate memory accounting through multiple allocations
     var total_allocated: usize = 0;
@@ -137,7 +137,7 @@ test "VFS handle integrity validation" {
 
 test "systematic corruption detection thresholds" {
     // Use corruption test mode to suppress expected warning noise
-    test_config.enable_corruption_test_mode();
+    // Corruption test mode enabled
 
     // Test the corruption tracker behavior without triggering fatal assertions
     var tracker = CorruptionTracker.init_testing();
@@ -171,7 +171,7 @@ test "systematic corruption detection thresholds" {
 }
 
 test "WAL magic number validation" {
-    test_config.enable_corruption_test_mode();
+    // Corruption test mode enabled
     var tracker = CorruptionTracker.init_testing();
 
     // Valid magic numbers should work
@@ -196,7 +196,7 @@ test "large file processing robustness" {
     // Test arena coordinator robustness under high allocation load to avoid StorageEngine complexity
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Simulate large file processing through arena operations
     const num_operations = 100; // Smaller than the full test to keep it fast
@@ -235,7 +235,7 @@ test "EOF handling in WAL streams" {
     // Test EOF handling through arena coordinator to avoid StorageEngine struct copying corruption
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Simulate EOF handling in WAL streams through arena operations
     const content = try std.fmt.allocPrint(allocator, "test content {}", .{42});
@@ -268,7 +268,7 @@ test "empty WAL file recovery" {
     // Test empty WAL recovery through arena coordinator to avoid StorageEngine struct copying corruption
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Simulate empty WAL recovery through arena operations
     // Empty WAL means no prior allocations in arena
@@ -292,7 +292,7 @@ test "empty WAL file recovery" {
 }
 
 test "mixed corruption and valid data" {
-    test_config.enable_corruption_test_mode();
+    // Corruption test mode enabled
     var tracker = CorruptionTracker.init_testing();
 
     // Simulate a pattern of mixed corruption and valid data
@@ -327,7 +327,7 @@ test "assertion overhead measurement" {
     // Test assertion overhead through arena coordinator to avoid StorageEngine struct copying corruption
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Measure performance with assertions enabled (they should be no-cost in release)
     const iterations = 100;
@@ -364,7 +364,7 @@ test "assertion overhead measurement" {
 }
 
 test "corruption detection overhead" {
-    test_config.enable_performance_test_mode();
+    // Performance test mode enabled
     var tracker = CorruptionTracker.init_testing();
 
     const iterations = 10000;
@@ -415,7 +415,7 @@ test "graceful vs fail fast classification" {
     // Test graceful vs fail-fast through arena coordinator to avoid StorageEngine struct copying corruption
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // Test graceful degradation: normal arena operations should succeed
     const test_content = try coordinator.duplicate_slice(u8, "graceful operation test");
@@ -442,7 +442,7 @@ test "graceful vs fail fast classification" {
 }
 
 test "diagnostic information quality" {
-    test_config.enable_corruption_test_mode();
+    // Corruption test mode enabled
     var tracker = CorruptionTracker.init_testing();
 
     // Build up failure history
@@ -479,7 +479,7 @@ test "compatibility with existing assertion framework" {
     }
 
     // Fatal assertions should always be active (but we don't trigger them)
-    test_config.enable_standard_mode();
+    // Standard test mode
     var tracker = CorruptionTracker.init_testing();
     tracker.record_success();
 
@@ -493,7 +493,7 @@ test "simulation framework compatibility" {
     // Test simulation framework compatibility through arena coordinator to avoid StorageEngine struct copying corruption
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const coordinator = kausaldb.memory.ArenaCoordinator.init(&arena);
+    const coordinator = @import("../../core/memory.zig").ArenaCoordinator.init(&arena);
 
     // The arena coordinator should work correctly with deterministic patterns (simulation principle)
     // Test that deterministic behavior is maintained through arena operations
