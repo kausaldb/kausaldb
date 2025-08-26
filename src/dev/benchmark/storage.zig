@@ -7,21 +7,19 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
-
 const coordinator = @import("../benchmark.zig");
 
-const context_block = kausaldb.types;
-const ownership = kausaldb.ownership;
-const production_vfs = kausaldb.production_vfs;
-const storage = kausaldb.storage;
+const types = coordinator.types;
+const ownership = coordinator.ownership;
+const production_vfs = coordinator.production_vfs;
+const storage = coordinator.storage;
 
 const BenchmarkResult = coordinator.BenchmarkResult;
-const StatisticalSampler = kausaldb.StatisticalSampler;
-const WarmupUtils = kausaldb.WarmupUtils;
-const StorageEngine = storage.StorageEngine;
-const ContextBlock = context_block.ContextBlock;
-const BlockId = context_block.BlockId;
+const StatisticalSampler = coordinator.StatisticalSampler;
+const WarmupUtils = coordinator.WarmupUtils;
+const StorageEngine = coordinator.storage.StorageEngine;
+const ContextBlock = coordinator.types.ContextBlock;
+const BlockId = coordinator.types.BlockId;
 const StorageEngineBlock = ownership.StorageEngineBlock;
 const OwnedBlock = ownership.OwnedBlock;
 

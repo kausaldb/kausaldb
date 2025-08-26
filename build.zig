@@ -132,7 +132,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     benchmark_exe.linkLibC();
-    benchmark_exe.root_module.addImport("kausaldb", kausaldb_module);
+    benchmark_exe.root_module.addImport("kausaldb", testing_api_module);
     benchmark_exe.root_module.addImport("build_options", build_options.createModule());
     b.installArtifact(benchmark_exe);
 
@@ -169,7 +169,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    fuzz_exe.root_module.addImport("kausaldb", kausaldb_module);
+    fuzz_exe.root_module.addImport("kausaldb", testing_api_module);
     fuzz_exe.root_module.addImport("build_options", build_options.createModule());
     b.installArtifact(fuzz_exe);
 

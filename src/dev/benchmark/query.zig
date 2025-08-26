@@ -6,23 +6,21 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
-
 const coordinator = @import("../benchmark.zig");
 
-const context_block = kausaldb.types;
-const operations = kausaldb.query_operations;
-const production_vfs = kausaldb.production_vfs;
-const query_engine = kausaldb.query_engine;
-const storage = kausaldb.storage;
+const types = coordinator.types;
+const operations = coordinator.query_operations;
+const production_vfs = coordinator.production_vfs;
+const query_engine = coordinator.query_engine;
+const storage = coordinator.storage;
 
 const BenchmarkResult = coordinator.BenchmarkResult;
-const StorageEngine = storage.StorageEngine;
-const QueryEngine = query_engine.QueryEngine;
-const ContextBlock = context_block.ContextBlock;
-const BlockId = context_block.BlockId;
-const GraphEdge = context_block.GraphEdge;
-const EdgeType = context_block.EdgeType;
+const StorageEngine = coordinator.storage.StorageEngine;
+const QueryEngine = coordinator.query_engine.QueryEngine;
+const ContextBlock = coordinator.types.ContextBlock;
+const BlockId = coordinator.types.BlockId;
+const GraphEdge = coordinator.types.GraphEdge;
+const EdgeType = coordinator.types.EdgeType;
 const FindBlocksQuery = operations.FindBlocksQuery;
 
 const SINGLE_QUERY_THRESHOLD_NS = 300; // direct storage access ~0.12µs → 300ns (2.5x margin)
@@ -149,7 +147,7 @@ fn benchmark_single_block_queries(query_eng: *QueryEngine, allocator: std.mem.Al
 /// Run graph traversal benchmarks with 3-hop traversal testing.
 /// Core value proposition benchmark - missing from current suite.
 pub fn run_graph_traversal(allocator: std.mem.Allocator) !BenchmarkResult {
-    var harness = try kausaldb.QueryHarness.init_and_startup(allocator, "benchmark_graph_traversal");
+    var harness = try coordinator.QueryHarness.init_and_startup(allocator, "benchmark_graph_traversal");
     defer harness.deinit();
 
     const result = benchmark_graph_traversal(harness.query_engine, allocator) catch |err| {

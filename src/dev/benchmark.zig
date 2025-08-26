@@ -5,11 +5,31 @@
 //! Follows separation of concerns - benchmarks produce data, main handles presentation.
 
 const std = @import("std");
+const kausaldb = @import("kausaldb");
 
 const compaction_benchmarks = @import("benchmark/compaction.zig");
 const parsing_benchmarks = @import("benchmark/parsing.zig");
 const query_benchmarks = @import("benchmark/query.zig");
 const storage_benchmarks = @import("benchmark/storage.zig");
+
+// Re-export kausaldb modules for benchmark files to use
+// This avoids having benchmark utilities in the main public API
+pub const types = kausaldb.types;
+pub const storage = kausaldb.storage;
+pub const query_engine = kausaldb.query_engine;
+pub const query_operations = kausaldb.query_operations;
+pub const production_vfs = kausaldb.production_vfs;
+pub const ownership = kausaldb.ownership;
+pub const pipeline = kausaldb.pipeline;
+pub const zig_parser = kausaldb.zig_parser;
+
+// Custom assert module
+pub const assert = kausaldb.assert;
+
+// Re-export testing utilities (available via testing_api module)
+pub const QueryHarness = kausaldb.QueryHarness;
+pub const StatisticalSampler = kausaldb.StatisticalSampler;
+pub const WarmupUtils = kausaldb.WarmupUtils;
 
 pub const BenchmarkResult = struct {
     operation_name: []const u8,

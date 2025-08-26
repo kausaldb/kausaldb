@@ -6,19 +6,17 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
-
 const coordinator = @import("../benchmark.zig");
 
-const assert = kausaldb.assert;
-const context_block = kausaldb.types;
-const production_vfs = kausaldb.production_vfs;
-const storage = kausaldb.storage;
+const assert = coordinator.assert;
+const types = coordinator.types;
+const production_vfs = coordinator.production_vfs;
+const storage = coordinator.storage;
 
 const BenchmarkResult = coordinator.BenchmarkResult;
-const StorageEngine = storage.StorageEngine;
-const ContextBlock = context_block.ContextBlock;
-const BlockId = context_block.BlockId;
+const StorageEngine = coordinator.storage.StorageEngine;
+const ContextBlock = coordinator.types.ContextBlock;
+const BlockId = coordinator.types.BlockId;
 
 const COMPACTION_THRESHOLD_NS = 50_000_000; // 50ms for compaction operations
 const MERGE_THRESHOLD_NS = 10_000_000; // 10ms for merge operations
