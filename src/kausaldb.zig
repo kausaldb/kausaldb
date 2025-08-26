@@ -71,6 +71,19 @@ pub const Server = handler.Server;
 
 pub const Allocator = std.mem.Allocator;
 
+// Development and testing utilities
+// These are exposed for internal development tools (benchmarks, fuzz tests)  
+// but should not be used by external applications
+pub const dev = struct {
+    pub const QueryHarness = @import("testing/scenarios.zig").QueryHarness;
+    pub const StatisticalSampler = @import("testing/performance_assertions.zig").StatisticalSampler;
+    pub const WarmupUtils = @import("testing/performance_assertions.zig").WarmupUtils;
+};
+
+pub const stdx = @import("core/stdx.zig");
+pub const assert = @import("core/assert.zig");
+pub const query_operations = @import("query/operations.zig");
+
 pub const version = .{
     .major = 0,
     .minor = 1,

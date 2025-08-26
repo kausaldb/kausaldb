@@ -125,6 +125,7 @@ pub fn build(b: *std.Build) void {
     });
     benchmark_exe.linkLibC();
     benchmark_exe.root_module.addImport("build_options", build_options.createModule());
+    benchmark_exe.root_module.addImport("kausaldb", kausaldb_module);
     b.installArtifact(benchmark_exe);
 
     const benchmark_cmd = b.addRunArtifact(benchmark_exe);
@@ -137,12 +138,13 @@ pub fn build(b: *std.Build) void {
     const tidy_exe = b.addExecutable(.{
         .name = "tidy",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/tidy/main.zig"),
+            .root_source_file = b.path("src/tidy/main.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
     tidy_exe.root_module.addImport("build_options", build_options.createModule());
+    tidy_exe.root_module.addImport("kausaldb", kausaldb_module);
     b.installArtifact(tidy_exe);
 
     const tidy_cmd = b.addRunArtifact(tidy_exe);
@@ -155,12 +157,13 @@ pub fn build(b: *std.Build) void {
     const fuzz_exe = b.addExecutable(.{
         .name = "fuzz",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/fuzz.zig"),
+            .root_source_file = b.path("src/dev/fuzz/main.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
     fuzz_exe.root_module.addImport("build_options", build_options.createModule());
+    fuzz_exe.root_module.addImport("kausaldb", kausaldb_module);
     b.installArtifact(fuzz_exe);
 
     const fuzz_cmd = b.addRunArtifact(fuzz_exe);
