@@ -291,6 +291,8 @@ fn benchmark_block_writes(storage_engine: *StorageEngine, allocator: std.mem.All
         .max_ns = stats.max,
         .mean_ns = stats.mean,
         .median_ns = stats.median,
+        .p95_ns = stats.p95,
+        .p99_ns = stats.p99,
         .stddev_ns = stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = stats.mean <= BLOCK_WRITE_THRESHOLD_NS,
@@ -298,6 +300,7 @@ fn benchmark_block_writes(storage_engine: *StorageEngine, allocator: std.mem.All
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = final_memory <= MAX_PEAK_MEMORY_BYTES and memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * STATISTICAL_SAMPLES),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -342,6 +345,8 @@ fn benchmark_block_reads(storage_engine: *StorageEngine, allocator: std.mem.Allo
         .max_ns = stats.max,
         .mean_ns = stats.mean,
         .median_ns = stats.median,
+        .p95_ns = stats.p95,
+        .p99_ns = stats.p99,
         .stddev_ns = stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = stats.mean <= BLOCK_READ_THRESHOLD_NS,
@@ -349,6 +354,7 @@ fn benchmark_block_reads(storage_engine: *StorageEngine, allocator: std.mem.Allo
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = final_memory <= MAX_PEAK_MEMORY_BYTES and memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * HIGH_PRECISION_ITERATIONS),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -391,6 +397,8 @@ fn benchmark_block_updates(storage_engine: *StorageEngine, allocator: std.mem.Al
         .max_ns = mean_time,
         .mean_ns = mean_time,
         .median_ns = mean_time,
+        .p95_ns = mean_time,
+        .p99_ns = mean_time,
         .stddev_ns = 0,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = true, // Always pass for simplified benchmark
@@ -398,6 +406,7 @@ fn benchmark_block_updates(storage_engine: *StorageEngine, allocator: std.mem.Al
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = true, // Simplified version should be efficient
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -440,6 +449,8 @@ fn benchmark_block_deletes(storage_engine: *StorageEngine, allocator: std.mem.Al
         .max_ns = mean_time,
         .mean_ns = mean_time,
         .median_ns = mean_time,
+        .p95_ns = mean_time,
+        .p99_ns = mean_time,
         .stddev_ns = 0,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = true, // Always pass for simplified benchmark
@@ -447,6 +458,7 @@ fn benchmark_block_deletes(storage_engine: *StorageEngine, allocator: std.mem.Al
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = true, // Simplified version should be efficient
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -487,6 +499,8 @@ fn benchmark_wal_flush(storage_engine: *StorageEngine, allocator: std.mem.Alloca
         .max_ns = mean_time,
         .mean_ns = mean_time,
         .median_ns = mean_time,
+        .p95_ns = mean_time,
+        .p99_ns = mean_time,
         .stddev_ns = 0,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = true, // Always pass for simplified benchmark
@@ -494,6 +508,7 @@ fn benchmark_wal_flush(storage_engine: *StorageEngine, allocator: std.mem.Alloca
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = true, // Simplified version should be efficient
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -593,6 +608,8 @@ fn benchmark_zero_cost_ownership(storage_engine: *StorageEngine, allocator: std.
         .max_ns = zero_cost_stats.max,
         .mean_ns = zero_cost_stats.mean,
         .median_ns = zero_cost_stats.median,
+        .p95_ns = zero_cost_stats.p95,
+        .p99_ns = zero_cost_stats.p99,
         .stddev_ns = zero_cost_stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = zero_cost_stats.mean <= BLOCK_READ_THRESHOLD_NS and no_regression,
@@ -600,6 +617,7 @@ fn benchmark_zero_cost_ownership(storage_engine: *StorageEngine, allocator: std.
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = final_memory <= MAX_PEAK_MEMORY_BYTES and memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * STATISTICAL_SAMPLES * 2),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -687,9 +705,11 @@ fn analyze_timings(timings: []u64) struct {
     max: u64,
     mean: u64,
     median: u64,
+    p95: u64,
+    p99: u64,
     stddev: u64,
 } {
-    if (timings.len == 0) return .{ .total_time_ns = 0, .min = 0, .max = 0, .mean = 0, .median = 0, .stddev = 0 };
+    if (timings.len == 0) return .{ .total_time_ns = 0, .min = 0, .max = 0, .mean = 0, .median = 0, .p95 = 0, .p99 = 0, .stddev = 0 };
 
     std.mem.sort(u64, timings, {}, std.sort.asc(u64));
 
@@ -738,12 +758,19 @@ fn analyze_timings(timings: []u64) struct {
         const variance = if (variance_count > 0) variance_sum / variance_count else 0;
         const stddev = std.math.sqrt(variance);
 
+        const p95_idx = (95 * timings.len) / 100;
+        const p99_idx = (99 * timings.len) / 100;
+        const p95 = timings[@min(p95_idx, timings.len - 1)];
+        const p99 = timings[@min(p99_idx, timings.len - 1)];
+
         return .{
             .total_time_ns = filtered_total,
             .min = filtered_min,
             .max = filtered_max,
             .mean = mean,
             .median = median,
+            .p95 = p95,
+            .p99 = p99,
             .stddev = stddev,
         };
     } else {
@@ -764,12 +791,19 @@ fn analyze_timings(timings: []u64) struct {
         const variance = variance_sum / timings.len;
         const stddev = std.math.sqrt(variance);
 
+        const p95_idx = (95 * timings.len) / 100;
+        const p99_idx = (99 * timings.len) / 100;
+        const p95 = timings[@min(p95_idx, timings.len - 1)];
+        const p99 = timings[@min(p99_idx, timings.len - 1)];
+
         return .{
             .total_time_ns = total_time_ns,
             .min = min,
             .max = max,
             .mean = mean,
             .median = median,
+            .p95 = p95,
+            .p99 = p99,
             .stddev = stddev,
         };
     }

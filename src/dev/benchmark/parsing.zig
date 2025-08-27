@@ -350,6 +350,8 @@ pub fn run_semantic_extraction(allocator: std.mem.Allocator) !BenchmarkResult {
         .max_ns = elapsed_ns,
         .mean_ns = elapsed_ns,
         .median_ns = elapsed_ns,
+        .p95_ns = elapsed_ns,
+        .p99_ns = elapsed_ns,
         .stddev_ns = 0,
         .throughput_ops_per_sec = 1_000_000_000.0 / @as(f64, @floatFromInt(elapsed_ns)),
         .passed_threshold = passed_threshold,
@@ -357,6 +359,7 @@ pub fn run_semantic_extraction(allocator: std.mem.Allocator) !BenchmarkResult {
         .peak_memory_bytes = 0,
         .memory_growth_bytes = 0,
         .memory_efficient = true,
+        .memory_kb = 0,
     };
 }
 
@@ -444,6 +447,12 @@ fn run_parsing_benchmark(
     const passed_threshold = mean_ns <= threshold_ns;
     const throughput_ops_per_sec = 1_000_000_000.0 / @as(f64, @floatFromInt(mean_ns));
 
+    // Calculate p95 and p99 percentiles
+    const p95_idx = (95 * measurements.items.len) / 100;
+    const p99_idx = (99 * measurements.items.len) / 100;
+    const p95_ns = measurements.items[@min(p95_idx, measurements.items.len - 1)];
+    const p99_ns = measurements.items[@min(p99_idx, measurements.items.len - 1)];
+
     return BenchmarkResult{
         .operation_name = operation_name,
         .iterations = STATISTICAL_SAMPLES,
@@ -452,6 +461,8 @@ fn run_parsing_benchmark(
         .max_ns = max_ns,
         .mean_ns = mean_ns,
         .median_ns = median_ns,
+        .p95_ns = p95_ns,
+        .p99_ns = p99_ns,
         .stddev_ns = stddev_ns,
         .throughput_ops_per_sec = throughput_ops_per_sec,
         .passed_threshold = passed_threshold,
@@ -459,5 +470,6 @@ fn run_parsing_benchmark(
         .peak_memory_bytes = 0, // Memory tracking could be added
         .memory_growth_bytes = 0,
         .memory_efficient = true,
+        .memory_kb = 0,
     };
 }

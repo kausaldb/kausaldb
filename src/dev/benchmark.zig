@@ -23,7 +23,7 @@ pub const pipeline = kausaldb.pipeline;
 pub const zig_parser = kausaldb.zig_parser;
 pub const assert = kausaldb.assert;
 
-// Development utilities exposed in kausaldb.dev namespace  
+// Development utilities exposed in kausaldb.dev namespace
 pub const QueryHarness = kausaldb.dev.QueryHarness;
 pub const StatisticalSampler = kausaldb.dev.StatisticalSampler;
 pub const WarmupUtils = kausaldb.dev.WarmupUtils;
@@ -46,7 +46,7 @@ pub const BenchmarkResult = struct {
     memory_growth_bytes: u64,
     memory_efficient: bool,
     memory_kb: u64,
-    
+
     pub fn format(
         self: BenchmarkResult,
         comptime fmt: []const u8,
@@ -55,14 +55,7 @@ pub const BenchmarkResult = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{s}: {} iterations, mean {d:.2}µs, p95 {d:.2}µs, memory {}KB",
-            .{
-                self.operation_name,
-                self.iterations,
-                @as(f64, @floatFromInt(self.mean_ns)) / 1000.0,
-                @as(f64, @floatFromInt(self.p95_ns)) / 1000.0,
-                self.memory_kb
-            });
+        try writer.print("{s}: {} iterations, mean {d:.2}µs, p95 {d:.2}µs, memory {}KB", .{ self.operation_name, self.iterations, @as(f64, @floatFromInt(self.mean_ns)) / 1000.0, @as(f64, @floatFromInt(self.p95_ns)) / 1000.0, self.memory_kb });
     }
 };
 
@@ -75,12 +68,12 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        try printUsage();
+        try print_usage();
         return;
     }
 
     const benchmark_type = args[1];
-    
+
     if (std.mem.eql(u8, benchmark_type, "storage")) {
         _ = try storage_benchmarks.run_all(allocator);
     } else if (std.mem.eql(u8, benchmark_type, "query")) {
@@ -96,11 +89,11 @@ pub fn main() !void {
         _ = try compaction_benchmarks.run_all(allocator);
     } else {
         std.debug.print("Unknown benchmark type: {s}\n\n", .{benchmark_type});
-        try printUsage();
+        try print_usage();
     }
 }
 
-fn printUsage() !void {
+fn print_usage() !void {
     std.debug.print(
         \\Usage: benchmark <type>
         \\

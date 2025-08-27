@@ -132,6 +132,8 @@ fn benchmark_single_block_queries(query_eng: *QueryEngine, allocator: std.mem.Al
         .max_ns = stats.max,
         .mean_ns = stats.mean,
         .median_ns = stats.median,
+        .p95_ns = stats.p95,
+        .p99_ns = stats.p99,
         .stddev_ns = stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = stats.mean <= SINGLE_QUERY_THRESHOLD_NS,
@@ -139,6 +141,7 @@ fn benchmark_single_block_queries(query_eng: *QueryEngine, allocator: std.mem.Al
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = final_memory <= MAX_PEAK_MEMORY_BYTES and memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * ITERATIONS),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -217,6 +220,8 @@ fn benchmark_batch_queries_impl(query_eng: *QueryEngine, allocator: std.mem.Allo
         .max_ns = stats.max,
         .mean_ns = stats.mean,
         .median_ns = stats.median,
+        .p95_ns = stats.p95,
+        .p99_ns = stats.p99,
         .stddev_ns = stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = stats.mean <= BATCH_QUERY_THRESHOLD_NS,
@@ -224,6 +229,7 @@ fn benchmark_batch_queries_impl(query_eng: *QueryEngine, allocator: std.mem.Allo
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = final_memory <= MAX_PEAK_MEMORY_BYTES and memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * ITERATIONS),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -347,6 +353,8 @@ fn benchmark_graph_traversal(query_eng: *QueryEngine, allocator: std.mem.Allocat
         .max_ns = stats.max,
         .mean_ns = stats.mean,
         .median_ns = stats.median,
+        .p95_ns = stats.p95,
+        .p99_ns = stats.p99,
         .stddev_ns = stats.stddev,
         .throughput_ops_per_sec = throughput,
         .passed_threshold = stats.mean <= GRAPH_TRAVERSAL_THRESHOLD_NS,
@@ -354,6 +362,7 @@ fn benchmark_graph_traversal(query_eng: *QueryEngine, allocator: std.mem.Allocat
         .peak_memory_bytes = final_memory,
         .memory_growth_bytes = memory_growth,
         .memory_efficient = memory_growth <= (MAX_MEMORY_GROWTH_PER_OP * timings.len),
+        .memory_kb = final_memory / 1024,
     };
 
     return result;
@@ -402,9 +411,11 @@ fn analyze_timings(timings: []u64) struct {
     max: u64,
     mean: u64,
     median: u64,
+    p95: u64,
+    p99: u64,
     stddev: u64,
 } {
-    if (timings.len == 0) return .{ .total_time_ns = 0, .min = 0, .max = 0, .mean = 0, .median = 0, .stddev = 0 };
+    if (timings.len == 0) return .{ .total_time_ns = 0, .min = 0, .max = 0, .mean = 0, .median = 0, .p95 = 0, .p99 = 0, .stddev = 0 };
 
     std.mem.sort(u64, timings, {}, std.sort.asc(u64));
 
@@ -424,12 +435,19 @@ fn analyze_timings(timings: []u64) struct {
     const variance = variance_sum / timings.len;
     const stddev = std.math.sqrt(variance);
 
+    const p95_idx = (95 * timings.len) / 100;
+    const p99_idx = (99 * timings.len) / 100;
+    const p95 = timings[@min(p95_idx, timings.len - 1)];
+    const p99 = timings[@min(p99_idx, timings.len - 1)];
+
     return .{
         .total_time_ns = total_time_ns,
         .min = min,
         .max = max,
         .mean = mean,
         .median = median,
+        .p95 = p95,
+        .p99 = p99,
         .stddev = stddev,
     };
 }

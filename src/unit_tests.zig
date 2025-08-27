@@ -39,7 +39,6 @@ comptime {
     _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/shell.zig");
-    _ = @import("dev/tidy.zig");
 
     // Ingestion modules
     _ = @import("ingestion/git_source.zig");

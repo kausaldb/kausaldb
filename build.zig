@@ -138,7 +138,7 @@ pub fn build(b: *std.Build) void {
     const tidy_exe = b.addExecutable(.{
         .name = "tidy",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tidy/main.zig"),
+            .root_source_file = b.path("src/dev/tidy/main.zig"),
             .target = target,
             .optimize = optimize,
         }),
