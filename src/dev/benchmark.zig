@@ -4,29 +4,29 @@
 //! Dev tools use the external kausaldb API for convenience.
 
 const std = @import("std");
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const compaction_benchmarks = @import("benchmark/compaction.zig");
 const parsing_benchmarks = @import("benchmark/parsing.zig");
 const query_benchmarks = @import("benchmark/query.zig");
 const storage_benchmarks = @import("benchmark/storage.zig");
 
-// Re-export kausaldb modules for benchmark files to use
-// Dev tools are allowed to use the external API for convenience
-pub const types = kausaldb.types;
-pub const storage = kausaldb.storage;
-pub const query_engine = kausaldb.query_engine;
-pub const query_operations = kausaldb.query_operations;
-pub const production_vfs = kausaldb.production_vfs;
-pub const ownership = kausaldb.ownership;
-pub const pipeline = kausaldb.pipeline;
-pub const zig_parser = kausaldb.zig_parser;
-pub const assert = kausaldb.assert;
+// Re-export internal modules for benchmark files to use
+// Dev tools use internal API for better access to implementation details
+pub const types = internal.types;
+pub const storage = internal.storage;
+pub const query_engine = internal.query_engine;
+pub const query_operations = internal.query_operations;
+pub const production_vfs = internal.production_vfs;
+pub const ownership = internal.ownership;
+pub const pipeline = internal.pipeline;
+pub const zig_parser = internal.zig_parser;
+pub const assert = internal.assert;
 
-// Development utilities exposed in kausaldb.dev namespace
-pub const QueryHarness = kausaldb.dev.QueryHarness;
-pub const StatisticalSampler = kausaldb.dev.StatisticalSampler;
-pub const WarmupUtils = kausaldb.dev.WarmupUtils;
+// Development utilities from internal API
+pub const QueryHarness = internal.QueryHarness;
+pub const StatisticalSampler = internal.performance_assertions.StatisticalSampler;
+pub const WarmupUtils = internal.performance_assertions.WarmupUtils;
 
 pub const BenchmarkResult = struct {
     operation_name: []const u8,

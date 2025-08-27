@@ -5,14 +5,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const common = @import("common.zig");
 
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
-const SimulationVFS = kausaldb.SimulationVFS;
-const StorageEngine = kausaldb.StorageEngine;
+const SimulationVFS = internal.SimulationVFS;
+const StorageEngine = internal.StorageEngine;
 
 const FUZZ_ITERATIONS_CONTINUOUS = std.math.maxInt(u64);
 

@@ -6,17 +6,17 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const common = @import("common.zig");
 
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
-const BlockId = kausaldb.types.BlockId;
-const ContextBlock = kausaldb.types.ContextBlock;
-const SimulationVFS = kausaldb.SimulationVFS;
-const StorageEngine = kausaldb.storage.StorageEngine;
-const TieredCompaction = kausaldb.storage.TieredCompaction;
+const BlockId = internal.types.BlockId;
+const ContextBlock = internal.types.ContextBlock;
+const SimulationVFS = internal.SimulationVFS;
+const StorageEngine = internal.storage.StorageEngine;
+const TieredCompaction = internal.storage.TieredCompaction;
 
 const CompactionFuzzStats = struct {
     total_compactions: u64 = 0,
@@ -385,7 +385,7 @@ pub fn run(
 
     while (iteration < iterations) {
         // Check for shutdown file
-        if (std.fs.cwd().access(".kausaldb_stop", .{})) |_| {
+        if (std.fs.cwd().access(".internal_stop", .{})) |_| {
             std.debug.print("\nCompaction fuzzing stopped by shutdown request\n", .{});
             break;
         } else |_| {

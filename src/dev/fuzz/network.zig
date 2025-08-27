@@ -6,14 +6,14 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const common = @import("common.zig");
 
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
-const ConnectionManager = kausaldb.server.ConnectionManager;
-const SimulationVFS = kausaldb.SimulationVFS;
+const ConnectionManager = internal.server.ConnectionManager;
+const SimulationVFS = internal.SimulationVFS;
 
 const NetworkFuzzStats = struct {
     total_connections: u64 = 0,
@@ -128,7 +128,7 @@ pub fn run(
 
     while (iteration < iterations) {
         // Check for shutdown file
-        if (std.fs.cwd().access(".kausaldb_stop", .{})) |_| {
+        if (std.fs.cwd().access(".internal_stop", .{})) |_| {
             std.debug.print("\nNetwork fuzzing stopped by shutdown request\n", .{});
             break;
         } else |_| {

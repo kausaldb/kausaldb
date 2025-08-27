@@ -9,10 +9,10 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const mem = std.mem;
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
 /// Check source code for patterns that violate KausalDB's architectural principles.
 /// Returns violation message or null if code adheres to standards.

@@ -6,7 +6,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const common = @import("common.zig");
 const compaction_fuzz = @import("compaction.zig");
@@ -16,7 +16,7 @@ const query_fuzz = @import("query.zig");
 const serialization_fuzz = @import("serialization.zig");
 const storage_fuzz = @import("storage.zig");
 
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
 const FUZZ_ITERATIONS_DEFAULT = 100_000;
 const FUZZ_ITERATIONS_CONTINUOUS = std.math.maxInt(u64);
@@ -31,7 +31,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    kausaldb.concurrency.init();
+    internal.concurrency.init();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);

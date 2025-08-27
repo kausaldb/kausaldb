@@ -6,10 +6,10 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
-const concurrency = kausaldb.concurrency;
-const types = kausaldb.types;
+const concurrency = internal.concurrency;
+const types = internal.types;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;

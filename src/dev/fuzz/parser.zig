@@ -5,15 +5,15 @@
 
 const std = @import("std");
 
-const kausaldb = @import("kausaldb");
+const internal = @import("internal");
 
 const common = @import("common.zig");
 
-const stdx = kausaldb.stdx;
+const stdx = internal.stdx;
 
-const SourceContent = kausaldb.SourceContent;
-const ZigParser = kausaldb.ZigParser;
-const ZigParserConfig = kausaldb.ZigParserConfig;
+const SourceContent = internal.SourceContent;
+const ZigParser = internal.ZigParser;
+const ZigParserConfig = internal.ZigParserConfig;
 
 const FUZZ_ITERATIONS_CONTINUOUS = std.math.maxInt(u64);
 
