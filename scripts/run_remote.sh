@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 DEFAULT_SERVER="${KAUSAL_SERVER:-mitander@server}"
 DEFAULT_REMOTE_PATH="${KAUSAL_PATH:-~/kausaldb}"
 DEFAULT_BUILD_TARGET="test-simulation"
-DEFAULT_OPTIMIZE="-Doptimize=ReleaseSafe"
+DEFAULT_OPTIMIZE="-Doptimize=ReleaseFast"
 
 # Parse arguments
 SERVER="$DEFAULT_SERVER"
