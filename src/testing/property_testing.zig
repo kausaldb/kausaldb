@@ -1,6 +1,6 @@
 //! Property Testing Framework
 //!
-//! TigerBeetle-inspired exhaustive API testing using compile-time reflection.
+//! Exhaustive API testing using compile-time reflection.
 //! Validates that all public APIs are tested and behave correctly under
 //! property-based testing scenarios.
 //!

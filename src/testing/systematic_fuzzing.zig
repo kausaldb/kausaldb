@@ -1,8 +1,8 @@
 //! Systematic Fuzzing Framework
 //!
-//! TigerBeetle-inspired systematic fuzzing integrated with KausalDB's
-//! defensive programming framework. Provides deterministic, reproducible
-//! fuzzing with bounded operations and comprehensive crash analysis.
+//! Systematic fuzzing integrated with KausalDB's defensive programming framework.
+//! Provides deterministic, reproducible fuzzing with bounded operations and
+//! comprehensive crash analysis.
 //!
 //! This framework follows KausalDB's Arena Coordinator Pattern for memory
 //! management and provides multiple fuzzing strategies:

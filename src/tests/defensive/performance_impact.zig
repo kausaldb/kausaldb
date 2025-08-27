@@ -1,9 +1,7 @@
 //! Performance impact validation for defensive programming assertions.
 //!
-//! Tests that our assertion framework maintains zero-cost
-//! abstraction in release builds while providing valuable debugging in
-//! debug builds. Follows TigerBeetle-style performance validation with
-//! precise timing measurements and statistical analysis.
+//! Tests that our assertion framework maintains zero-cost abstractions
+//! in release builds while providing valuable debugging in debug builds.
 
 const builtin = @import("builtin");
 const std = @import("std");

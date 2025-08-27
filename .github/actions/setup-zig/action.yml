@@ -1,0 +1,42 @@
+name: Setup Zig Toolchain
+description: Install and cache Zig with optimal settings for KausalDB
+outputs:
+  version:
+    description: Installed Zig version
+    value: ${{ steps.version.outputs.version }}
+  cache-hit:
+    description: Whether Zig installation was cached
+    value: ${{ steps.zig-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract Zig Version
+      id: version
+      shell: bash
+      run: |
+        ZIG_VERSION=$(grep 'ZIG_RELEASE_DEFAULT=' scripts/install_zig.sh | sed 's/.*="\([^"]*\)".*/\1/')
+        echo "version=$ZIG_VERSION" >> $GITHUB_OUTPUT
+        echo "Detected Zig version: $ZIG_VERSION"
+    
+    - name: Cache Zig Installation
+      id: zig-cache
+      uses: actions/cache@v4
+      with:
+        path: zig/
+        key: zig-${{ runner.os }}-${{ steps.version.outputs.version }}
+        restore-keys: zig-${{ runner.os }}-
+    
+    - name: Install Zig
+      if: steps.zig-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "Installing Zig ${{ steps.version.outputs.version }}..."
+        chmod +x scripts/install_zig.sh
+        ./scripts/install_zig.sh
+    
+    - name: Verify Installation
+      shell: bash
+      run: |
+        echo "Zig version: $(./zig/zig version)"
+        echo "Zig path: $(pwd)/zig/zig"

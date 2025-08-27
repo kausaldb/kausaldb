@@ -2,8 +2,7 @@
 //!
 //! Tests the assertion framework and defensive programming checks throughout
 //! KausalDB to ensure they properly catch invalid conditions while not
-//! interfering with normal operation. Follows TigerBeetle-style defensive
-//! programming principles with validation.
+//! interfering with normal operation.
 
 const std = @import("std");
 

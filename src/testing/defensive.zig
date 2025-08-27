@@ -1,8 +1,8 @@
 //! Defensive Programming Framework
 //!
 //! Systematic defensive programming patterns for bulletproof KausalDB operations.
-//! Inspired by TigerBeetle's defense-in-depth approach with heavy assertions
-//! and systematic validation that makes bugs impossible.
+//! Uses a defense-in-depth approach with heavy assertions and systematic
+//! validation that makes bugs impossible.
 //!
 //! This framework provides zero-cost abstractions for safety - all defensive
 //! mechanisms have ZERO runtime overhead in release builds while providing
