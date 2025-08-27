@@ -126,8 +126,8 @@ jobs:
         if: matrix.config.test-level == 'comprehensive'
         run: |
           echo "Running integration tests..."
-          # Use ReleaseFast for performance-critical integration tests
-          ./zig/zig build test-integration -Doptimize=ReleaseFast --summary all
+          # Use matrix optimization level for integration tests
+          ./zig/zig build test-integration -Doptimize=${{ matrix.config.optimize }} --summary all
 
       - name: Run Tests (Smoke)
         if: matrix.config.test-level == 'smoke'
@@ -172,8 +172,8 @@ jobs:
       - name: Complete Test Suite
         run: |
           echo "Running complete test suite (unit + integration + e2e + scenarios + golden masters)..."
-          # Use ReleaseFast for comprehensive performance validation
-          ./zig/zig build test-all -Doptimize=ReleaseFast --summary all
+          # Use ReleaseSafe for comprehensive validation (avoid Zig test runner bug in ReleaseFast)
+          ./zig/zig build test-all -Doptimize=ReleaseSafe --summary all
 
       - name: Complete Benchmark Suite
         run: |
