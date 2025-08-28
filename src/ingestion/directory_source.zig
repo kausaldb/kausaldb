@@ -123,7 +123,11 @@ pub const DirectorySourceIterator = struct {
     /// Base allocator for cleanup
     allocator: std.mem.Allocator,
 
-    pub fn init(directory_source: *DirectorySource, files: []DirectoryFileInfo, allocator: std.mem.Allocator) DirectorySourceIterator {
+    pub fn init(
+        directory_source: *DirectorySource,
+        files: []DirectoryFileInfo,
+        allocator: std.mem.Allocator,
+    ) DirectorySourceIterator {
         return DirectorySourceIterator{
             .directory_source = directory_source,
             .files = files,
@@ -222,7 +226,11 @@ pub const DirectorySource = struct {
     }
 
     /// Fetch content from the directory
-    fn fetch_iterator(self: *DirectorySource, allocator: std.mem.Allocator, file_system: *VFS) IngestionError!SourceIterator {
+    fn fetch_iterator(
+        self: *DirectorySource,
+        allocator: std.mem.Allocator,
+        file_system: *VFS,
+    ) IngestionError!SourceIterator {
         concurrency.assert_main_thread();
 
         const dir_stat = file_system.stat(self.config.directory_path) catch |err| {
@@ -262,7 +270,11 @@ pub const DirectorySource = struct {
     }
 
     /// Find all files matching the configured patterns
-    fn find_matching_files(self: *DirectorySource, allocator: std.mem.Allocator, file_system: *VFS) ![]DirectoryFileInfo {
+    fn find_matching_files(
+        self: *DirectorySource,
+        allocator: std.mem.Allocator,
+        file_system: *VFS,
+    ) ![]DirectoryFileInfo {
         var files = std.array_list.Managed(DirectoryFileInfo).init(allocator);
         try self.scan_directory_recursive(allocator, file_system, self.config.directory_path, "", &files);
 

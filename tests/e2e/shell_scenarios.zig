@@ -18,7 +18,10 @@ const ShellHarness = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, test_name: []const u8) !Self {
-        const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+        // Get absolute path to binary for shell execution
+        var cwd_buffer: [4096]u8 = undefined;
+        const cwd = try std.process.getCwd(&cwd_buffer);
+        const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "zig-out", "bin", "kausaldb" });
         const test_workspace = try create_shell_workspace(allocator, test_name);
 
         var env = try std.process.getEnvMap(allocator);
@@ -134,6 +137,7 @@ test "shell basic command chaining" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("chain_test");
+    defer testing.allocator.free(project_dir);
 
     // Chain multiple KausalDB commands using shell
     const chain_cmd = try std.fmt.allocPrint(testing.allocator, "{s} link {s} && {s} sync chain_test && {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path, shell_harness.binary_path });
@@ -206,6 +210,7 @@ test "shell environment variable integration" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("env_test");
+    defer testing.allocator.free(project_dir);
 
     // Test with environment variables
     const env_cmd = try std.fmt.allocPrint(testing.allocator, "KAUSAL_WORKSPACE=test_env {s} link {s} && KAUSAL_WORKSPACE=test_env {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
@@ -224,6 +229,7 @@ test "shell output redirection and processing" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("redirect_test");
+    defer testing.allocator.free(project_dir);
 
     // Test output redirection to files
     const redirect_cmd = try std.fmt.allocPrint(testing.allocator,
@@ -248,6 +254,7 @@ test "shell pipe operations with kausal commands" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("pipe_test");
+    defer testing.allocator.free(project_dir);
 
     // Test piping KausalDB output through shell utilities
     const pipe_cmd = try std.fmt.allocPrint(testing.allocator,
@@ -317,6 +324,7 @@ test "shell conditional execution based on kausal output" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("cond_test");
+    defer testing.allocator.free(project_dir);
 
     // Test conditional execution based on KausalDB command results
     const cond_cmd = try std.fmt.allocPrint(testing.allocator,
@@ -350,11 +358,12 @@ test "shell command substitution with kausal output" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("subst_test");
+    defer testing.allocator.free(project_dir);
 
     // Test command substitution using KausalDB output
     const subst_cmd = try std.fmt.allocPrint(testing.allocator,
         \\{s} link {s} &&
-        \\PROJECT_COUNT=$({s} status | grep -c "Path:" || echo "0") &&
+        \\PROJECT_COUNT=$({s} status | grep -c "linked from" || echo "0") &&
         \\echo "Found $PROJECT_COUNT linked projects" &&
         \\test "$PROJECT_COUNT" -ge "0"
     , .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
@@ -396,6 +405,7 @@ test "shell integration with json processing tools" {
     defer shell_harness.deinit();
 
     const project_dir = try shell_harness.create_shell_project("json_test");
+    defer testing.allocator.free(project_dir);
 
     // Test JSON output integration with shell tools (using basic tools available everywhere)
     const json_cmd = try std.fmt.allocPrint(testing.allocator,

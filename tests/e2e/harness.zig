@@ -6,7 +6,6 @@
 
 const std = @import("std");
 const testing = std.testing;
-const assert = std.debug.assert;
 
 /// Result of executing a KausalDB command
 pub const CommandResult = struct {

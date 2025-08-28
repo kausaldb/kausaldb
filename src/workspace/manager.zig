@@ -369,22 +369,20 @@ pub const WorkspaceManager = struct {
         // Note: Don't call source_config.deinit() since we're using an arena allocator
 
         var dir_src = DirectorySource.init(temp_allocator, source_config);
-        // Note: Don't call dir_src.deinit() since we're using an arena allocator
+        // Arena allocator pattern: all component memory freed together at arena cleanup
 
         // Configure Zig parser
         const parser_config = ZigParserConfig{};
         var zig_psr = ZigParser.init(temp_allocator, parser_config);
-        // Note: Don't call zig_psr.deinit() since it doesn't allocate anything
+        // Parser is stateless with no internal allocations to release
 
-        // Configure semantic chunker
         const chunker_config = SemanticChunkerConfig{};
         var sem_chunker = SemanticChunker.init(temp_allocator, chunker_config);
-        // Note: Don't call sem_chunker.deinit() since we're using an arena allocator
+        // Arena-based cleanup eliminates individual component deinitialization
 
         // Configure and create ingestion pipeline
         var pipeline_config = PipelineConfig.init(temp_allocator);
-        // Note: Don't call pipeline_config.deinit() since we're using an arena allocator
-        // that will clean up all allocations automatically
+        // Arena pattern ensures O(1) cleanup of all pipeline configuration memory
 
         // Add some metadata to identify the source
         try pipeline_config.global_metadata.put("workspace_name", try temp_allocator.dupe(u8, codebase_name));
@@ -393,7 +391,6 @@ pub const WorkspaceManager = struct {
         var pipeline = try IngestionPipeline.init(temp_allocator, &self.storage_engine.vfs, pipeline_config);
         defer pipeline.deinit();
 
-        // Register pipeline components
         try pipeline.register_source(dir_src.source());
         try pipeline.register_parser(zig_psr.parser());
         try pipeline.register_chunker(sem_chunker.chunker());

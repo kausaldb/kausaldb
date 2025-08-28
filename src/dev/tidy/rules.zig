@@ -1636,10 +1636,15 @@ fn check_simulation_first_testing(context: *RuleContext) []const Rule.RuleViolat
     var violations = std.array_list.Managed(Rule.RuleViolation).init(context.allocator);
     violations.ensureTotalCapacity(20) catch {};
 
-    // Only apply to test files
+    // Only apply to test files, but exclude E2E tests
     if (!std.mem.endsWith(u8, context.file_path, "_test.zig") and
         std.mem.indexOf(u8, context.file_path, "tests/") == null)
     {
+        return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
+    }
+
+    // Skip E2E tests - they need real filesystem access to test binary behavior
+    if (std.mem.indexOf(u8, context.file_path, "tests/e2e/") != null) {
         return violations.toOwnedSlice() catch &[_]Rule.RuleViolation{};
     }
 

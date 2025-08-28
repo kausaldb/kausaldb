@@ -134,7 +134,7 @@ test "query commands with JSON output format" {
     }
 
     // Test trace with JSON output
-    var trace_result = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--format", "json" });
+    var trace_result = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--json" });
     defer trace_result.deinit();
 
     try trace_result.expect_success();

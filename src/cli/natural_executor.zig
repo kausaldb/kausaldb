@@ -196,7 +196,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             } else {
                 print_stderr("Error: Path '{s}' does not exist\n", .{cmd.path});
             }
-            return;
+            return error.FileNotFound;
         },
         else => return err,
     };
@@ -211,7 +211,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
                 print_stderr("Error: Codebase is already linked\n", .{});
                 print_stderr("Use 'kausaldb unlink {s}' first if you want to re-link it.\n", .{std.fs.path.basename(resolved_path)});
             }
-            return;
+            return error.CodebaseAlreadyLinked;
         },
         workspace_manager.WorkspaceError.InvalidCodebasePath => {
             if (cmd.format == .json) {
@@ -221,7 +221,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             } else {
                 print_stderr("Error: Invalid codebase path '{s}'\n", .{resolved_path});
             }
-            return;
+            return error.InvalidCodebasePath;
         },
         storage.StorageError.WriteBlocked => {
             // WriteBlocked should not occur in single-threaded CLI usage.
@@ -235,7 +235,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
                 print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
                 print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
             }
-            return;
+            return error.WriteBlocked;
         },
         else => {
             if (cmd.format == .json) {
@@ -246,7 +246,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
                 print_stderr("Error: Failed to link codebase '{s}'\n", .{resolved_path});
                 print_stderr("This may be due to a storage issue. Please try again.\n", .{});
             }
-            return;
+            return err;
         },
     };
 
@@ -276,7 +276,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
                 print_stderr("Error: Codebase '{s}' not found\n", .{cmd.name});
                 write_stdout("Use 'kausaldb workspace' to see linked codebases\n");
             }
-            return;
+            return error.CodebaseNotFound;
         },
         storage.StorageError.WriteBlocked => {
             // WriteBlocked should not occur in single-threaded CLI usage.
@@ -290,7 +290,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
                 print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
                 print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
             }
-            return;
+            return error.WriteBlocked;
         },
         else => {
             if (cmd.format == .json) {
@@ -299,9 +299,9 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
                 , .{cmd.name});
             } else {
                 print_stderr("Error: Failed to unlink codebase '{s}'\n", .{cmd.name});
-                print_stderr("This may be due to storage being busy. Please try again.\n", .{});
+                print_stderr("This may be due to a storage issue. Please try again.\n", .{});
             }
-            return;
+            return err;
         },
     };
 

@@ -316,7 +316,7 @@ fn execute_link_command(context: *ExecutionContext, link_cmd: commands.LinkComma
     const abs_path = std.fs.cwd().realpath(link_cmd.path, &path_buffer) catch |err| switch (err) {
         error.FileNotFound => {
             print_stderr("Error: Path '{s}' does not exist\n", .{link_cmd.path});
-            return;
+            return error.FileNotFound;
         },
         else => return err,
     };
@@ -325,7 +325,7 @@ fn execute_link_command(context: *ExecutionContext, link_cmd: commands.LinkComma
         workspace_manager.WorkspaceError.CodebaseAlreadyLinked => {
             const name = link_cmd.name orelse std.fs.path.basename(abs_path);
             print_stderr("Error: Codebase '{s}' is already linked to workspace\n", .{name});
-            return;
+            return error.CodebaseAlreadyLinked;
         },
         workspace_manager.WorkspaceError.InvalidCodebasePath => {
             print_stderr("Error: Invalid codebase path '{s}'\n", .{abs_path});
@@ -348,7 +348,7 @@ fn execute_unlink_command(context: *ExecutionContext, unlink_cmd: commands.Unlin
     workspace.unlink_codebase(unlink_cmd.name) catch |err| switch (err) {
         workspace_manager.WorkspaceError.CodebaseNotFound => {
             print_stderr("Error: Codebase '{s}' is not linked to workspace\n", .{unlink_cmd.name});
-            return;
+            return error.CodebaseNotFound;
         },
         else => return err,
     };
