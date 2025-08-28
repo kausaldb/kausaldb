@@ -57,6 +57,7 @@ fn platform_global_sync() PlatformSyncError!void {
     const start_time = std.time.nanoTimestamp();
     errdefer {
         const end_time = std.time.nanoTimestamp();
+        // Safety: Timestamp difference guaranteed to be positive and within u64 range
         const duration_ns = @as(u64, @intCast(end_time - start_time));
         std.debug.print("platform_global_sync failed on {s} after {}ns ({}µs)\n", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
     }

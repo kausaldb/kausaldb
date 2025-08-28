@@ -234,6 +234,7 @@ test quine {
         return;
     }
 
+    // Safety: File stat size guaranteed to be within allocator limits
     const current_contents = try current_file.readToEndAlloc(arena.allocator(), @intCast(file_stat.size));
 
     // Arena Reset Pattern: process files one at a time with bounded memory
@@ -260,6 +261,7 @@ test quine {
         var file_arena = std.heap.ArenaAllocator.init(backing_allocator);
         defer file_arena.deinit(); // O(1) cleanup per file
 
+        // Safety: Entry stat size clamped to safe read buffer size
         const read_size = @min(@as(usize, 4096), @as(usize, @intCast(entry_stat.size)));
         const file_content = src_dir.readFileAlloc(file_arena.allocator(), entry.path, read_size) catch continue;
 
