@@ -298,7 +298,7 @@ test "backpressure under normal memory conditions maintains full batch size" {
     };
 
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 100;
 
@@ -368,7 +368,7 @@ test "backpressure under memory pressure reduces batch sizes appropriately" {
     };
 
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 100;
 
@@ -422,7 +422,7 @@ test "backpressure recovers batch size after pressure relief" {
     };
 
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 80;
 
@@ -496,7 +496,7 @@ test "adaptive batch sizing responds proportionally to pressure levels" {
     };
 
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 120;
 
@@ -587,7 +587,7 @@ test "memory recovery behavior stabilizes after sustained pressure" {
     };
 
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.backpressure = backpressure_config;
     pipeline_config.max_batch_size = 70;
 
@@ -637,7 +637,7 @@ test "ingestion pipeline fault tolerance with systematic corruption" {
 
     // Create ingestion pipeline with conservative settings for fault testing
     var pipeline_config = PipelineConfig.init(allocator);
-    defer pipeline_config.deinit();
+    defer pipeline_config.deinit(allocator);
     pipeline_config.max_batch_size = 10; // Small batches for granular fault isolation
     pipeline_config.continue_on_error = true; // Test recovery behavior
     pipeline_config.backpressure = backpressure_config;

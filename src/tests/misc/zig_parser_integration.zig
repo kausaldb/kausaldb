@@ -55,7 +55,7 @@ test "parser extracts functions and creates call edges" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "test.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "test.zig"));
 
     const content = SourceContent{
         .data = zig_source,
@@ -137,7 +137,7 @@ test "parser handles malformed code gracefully" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "broken.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "broken.zig"));
 
     const content = SourceContent{
         .data = malformed_source,
@@ -216,7 +216,7 @@ test "parser extracts struct definitions and metadata" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "structs.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "structs.zig"));
 
     const content = SourceContent{
         .data = struct_source,
@@ -317,7 +317,7 @@ test "parser preserves source location information" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "multiline.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "multiline.zig"));
 
     const content = SourceContent{
         .data = multi_line_source,
@@ -381,7 +381,7 @@ test "parser handles test declarations" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "with_tests.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "with_tests.zig"));
 
     const content = SourceContent{
         .data = test_source,
