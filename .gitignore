@@ -14,7 +14,21 @@ fuzz_reports/
 
 # Data directories (runtime generated)
 .kausal-data/
-kausaldb_data
+.kausal_data/
+kausal-data/
+kausal_data/
+kausaldb_data/
+
+# Test artifacts and simulation data
+test_*/
+scenario_*/
+*_test/
+*_test_*/
+*_data/
+rapid_cycle_*/
+wal_*/
+*_corruption_test/
+*_stress*/
 
 # Where does this damn file come from?
 .DS_Store

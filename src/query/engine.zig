@@ -688,10 +688,18 @@ pub const QueryEngine = struct {
         entity_type: []const u8,
         name: []const u8,
     ) !SemanticQueryResult {
-        const search_text = try std.fmt.allocPrint(self.allocator, "{s} {s} codebase:{s}", .{ entity_type, name, codebase });
+        _ = codebase; // TODO: Filter by codebase in search
+        _ = entity_type; // TODO: Filter by entity type in search
+
+        // Use just the name for content search - this is more likely to match
+        // the actual function/struct name in the source code
+        const search_text = try std.fmt.allocPrint(self.allocator, "{s}", .{name});
         defer self.allocator.free(search_text);
 
-        const semantic_query = SemanticQuery.init(search_text);
+        // Use a lower threshold for name-based searches since we're looking for exact name matches
+        var semantic_query = SemanticQuery.init(search_text);
+        semantic_query.similarity_threshold = 0.1; // Very permissive since we're doing exact name matching
+
         return self.execute_semantic_query(semantic_query);
     }
 

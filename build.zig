@@ -133,32 +133,23 @@ pub fn build(b: *std.Build) void {
     }
 
     // E2E tests - binary interface testing
-    const e2e_tests = [_][]const u8{
-        "tests/e2e/cli_test.zig",
-        "tests/e2e/server_test.zig",
-    };
-
     const e2e_step = b.step("test-e2e", "Run end-to-end tests");
-    for (e2e_tests) |test_path| {
-        std.fs.cwd().access(test_path, .{}) catch continue;
+    const e2e_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/e2e_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    e2e_test.root_module.addImport("build_options", build_options.createModule());
+    e2e_test.linkLibC();
 
-        const e2e_test = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(test_path),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        e2e_test.root_module.addImport("build_options", build_options.createModule());
-        e2e_test.linkLibC();
+    const run_e2e_test = b.addRunArtifact(e2e_test);
+    run_e2e_test.step.dependOn(&exe.step); // E2E tests need the binary
+    run_e2e_test.has_side_effects = true;
+    if (b.args) |args| run_e2e_test.addArgs(args);
 
-        const run_e2e_test = b.addRunArtifact(e2e_test);
-        run_e2e_test.step.dependOn(&exe.step); // E2E tests need the binary
-        run_e2e_test.has_side_effects = true;
-        if (b.args) |args| run_e2e_test.addArgs(args);
-
-        e2e_step.dependOn(&run_e2e_test.step);
-    }
+    e2e_step.dependOn(&run_e2e_test.step);
 
     // Aggregate test commands
     const test_fast_step = b.step("test-fast", "Run fast tests (unit + integration, use --test-filter=\"name\" to filter)");

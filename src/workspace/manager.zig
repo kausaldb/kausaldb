@@ -13,9 +13,14 @@ const std = @import("std");
 const assert_mod = @import("../core/assert.zig");
 const context_block = @import("../core/types.zig");
 const error_context = @import("../core/error_context.zig");
+const directory_source = @import("../ingestion/directory_source.zig");
+const git_source = @import("../ingestion/git_source.zig");
 const memory = @import("../core/memory.zig");
+const ingestion_pipeline = @import("../ingestion/pipeline.zig");
+const semantic_chunker = @import("../ingestion/semantic_chunker.zig");
 const storage = @import("../storage/engine.zig");
 const vfs = @import("../core/vfs.zig");
+const zig_parser = @import("../ingestion/zig_parser.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
@@ -23,8 +28,18 @@ const fatal_assert = assert_mod.fatal_assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const ContextBlock = context_block.ContextBlock;
+const DirectorySource = directory_source.DirectorySource;
+const DirectorySourceConfig = directory_source.DirectorySourceConfig;
+const GitSource = git_source.GitSource;
+const GitSourceConfig = git_source.GitSourceConfig;
+const IngestionPipeline = ingestion_pipeline.IngestionPipeline;
+const PipelineConfig = ingestion_pipeline.PipelineConfig;
+const SemanticChunker = semantic_chunker.SemanticChunker;
+const SemanticChunkerConfig = semantic_chunker.SemanticChunkerConfig;
 const StorageEngine = storage.StorageEngine;
 const VFS = vfs.VFS;
+const ZigParser = zig_parser.ZigParser;
+const ZigParserConfig = zig_parser.ZigParserConfig;
 
 pub const WorkspaceError = error{
     CodebaseAlreadyLinked,
@@ -151,9 +166,16 @@ pub const WorkspaceManager = struct {
         try self.linked_codebases.put(codebase_info.name, codebase_info);
         try self.persist_workspace_metadata();
 
-        // TODO: Trigger initial ingestion of codebase
-        // This will be implemented in the next phase when we integrate
-        // with the existing IngestionPipeline
+        // Trigger initial ingestion of the linked codebase
+        self.ingest_codebase(codebase_info.name, codebase_info.path) catch |err| {
+            // Log the error but don't fail the link operation
+            // The user can manually sync later if needed
+            error_context.log_ingestion_error(err, error_context.IngestionContext{
+                .operation = "initial_ingestion",
+                .repository_path = codebase_info.path,
+                .content_type = "codebase",
+            });
+        };
     }
 
     /// Remove a codebase from the workspace.
@@ -218,8 +240,13 @@ pub const WorkspaceManager = struct {
         // Atomic persistence ensures workspace state survives crashes
         try self.persist_workspace_metadata();
 
-        // TODO: Trigger re-ingestion of codebase
-        // This will be implemented when we integrate with IngestionPipeline
+        // Trigger re-ingestion of the codebase
+        try self.ingest_codebase(name, codebase_entry.value_ptr.path);
+
+        // Update block and edge counts after successful ingestion
+        // For now, we'll leave the counts as-is since updating them requires
+        // querying the storage engine which would be expensive
+        // TODO: Implement efficient block/edge counting
     }
 
     /// Load workspace metadata from storage engine.
@@ -237,6 +264,11 @@ pub const WorkspaceManager = struct {
 
         if (metadata_block) |block| {
             try self.deserialize_workspace_config(block.block.content);
+
+            // Clean up the cloned OwnedBlock to prevent memory leaks
+            self.backing_allocator.free(block.block.source_uri);
+            self.backing_allocator.free(block.block.metadata_json);
+            self.backing_allocator.free(block.block.content);
         }
     }
 
@@ -323,5 +355,59 @@ pub const WorkspaceManager = struct {
 
             try self.linked_codebases.put(codebase_info.name, codebase_info);
         }
+    }
+
+    /// Ingest a codebase using the ingestion pipeline
+    fn ingest_codebase(self: *WorkspaceManager, codebase_name: []const u8, codebase_path: []const u8) !void {
+        // Create a temporary allocator for the ingestion process
+        var arena_allocator = std.heap.ArenaAllocator.init(self.backing_allocator);
+        defer arena_allocator.deinit();
+        const temp_allocator = arena_allocator.allocator();
+
+        // Configure Directory source for local filesystem scanning
+        const source_config = try DirectorySourceConfig.init(temp_allocator, codebase_path);
+        // Note: Don't call source_config.deinit() since we're using an arena allocator
+
+        var dir_src = DirectorySource.init(temp_allocator, source_config);
+        // Note: Don't call dir_src.deinit() since we're using an arena allocator
+
+        // Configure Zig parser
+        const parser_config = ZigParserConfig{};
+        var zig_psr = ZigParser.init(temp_allocator, parser_config);
+        // Note: Don't call zig_psr.deinit() since it doesn't allocate anything
+
+        // Configure semantic chunker
+        const chunker_config = SemanticChunkerConfig{};
+        var sem_chunker = SemanticChunker.init(temp_allocator, chunker_config);
+        // Note: Don't call sem_chunker.deinit() since we're using an arena allocator
+
+        // Configure and create ingestion pipeline
+        var pipeline_config = PipelineConfig.init(temp_allocator);
+        // Note: Don't call pipeline_config.deinit() since we're using an arena allocator
+        // that will clean up all allocations automatically
+
+        // Add some metadata to identify the source
+        try pipeline_config.global_metadata.put("workspace_name", try temp_allocator.dupe(u8, codebase_name));
+        try pipeline_config.global_metadata.put("codebase_path", try temp_allocator.dupe(u8, codebase_path));
+
+        var pipeline = try IngestionPipeline.init(temp_allocator, &self.storage_engine.vfs, pipeline_config);
+        defer pipeline.deinit();
+
+        // Register pipeline components
+        try pipeline.register_source(dir_src.source());
+        try pipeline.register_parser(zig_psr.parser());
+        try pipeline.register_chunker(sem_chunker.chunker());
+
+        // Execute ingestion with backpressure control
+        // This directly stores blocks to the storage engine without accumulating them in memory
+        try pipeline.execute_with_backpressure(self.storage_engine);
+
+        // Log statistics for visibility
+        const stats = pipeline.stats();
+        std.log.info("Ingested codebase '{s}': {} sources processed, {} blocks generated", .{
+            codebase_name,
+            stats.sources_processed,
+            stats.blocks_generated,
+        });
     }
 };

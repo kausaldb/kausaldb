@@ -308,7 +308,12 @@ pub const PipelineConfig = struct {
         };
     }
 
-    pub fn deinit(self: *PipelineConfig) void {
+    pub fn deinit(self: *PipelineConfig, allocator: std.mem.Allocator) void {
+        // Free all the values before deinitializing the HashMap
+        var iterator = self.global_metadata.iterator();
+        while (iterator.next()) |entry| {
+            allocator.free(entry.value_ptr.*);
+        }
         self.global_metadata.deinit();
     }
 };
@@ -379,7 +384,7 @@ pub const IngestionPipeline = struct {
         self.sources.deinit();
         self.parsers.deinit();
         self.chunkers.deinit();
-        self.config.deinit();
+        self.config.deinit(self.allocator);
         self.arena.deinit();
     }
 
@@ -742,7 +747,7 @@ test "pipeline creation and cleanup" {
     defer sim_vfs.deinit();
 
     var config = PipelineConfig.init(allocator);
-    defer config.deinit();
+    defer config.deinit(allocator);
 
     var vfs_instance = sim_vfs.vfs();
     var pipeline = try IngestionPipeline.init(allocator, &vfs_instance, config);
