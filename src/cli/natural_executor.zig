@@ -522,7 +522,7 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
 
 fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.ShowCommand) !void {
     try context.ensure_query_initialized();
-    _ = context.query_engine.?;
+    const query_eng = context.query_engine.?;
 
     // Relation validation ensures only supported graph traversal patterns
     if (!natural_commands.validate_relation_type(cmd.relation_type)) {
@@ -537,20 +537,116 @@ fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
         return;
     }
 
-    // For now, return helpful message since this requires target resolution
+    const workspace = cmd.workspace orelse "default";
+
+    // First find the target entity to get its block ID
+    const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
+        query_engine.QueryError.SemanticSearchUnavailable => {
+            if (cmd.format == .json) {
+                write_stdout("{\"error\": \"Semantic search not available\"}\n");
+            } else {
+                write_stdout("Semantic search is not available yet.\n");
+                write_stdout("Make sure codebases are linked and synced.\n");
+            }
+            return;
+        },
+        else => return err,
+    };
+    defer search_result.deinit();
+
+    if (search_result.total_matches == 0) {
+        if (cmd.format == .json) {
+            print_json_stdout(context.allocator,
+                \\{{"error": "Target '{s}' not found"}}
+            , .{cmd.target});
+        } else {
+            print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(".\n");
+        }
+        return;
+    }
+
+    // Use the first match as target
+    const target_block = search_result.results[0].block.block;
+    const target_id = target_block.id;
+
+    // Execute the appropriate traversal query
+    const traversal_result = (if (std.mem.indexOf(u8, cmd.relation_type, "callers") != null) blk: {
+        // callers - incoming traversal
+        break :blk query_eng.find_callers(workspace, target_id, 1);
+    } else if (std.mem.indexOf(u8, cmd.relation_type, "callees") != null) blk: {
+        // callees - outgoing traversal
+        break :blk query_eng.find_callees(workspace, target_id, 1);
+    } else blk: {
+        // references - bidirectional traversal
+        break :blk query_eng.find_references(workspace, target_id, 1);
+    }) catch |err| {
+        if (cmd.format == .json) {
+            print_json_stdout(context.allocator,
+                \\{{"error": "Failed to execute traversal query"}}
+            , .{});
+        } else {
+            print_stderr("Error: Failed to execute traversal query\n", .{});
+        }
+        return err;
+    };
+    defer traversal_result.deinit();
+
+    // Output results
     if (cmd.format == .json) {
-        print_json_stdout(context.allocator,
-            \\{{"message": "Show {s} of '{s}' - implementation in progress"}}
-        , .{ cmd.relation_type, cmd.target });
+        write_stdout("{\n");
+        print_stdout(context.allocator, "  \"query\": {{\"relation\": \"{s}\", \"target\": \"{s}\", \"workspace\": \"{s}\"}},\n", .{ cmd.relation_type, cmd.target, workspace });
+        print_stdout(context.allocator, "  \"total_matches\": {},\n", .{traversal_result.blocks.len});
+        write_stdout("  \"results\": [\n");
+        for (traversal_result.blocks, 0..) |owned_block, i| {
+            const block = owned_block.read(.query_engine);
+            print_json_stdout(context.allocator,
+                \\    {{"name": "{s}", "source": "{s}", "depth": {}}}
+            , .{ extract_entity_name(block.*), block.source_uri, traversal_result.depths[i] });
+            if (i < traversal_result.blocks.len - 1) write_stdout(",");
+            write_stdout("\n");
+        }
+        write_stdout("  ]\n}\n");
     } else {
-        print_stdout(context.allocator, "Showing {s} of '{s}' - implementation in progress\n", .{ cmd.relation_type, cmd.target });
-        write_stdout("This requires first finding the target entity, then traversing relationships.\n");
+        if (traversal_result.blocks.len == 0) {
+            print_stdout(context.allocator, "No {s} found for '{s}'", .{ cmd.relation_type, cmd.target });
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(".\n");
+        } else {
+            print_stdout(context.allocator, "Found {} {s} for '{s}'", .{ traversal_result.blocks.len, cmd.relation_type, cmd.target });
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(":\n\n");
+
+            for (traversal_result.blocks, 0..) |owned_block, i| {
+                const block = owned_block.read(.query_engine);
+                print_stdout(context.allocator, "{}. {s}\n", .{ i + 1, extract_entity_name(block.*) });
+                print_stdout(context.allocator, "   Source: {s}\n", .{block.source_uri});
+
+                if (block.content.len > 0) {
+                    const preview = if (block.content.len > 100)
+                        try std.fmt.allocPrint(context.allocator, "{s}...", .{block.content[0..100]})
+                    else
+                        try context.allocator.dupe(u8, block.content);
+                    defer context.allocator.free(preview);
+
+                    print_stdout(context.allocator, "   Preview: {s}\n", .{preview});
+                }
+                write_stdout("\n");
+            }
+        }
     }
 }
 
 fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.TraceCommand) !void {
     try context.ensure_query_initialized();
-    _ = context.query_engine.?;
+    const query_eng = context.query_engine.?;
 
     // Direction validation prevents invalid multi-hop traversal requests
     if (!natural_commands.validate_direction(cmd.direction)) {
@@ -566,15 +662,124 @@ fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.
     }
 
     const depth = cmd.depth orelse 3;
+    const workspace = cmd.workspace orelse "default";
 
-    // For now, return helpful message since this requires target resolution
+    // First find the target entity to get its block ID
+    const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
+        query_engine.QueryError.SemanticSearchUnavailable => {
+            if (cmd.format == .json) {
+                write_stdout("{\"error\": \"Semantic search not available\"}\n");
+            } else {
+                write_stdout("Semantic search is not available yet.\n");
+                write_stdout("Make sure codebases are linked and synced.\n");
+            }
+            return;
+        },
+        else => return err,
+    };
+    defer search_result.deinit();
+
+    if (search_result.total_matches == 0) {
+        if (cmd.format == .json) {
+            print_json_stdout(context.allocator,
+                \\{{"error": "Target '{s}' not found"}}
+            , .{cmd.target});
+        } else {
+            print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(".\n");
+        }
+        return;
+    }
+
+    // Use the first match as target
+    const target_block = search_result.results[0].block.block;
+    const target_id = target_block.id;
+
+    // Execute the appropriate traversal query based on direction
+    const traversal_result = (if (std.mem.eql(u8, cmd.direction, "callers")) blk: {
+        // callers - incoming traversal
+        break :blk query_eng.find_callers(workspace, target_id, depth);
+    } else if (std.mem.eql(u8, cmd.direction, "callees")) blk: {
+        // callees - outgoing traversal
+        break :blk query_eng.find_callees(workspace, target_id, depth);
+    } else if (std.mem.eql(u8, cmd.direction, "references") or std.mem.eql(u8, cmd.direction, "both")) blk: {
+        // references/both - bidirectional traversal
+        break :blk query_eng.find_references(workspace, target_id, depth);
+    } else blk: {
+        // Default to callees for unknown directions
+        break :blk query_eng.find_callees(workspace, target_id, depth);
+    }) catch |err| {
+        if (cmd.format == .json) {
+            print_json_stdout(context.allocator,
+                \\{{"error": "Failed to execute traversal query"}}
+            , .{});
+        } else {
+            print_stderr("Error: Failed to execute traversal query\n", .{});
+        }
+        return err;
+    };
+    defer traversal_result.deinit();
+
+    // Output results
     if (cmd.format == .json) {
-        print_json_stdout(context.allocator,
-            \\{{"message": "Trace {s} from '{s}' depth {} - implementation in progress"}}
-        , .{ cmd.direction, cmd.target, depth });
+        write_stdout("{\n");
+        print_stdout(context.allocator, "  \"query\": {{\"direction\": \"{s}\", \"target\": \"{s}\", \"depth\": {}, \"workspace\": \"{s}\"}},\n", .{ cmd.direction, cmd.target, depth, workspace });
+        print_stdout(context.allocator, "  \"total_matches\": {},\n", .{traversal_result.blocks.len});
+        write_stdout("  \"results\": [\n");
+        for (traversal_result.blocks, 0..) |owned_block, i| {
+            const block = owned_block.read(.query_engine);
+            print_json_stdout(context.allocator,
+                \\    {{"name": "{s}", "source": "{s}", "depth": {}}}
+            , .{ extract_entity_name(block.*), block.source_uri, traversal_result.depths[i] });
+            if (i < traversal_result.blocks.len - 1) write_stdout(",");
+            write_stdout("\n");
+        }
+        write_stdout("  ]\n}\n");
     } else {
-        print_stdout(context.allocator, "Tracing {s} from '{s}' (depth: {}) - implementation in progress\n", .{ cmd.direction, cmd.target, depth });
-        write_stdout("This requires first finding the target entity, then performing graph traversal.\n");
+        if (traversal_result.blocks.len == 0) {
+            print_stdout(context.allocator, "No {s} found for '{s}' (depth: {})", .{ cmd.direction, cmd.target, depth });
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(".\n");
+        } else {
+            print_stdout(context.allocator, "Trace {s} from '{s}' (depth: {})", .{ cmd.direction, cmd.target, depth });
+            if (cmd.workspace) |ws| {
+                print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+            }
+            write_stdout(":\n\n");
+
+            for (traversal_result.blocks, 0..) |owned_block, i| {
+                const block = owned_block.read(.query_engine);
+                const block_depth = traversal_result.depths[i];
+
+                // Create indentation based on depth
+                var depth_spaces = std.array_list.Managed(u8).init(context.allocator);
+                defer depth_spaces.deinit();
+                var d: u32 = 0;
+                while (d < block_depth) : (d += 1) {
+                    try depth_spaces.appendSlice("  ");
+                }
+                const depth_indicator = depth_spaces.items;
+
+                print_stdout(context.allocator, "{s}{}. {s} (depth: {})\n", .{ depth_indicator, i + 1, extract_entity_name(block.*), block_depth });
+                print_stdout(context.allocator, "{s}   Source: {s}\n", .{ depth_indicator, block.source_uri });
+
+                if (block.content.len > 0) {
+                    const preview = if (block.content.len > 100)
+                        try std.fmt.allocPrint(context.allocator, "{s}...", .{block.content[0..100]})
+                    else
+                        try context.allocator.dupe(u8, block.content);
+                    defer context.allocator.free(preview);
+
+                    print_stdout(context.allocator, "{s}   Preview: {s}\n", .{ depth_indicator, preview });
+                }
+                write_stdout("\n");
+            }
+        }
     }
 }
 
@@ -715,4 +920,74 @@ fn show_command_help(topic: []const u8) void {
         print_stdout(std.heap.page_allocator, "No help available for topic: {s}\n", .{topic});
         write_stdout("Available topics: link, find, show, trace, sync, status\n");
     }
+}
+
+// === Unit Tests ===
+
+test "natural command parsing validation" {
+    // Test that relation types validate correctly
+    try std.testing.expect(natural_commands.validate_relation_type("callers"));
+    try std.testing.expect(natural_commands.validate_relation_type("callees"));
+    try std.testing.expect(natural_commands.validate_relation_type("references"));
+    try std.testing.expect(!natural_commands.validate_relation_type("invalid"));
+
+    // Test that trace directions validate correctly
+    try std.testing.expect(natural_commands.validate_direction("callers"));
+    try std.testing.expect(natural_commands.validate_direction("callees"));
+    try std.testing.expect(natural_commands.validate_direction("references"));
+    try std.testing.expect(natural_commands.validate_direction("both"));
+    try std.testing.expect(!natural_commands.validate_direction("invalid"));
+}
+
+test "execution context initialization" {
+    const allocator = std.testing.allocator;
+
+    // Create temporary directory for test
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const test_data_dir = try tmp_dir.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(test_data_dir);
+
+    var context = try NaturalExecutionContext.init(allocator, test_data_dir);
+    defer context.deinit();
+
+    try std.testing.expect(context.storage_engine == null);
+    try std.testing.expect(context.query_engine == null);
+    try std.testing.expect(context.workspace_manager == null);
+
+    // Test lazy initialization
+    try context.ensure_storage_initialized();
+    try std.testing.expect(context.storage_engine != null);
+
+    try context.ensure_query_initialized();
+    try std.testing.expect(context.query_engine != null);
+
+    try context.ensure_workspace_initialized();
+    try std.testing.expect(context.workspace_manager != null);
+}
+
+test "extract entity name from block content" {
+    const test_block = ContextBlock{
+        .id = try types.BlockId.from_hex("11111111111111111111111111111111"),
+        .version = 1,
+        .source_uri = "test://example.zig#my_function",
+        .metadata_json = "{\"name\": \"my_function\", \"type\": \"function\"}",
+        .content = "fn my_function() {}",
+    };
+
+    const extracted = extract_entity_name(test_block);
+    try std.testing.expectEqualStrings("my_function", extracted);
+
+    // Test fallback to source URI
+    const uri_fallback_block = ContextBlock{
+        .id = try types.BlockId.from_hex("22222222222222222222222222222222"),
+        .version = 1,
+        .source_uri = "test://example.zig#fallback_name",
+        .metadata_json = "{}",
+        .content = "some content",
+    };
+
+    const uri_extracted = extract_entity_name(uri_fallback_block);
+    try std.testing.expectEqualStrings("fallback_name", uri_extracted);
 }
