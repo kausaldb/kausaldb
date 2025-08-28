@@ -86,11 +86,18 @@ pub const E2EHarness = struct {
 
         // Check if binary exists, if not try to build it
         std.fs.cwd().access(binary_path, .{}) catch {
-            std.debug.print("Binary not found, attempting to build...\n", .{});
+            std.debug.print("Binary not found at {s}, attempting to build...\n", .{binary_path});
             build_kausaldb_binary(allocator) catch |err| {
                 std.debug.print("Failed to build binary: {}\n", .{err});
                 return err;
             };
+
+            // Verify the binary was actually built
+            std.fs.cwd().access(binary_path, .{}) catch {
+                std.debug.print("Binary still not found after build attempt at: {s}\n", .{binary_path});
+                return error.BinaryNotFound;
+            };
+            std.debug.print("Binary successfully built at: {s}\n", .{binary_path});
         };
         const test_workspace = try create_isolated_workspace(allocator, test_name);
 

@@ -169,6 +169,16 @@ jobs:
       - name: Setup Zig
         uses: ./.github/actions/setup-zig
 
+      - name: Build All Targets
+        run: |
+          echo "Building all executables for comprehensive validation..."
+          ./zig/zig build -Doptimize=ReleaseSafe --summary all
+          echo "Verifying executables..."
+          test -f zig-out/bin/kausaldb && echo "kausaldb built"
+          test -f zig-out/bin/benchmark && echo "benchmark built"
+          test -f zig-out/bin/fuzz && echo "fuzz built"
+          test -f zig-out/bin/tidy && echo "tidy built"
+
       - name: Complete Test Suite
         run: |
           echo "Running complete test suite (unit + integration + e2e + scenarios + golden masters)..."

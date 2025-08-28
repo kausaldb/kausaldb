@@ -9,10 +9,28 @@ const testing = std.testing;
 test "binary exists and is executable" {
     const binary_path = "zig-out/bin/kausaldb";
 
-    // Check if binary file exists
-    std.fs.cwd().access(binary_path, .{}) catch |err| {
-        std.debug.print("Binary not found at: {s}\n", .{binary_path});
-        return err;
+    // Check if binary file exists, try to build if not
+    std.fs.cwd().access(binary_path, .{}) catch {
+        std.debug.print("Binary not found at: {s}, attempting to build...\n", .{binary_path});
+
+        // Try to build the binary
+        const build_result = try std.process.Child.run(.{
+            .allocator = testing.allocator,
+            .argv = &[_][]const u8{ "./zig/zig", "build" },
+        });
+        defer testing.allocator.free(build_result.stdout);
+        defer testing.allocator.free(build_result.stderr);
+
+        if (build_result.term != .Exited or build_result.term.Exited != 0) {
+            std.debug.print("Build failed:\nstdout: {s}\nstderr: {s}\n", .{ build_result.stdout, build_result.stderr });
+            return error.BuildFailed;
+        }
+
+        // Verify the binary was actually built
+        std.fs.cwd().access(binary_path, .{}) catch {
+            std.debug.print("Binary still not found after build attempt\n", .{});
+            return error.BinaryNotFound;
+        };
     };
 
     std.debug.print("Binary found at: {s}\n", .{binary_path});
