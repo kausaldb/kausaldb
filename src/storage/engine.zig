@@ -490,12 +490,14 @@ pub const StorageEngine = struct {
                 return err;
             };
 
-            // After flushing memtable (which creates new SSTable), check for compaction
-            // This prevents L0 SSTable accumulation that can cause WriteBlocked errors
-            self.sstable_manager.check_and_run_compaction() catch |err| {
-                error_context.log_storage_error(err, error_context.block_context("check_and_run_compaction", block_data.id));
-                return err;
-            };
+            // Only trigger compaction if actually needed to prevent L0 accumulation
+            // This avoids performance regression from unnecessary compaction
+            if (self.sstable_manager.should_compact()) {
+                self.sstable_manager.check_and_run_compaction() catch |err| {
+                    error_context.log_storage_error(err, error_context.block_context("check_and_run_compaction", block_data.id));
+                    return err;
+                };
+            }
         }
 
         // Update throttle state after successful write

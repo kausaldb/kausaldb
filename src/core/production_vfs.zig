@@ -517,10 +517,7 @@ test "platform_global_sync coverage" {
     const result = platform_global_sync();
     switch (builtin.os.tag) {
         .linux, .macos, .windows => {
-            // Should complete without error on supported platforms (Linux, macOS)
-            // On Windows, provides best-effort flush behavior
-            // Unsupported platforms return IoError
-
+            // Should complete without error on supported platforms
             try result;
         },
         else => {
