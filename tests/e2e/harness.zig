@@ -81,10 +81,17 @@ pub const E2EHarness = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, test_name: []const u8) !Self {
-        // Ensure binary is built before testing
-        try build_kausaldb_binary(allocator);
-
+        // Try to ensure binary exists, build if needed (CI fallback)
         const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+
+        // Check if binary exists, if not try to build it
+        std.fs.cwd().access(binary_path, .{}) catch {
+            std.debug.print("Binary not found, attempting to build...\n", .{});
+            build_kausaldb_binary(allocator) catch |err| {
+                std.debug.print("Failed to build binary: {}\n", .{err});
+                return err;
+            };
+        };
         const test_workspace = try create_isolated_workspace(allocator, test_name);
 
         const cleanup_paths = std.ArrayList([]const u8){};
