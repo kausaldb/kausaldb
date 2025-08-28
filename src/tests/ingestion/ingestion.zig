@@ -69,7 +69,7 @@ test "parser integration through pipeline interface" {
         }
         metadata.deinit();
     }
-    try metadata.put("path", try allocator.dupe(u8, "integration_test.zig"));
+    try metadata.put("file_path", try allocator.dupe(u8, "integration_test.zig"));
 
     const content = SourceContent{
         .data = test_source,

@@ -81,7 +81,7 @@ pub const ZigParser = struct {
         allocator: std.mem.Allocator,
         content: SourceContent,
     ) IngestionError![]ParsedUnit {
-        const file_path = content.metadata.get("file_path") orelse "unknown.zig";
+        const file_path = content.metadata.get("file_path") orelse content.metadata.get("path") orelse "unknown.zig";
 
         var units = std.array_list.Managed(ParsedUnit).init(allocator);
         defer units.deinit();
