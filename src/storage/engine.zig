@@ -489,6 +489,13 @@ pub const StorageEngine = struct {
                 error_context.log_storage_error(err, error_context.block_context("coordinate_memtable_flush", block_data.id));
                 return err;
             };
+
+            // After flushing memtable (which creates new SSTable), check for compaction
+            // This prevents L0 SSTable accumulation that can cause WriteBlocked errors
+            self.sstable_manager.check_and_run_compaction() catch |err| {
+                error_context.log_storage_error(err, error_context.block_context("check_and_run_compaction", block_data.id));
+                return err;
+            };
         }
 
         // Update throttle state after successful write

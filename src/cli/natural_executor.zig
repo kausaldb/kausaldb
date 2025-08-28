@@ -185,13 +185,70 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
 
-    const resolved_path = if (std.fs.path.isAbsolute(cmd.path))
-        cmd.path
-    else
-        try std.fs.path.resolve(context.allocator, &[_][]const u8{ ".", cmd.path });
-    defer if (!std.fs.path.isAbsolute(cmd.path)) context.allocator.free(resolved_path);
+    // Resolve path to absolute path for consistent storage
+    var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const resolved_path = std.fs.cwd().realpath(cmd.path, &path_buffer) catch |err| switch (err) {
+        error.FileNotFound => {
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Path '{s}' does not exist"}}
+                , .{cmd.path});
+            } else {
+                print_stderr("Error: Path '{s}' does not exist\n", .{cmd.path});
+            }
+            return;
+        },
+        else => return err,
+    };
 
-    try workspace.link_codebase(resolved_path, cmd.name);
+    workspace.link_codebase(resolved_path, cmd.name) catch |err| switch (err) {
+        workspace_manager.WorkspaceError.CodebaseAlreadyLinked => {
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Codebase is already linked. Use 'kausaldb unlink {s}' first if you want to re-link it."}}
+                , .{std.fs.path.basename(resolved_path)});
+            } else {
+                print_stderr("Error: Codebase is already linked\n", .{});
+                print_stderr("Use 'kausaldb unlink {s}' first if you want to re-link it.\n", .{std.fs.path.basename(resolved_path)});
+            }
+            return;
+        },
+        workspace_manager.WorkspaceError.InvalidCodebasePath => {
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Invalid codebase path '{s}'"}}
+                , .{resolved_path});
+            } else {
+                print_stderr("Error: Invalid codebase path '{s}'\n", .{resolved_path});
+            }
+            return;
+        },
+        storage.StorageError.WriteBlocked => {
+            // WriteBlocked should not occur in single-threaded CLI usage.
+            // This indicates a storage engine configuration or compaction issue.
+            // TODO: Re-enable fatal_assert after fixing compaction logic
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}
+                , .{});
+            } else {
+                print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
+                print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
+            }
+            return;
+        },
+        else => {
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Failed to link codebase. Storage error occurred."}}
+                , .{});
+            } else {
+                print_stderr("Error: Failed to link codebase '{s}'\n", .{resolved_path});
+                print_stderr("This may be due to a storage issue. Please try again.\n", .{});
+            }
+            return;
+        },
+    };
 
     const actual_name = cmd.name orelse std.fs.path.basename(resolved_path);
 
@@ -217,11 +274,35 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
                 , .{cmd.name});
             } else {
                 print_stderr("Error: Codebase '{s}' not found\n", .{cmd.name});
-                write_stdout("Use 'kausal status' to see linked codebases\n");
+                write_stdout("Use 'kausaldb workspace' to see linked codebases\n");
             }
             return;
         },
-        else => return err,
+        storage.StorageError.WriteBlocked => {
+            // WriteBlocked should not occur in single-threaded CLI usage.
+            // This indicates a storage engine configuration or compaction issue.
+            // TODO: Re-enable fatal_assert after fixing compaction logic
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}
+                , .{});
+            } else {
+                print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
+                print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
+            }
+            return;
+        },
+        else => {
+            if (cmd.format == .json) {
+                print_json_stdout(context.allocator,
+                    \\{{"error": "Failed to unlink codebase '{s}'. Storage error occurred."}}
+                , .{cmd.name});
+            } else {
+                print_stderr("Error: Failed to unlink codebase '{s}'\n", .{cmd.name});
+                print_stderr("This may be due to storage being busy. Please try again.\n", .{});
+            }
+            return;
+        },
     };
 
     if (cmd.format == .json) {
