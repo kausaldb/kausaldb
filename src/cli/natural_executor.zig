@@ -113,6 +113,18 @@ pub const NaturalExecutionContext = struct {
         self.allocator.free(self.data_dir);
     }
 
+    /// Generate default workspace name based on current working directory.
+    /// Uses current directory basename for more meaningful workspace names.
+    fn infer_workspace_name(self: *NaturalExecutionContext) []const u8 {
+        const cwd = std.fs.cwd().realpathAlloc(self.allocator, ".") catch {
+            return "default"; // Fallback to "default" if we can't get current directory
+        };
+        defer self.allocator.free(cwd);
+
+        const basename = std.fs.path.basename(cwd);
+        return self.allocator.dupe(u8, basename) catch "default";
+    }
+
     fn ensure_storage_initialized(self: *NaturalExecutionContext) !void {
         if (self.storage_engine != null) return;
 
@@ -456,7 +468,7 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
         return;
     }
 
-    const workspace = cmd.workspace orelse "default";
+    const workspace = cmd.workspace orelse context.infer_workspace_name();
 
     const search_result = query_eng.find_by_name(workspace, cmd.entity_type, cmd.name) catch |err| switch (err) {
         query_engine.QueryError.SemanticSearchUnavailable => {
@@ -537,7 +549,7 @@ fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
         return;
     }
 
-    const workspace = cmd.workspace orelse "default";
+    const workspace = cmd.workspace orelse context.infer_workspace_name();
 
     // First find the target entity to get its block ID
     const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
@@ -662,7 +674,7 @@ fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.
     }
 
     const depth = cmd.depth orelse 3;
-    const workspace = cmd.workspace orelse "default";
+    const workspace = cmd.workspace orelse context.infer_workspace_name();
 
     // First find the target entity to get its block ID
     const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
