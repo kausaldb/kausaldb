@@ -32,7 +32,7 @@ pub const IngestionStats = struct {
 /// Configuration for directory ingestion
 pub const IngestionConfig = struct {
     include_patterns: []const []const u8 = &[_][]const u8{"**/*.zig"},
-    exclude_patterns: []const []const u8 = &[_][]const u8{ "zig-cache/**", "zig-out/**", ".git/**" },
+    exclude_patterns: []const []const u8 = &[_][]const u8{},
     max_file_size: u64 = 1024 * 1024, // 1MB
     include_function_bodies: bool = true,
     include_private: bool = true,
@@ -72,10 +72,9 @@ pub fn ingest_directory_to_blocks(
         file_paths.deinit();
     }
 
-    try collect_matching_files(
+    try collect_git_tracked_files(
         backing,
         file_system,
-        directory_path,
         directory_path,
         config.include_patterns,
         config.exclude_patterns,
@@ -154,6 +153,86 @@ pub fn ingest_directory_to_blocks(
         .blocks = try all_blocks.toOwnedSlice(),
         .stats = stats,
     };
+}
+
+/// Collect git-tracked files respecting .gitignore patterns
+/// Falls back to directory traversal for simulation VFS or non-git repos
+fn collect_git_tracked_files(
+    backing: std.mem.Allocator,
+    file_system: *VFS,
+    directory_path: []const u8,
+    include_patterns: []const []const u8,
+    exclude_patterns: []const []const u8,
+    file_list: *std.array_list.Managed([]const u8),
+) !void {
+    const initial_count = file_list.items.len;
+
+    // Always try git ls-files first to respect .gitignore
+    collect_git_ls_files(backing, directory_path, include_patterns, exclude_patterns, file_list) catch {
+        // Git command failed - not a problem, fall back to manual collection
+    };
+
+    // Fall back to manual traversal if no files found
+    if (file_list.items.len == initial_count) {
+        // Use basic exclude patterns for fallback when git is not available
+        const fallback_exclude_patterns = &[_][]const u8{ "zig-cache/**", "zig-out/**", ".git/**", "zig/**" };
+        try collect_matching_files(
+            backing,
+            file_system,
+            directory_path,
+            directory_path,
+            include_patterns,
+            fallback_exclude_patterns,
+            file_list,
+        );
+    }
+}
+
+/// Use git ls-files to collect tracked files (respects .gitignore automatically)
+fn collect_git_ls_files(
+    backing: std.mem.Allocator,
+    directory_path: []const u8,
+    include_patterns: []const []const u8,
+    exclude_patterns: []const []const u8,
+    file_list: *std.array_list.Managed([]const u8),
+) !void {
+    // Execute git ls-files to get all tracked files
+    const result = std.process.Child.run(.{
+        .allocator = backing,
+        .argv = &[_][]const u8{ "git", "ls-files" },
+        .cwd = directory_path,
+    }) catch |err| switch (err) {
+        error.FileNotFound => {
+            // Git not available, fall back to manual collection
+            // This is acceptable for non-git repositories
+            return;
+        },
+        else => return err,
+    };
+    defer backing.free(result.stdout);
+    defer backing.free(result.stderr);
+
+    if (result.term != .Exited or result.term.Exited != 0) {
+        // Not a git repository or git command failed
+        // This is acceptable - fall back to manual collection would happen at caller
+        return;
+    }
+
+    // Parse git ls-files output (one file per line)
+    var lines = std.mem.splitSequence(u8, result.stdout, "\n");
+    while (lines.next()) |line| {
+        const trimmed_line = std.mem.trim(u8, line, " \t\r\n");
+        if (trimmed_line.len == 0) continue;
+
+        // Filter by include patterns and exclude patterns (extra safety layer)
+        if (matches_patterns(trimmed_line, include_patterns) and
+            !matches_patterns(trimmed_line, exclude_patterns))
+        {
+            // Convert relative path to absolute path
+            const absolute_path = try std.fs.path.join(backing, &[_][]const u8{ directory_path, trimmed_line });
+            try file_list.append(absolute_path);
+        }
+    }
 }
 
 /// Recursively collect matching files using simple explicit patterns
@@ -263,6 +342,60 @@ test "simple glob matching" {
     try testing.expect(!simple_glob_match("*.zig", "main.c"));
     try testing.expect(!simple_glob_match("**/*.zig", "main.c"));
     try testing.expect(!simple_glob_match("zig-cache/**", "src/main.zig"));
+}
+
+test "git ls-files integration" {
+    var test_harness = try TestHarness.init(testing.allocator, "git_ls_files_test");
+    defer test_harness.deinit();
+
+    // Create test directory structure with some ignored files
+    try test_harness.file_system.create_directory("git_test");
+    try test_harness.file_system.create_directory("git_test/src");
+    try test_harness.file_system.create_directory("git_test/zig-cache");
+
+    // Create files that should be included
+    try test_harness.file_system.write_file("git_test/src/main.zig", "pub fn main() !void {}");
+    try test_harness.file_system.write_file("git_test/build.zig", "pub fn build() void {}");
+
+    // Create files that should be excluded (cache files)
+    try test_harness.file_system.write_file("git_test/zig-cache/cached.zig", "// cache file");
+
+    // Test with simulation VFS (should use fallback pattern matching)
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var file_paths = std.array_list.Managed([]const u8).init(testing.allocator);
+    defer {
+        for (file_paths.items) |path| {
+            testing.allocator.free(path);
+        }
+        file_paths.deinit();
+    }
+
+    const include_patterns = &[_][]const u8{"**/*.zig"};
+    const exclude_patterns = &[_][]const u8{ "zig-cache/**", "zig-out/**", "zig/**" };
+
+    try collect_git_tracked_files(
+        testing.allocator,
+        test_harness.file_system,
+        "git_test",
+        include_patterns,
+        exclude_patterns,
+        &file_paths,
+    );
+
+    // Should find main.zig but not cached.zig
+    try testing.expect(file_paths.items.len >= 1);
+
+    var found_main = false;
+    var found_cache = false;
+    for (file_paths.items) |path| {
+        if (std.mem.endsWith(u8, path, "main.zig")) found_main = true;
+        if (std.mem.endsWith(u8, path, "cached.zig")) found_cache = true;
+    }
+
+    try testing.expect(found_main);
+    try testing.expect(!found_cache); // Cache files should be excluded
 }
 
 test "ingest directory basic functionality" {
