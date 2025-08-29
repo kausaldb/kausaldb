@@ -25,6 +25,9 @@ comptime {
     // Query functionality (placeholder until implementation complete)
     _ = @import("e2e/query_commands.zig");
 
+    // Find function accuracy tests
+    _ = @import("e2e/find_function_accuracy_test.zig");
+
     // Shell integration scenarios
     _ = @import("e2e/shell_scenarios.zig");
 }

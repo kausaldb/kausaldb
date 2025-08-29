@@ -29,8 +29,8 @@ const assert_mod = @import("../core/assert.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
-const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
 
+const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
 const Config = storage_config_mod.Config;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
@@ -43,13 +43,11 @@ const StorageEngine = storage.StorageEngine;
 
 pub const QueryError = operations.QueryError;
 pub const QueryResult = operations.QueryResult;
-
 pub const TraversalQuery = traversal.TraversalQuery;
 pub const TraversalResult = traversal.TraversalResult;
 pub const TraversalDirection = traversal.TraversalDirection;
 pub const TraversalAlgorithm = traversal.TraversalAlgorithm;
 pub const EdgeTypeFilter = traversal.EdgeTypeFilter;
-
 pub const SemanticQuery = operations.SemanticQuery;
 
 /// Block reference for allocation-free queries.
@@ -689,18 +687,41 @@ pub const QueryEngine = struct {
         name: []const u8,
     ) !SemanticQueryResult {
         _ = codebase; // TODO: Filter by codebase in search
-        _ = entity_type; // TODO: Filter by entity type in search
 
-        // Use just the name for content search - this is more likely to match
-        // the actual function/struct name in the source code
-        const search_text = try std.fmt.allocPrint(self.allocator, "{s}", .{name});
-        defer self.allocator.free(search_text);
+        var results = std.array_list.Managed(SemanticResult).init(self.allocator);
+        defer results.deinit();
 
-        // Use a lower threshold for name-based searches since we're looking for exact name matches
-        var semantic_query = SemanticQuery.init(search_text);
-        semantic_query.similarity_threshold = 0.1; // Very permissive since we're doing exact name matching
+        var iterator = self.storage_engine.iterate_all_blocks();
+        var matches_found: u32 = 0;
 
-        return self.execute_semantic_query(semantic_query);
+        while (try iterator.next()) |block| {
+            var parsed = std.json.parseFromSlice(
+                std.json.Value,
+                self.allocator,
+                block.metadata_json,
+                .{},
+            ) catch continue; // Skip blocks with invalid JSON
+            defer parsed.deinit();
+
+            const metadata = parsed.value;
+            const unit_type = if (metadata.object.get("unit_type")) |ut| ut.string else continue;
+            if (!std.mem.eql(u8, unit_type, entity_type)) continue;
+
+            const unit_id = if (metadata.object.get("unit_id")) |ui| ui.string else continue;
+            const colon_pos = std.mem.lastIndexOf(u8, unit_id, ":") orelse continue;
+            const entity_name = unit_id[colon_pos + 1 ..];
+
+            if (std.mem.eql(u8, entity_name, name)) {
+                matches_found += 1;
+
+                try results.append(SemanticResult{
+                    .block = OwnedQueryEngineBlock.init(block),
+                    .similarity_score = 1.0, // Exact match
+                });
+            }
+        }
+
+        return SemanticQueryResult.init(self.allocator, results.items, matches_found);
     }
 
     /// Find all functions, methods, etc., that call a target function (incoming traversal)
