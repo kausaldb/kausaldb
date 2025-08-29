@@ -90,8 +90,15 @@ pub const query_filtering = @import("query/filtering.zig");
 pub const zig_parser = @import("ingestion/zig_parser.zig");
 pub const ZigParser = zig_parser.ZigParser;
 pub const ZigParserConfig = zig_parser.ZigParserConfig;
-pub const pipeline = @import("ingestion/pipeline.zig");
-pub const SourceContent = pipeline.SourceContent;
+
+// Pipeline types for backward compatibility
+pub const pipeline_types = @import("ingestion/pipeline_types.zig");
+
+// File parsing (replaces pipeline abstractions)
+pub const parse_file_to_blocks = @import("ingestion/parse_file_to_blocks.zig");
+pub const FileContent = parse_file_to_blocks.FileContent;
+// Backward compatibility alias for legacy fuzz/benchmark code
+pub const SourceContent = FileContent;
 
 // Server components
 pub const connection_manager = @import("server/connection_manager.zig");

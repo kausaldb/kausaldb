@@ -43,28 +43,16 @@ pub const FilterExpression = query_engine.FilterExpression;
 pub const FilterOperator = query_engine.FilterOperator;
 pub const FilterTarget = query_engine.FilterTarget;
 
-pub const pipeline = @import("ingestion/pipeline.zig");
-pub const IngestionPipeline = pipeline.IngestionPipeline;
-pub const PipelineConfig = pipeline.PipelineConfig;
-pub const BackpressureConfig = pipeline.BackpressureConfig;
-pub const BackpressureStats = pipeline.BackpressureStats;
-pub const Source = pipeline.Source;
-pub const Parser = pipeline.Parser;
-pub const Chunker = pipeline.Chunker;
-pub const SourceContent = pipeline.SourceContent;
-pub const ParsedUnit = pipeline.ParsedUnit;
+// Pipeline abstractions removed - using direct file processing approach
+// See file_iterator.zig and parse_file_to_blocks.zig for simplified alternatives
 
-pub const git_source = @import("ingestion/git_source.zig");
-pub const GitSource = git_source.GitSource;
-pub const GitSourceConfig = git_source.GitSourceConfig;
+// Git source abstraction removed - using unified FileIterator approach
 
 pub const zig_parser = @import("ingestion/zig_parser.zig");
 pub const ZigParser = zig_parser.ZigParser;
 pub const ZigParserConfig = zig_parser.ZigParserConfig;
 
-pub const semantic_chunker = @import("ingestion/semantic_chunker.zig");
-pub const SemanticChunker = semantic_chunker.SemanticChunker;
-pub const SemanticChunkerConfig = semantic_chunker.SemanticChunkerConfig;
+// Semantic chunker removed - parse_file_to_blocks.zig provides direct transformation
 
 pub const handler = @import("server/handler.zig");
 pub const Server = handler.Server;
