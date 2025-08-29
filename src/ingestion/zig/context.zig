@@ -4,9 +4,9 @@
 //! No compiler dependencies for stability across Zig versions.
 
 const std = @import("std");
-const pipeline = @import("../pipeline.zig");
+const pipeline_types = @import("../pipeline_types.zig");
 
-const ParsedUnit = pipeline.ParsedUnit;
+const ParsedUnit = pipeline_types.ParsedUnit;
 
 // Re-export parser config from main parser module
 pub const ZigParserConfig = @import("parser.zig").ZigParserConfig;

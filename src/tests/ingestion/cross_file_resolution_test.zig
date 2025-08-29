@@ -5,7 +5,7 @@
 
 const std = @import("std");
 
-const pipeline = @import("../../ingestion/pipeline.zig");
+const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
 const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
 
@@ -13,7 +13,7 @@ const testing = std.testing;
 
 const ZigParser = zig_parser_mod.ZigParser;
 const ZigParserConfig = zig_parser_mod.ZigParserConfig;
-const SourceContent = pipeline.SourceContent;
+const SourceContent = pipeline_types.SourceContent;
 const EdgeType = types.EdgeType;
 
 test "parser handles realistic zig file structure" {
@@ -90,6 +90,7 @@ test "parser handles realistic zig file structure" {
     const content = SourceContent{
         .data = realistic_source,
         .content_type = "text/zig",
+        .source_uri = "main.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -171,6 +172,7 @@ test "parser handles empty and minimal files" {
         const content = SourceContent{
             .data = empty_source,
             .content_type = "text/zig",
+            .source_uri = "empty.zig",
             .metadata = metadata,
             .timestamp_ns = @intCast(std.time.nanoTimestamp()),
         };
@@ -202,6 +204,7 @@ test "parser handles empty and minimal files" {
         const content = SourceContent{
             .data = minimal_source,
             .content_type = "text/zig",
+            .source_uri = "minimal.zig",
             .metadata = metadata,
             .timestamp_ns = @intCast(std.time.nanoTimestamp()),
         };
@@ -263,6 +266,7 @@ test "parser extracts metadata correctly" {
     const content = SourceContent{
         .data = metadata_source,
         .content_type = "text/zig",
+        .source_uri = "malformed.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };

@@ -19,7 +19,7 @@ const std = @import("std");
 
 const context_types = @import("context.zig");
 const cross_file_resolver = @import("cross_file_resolver.zig");
-const ingestion = @import("../pipeline.zig");
+const ingestion = @import("../pipeline_types.zig");
 const context_block = @import("../../core/types.zig");
 
 const CrossFileResolver = cross_file_resolver.CrossFileResolver;

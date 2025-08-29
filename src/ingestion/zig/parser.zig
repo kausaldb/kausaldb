@@ -7,19 +7,19 @@
 const std = @import("std");
 
 const assert_mod = @import("../../core/assert.zig");
-const pipeline = @import("../pipeline.zig");
+const pipeline_types = @import("../pipeline_types.zig");
 const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 
-const Parser = pipeline.Parser;
-const ParsedUnit = pipeline.ParsedUnit;
-const ParsedEdge = pipeline.ParsedEdge;
-const SourceContent = pipeline.SourceContent;
-const SourceLocation = pipeline.SourceLocation;
+const Parser = pipeline_types.Parser;
+const ParsedUnit = pipeline_types.ParsedUnit;
+const ParsedEdge = pipeline_types.ParsedEdge;
+const SourceContent = pipeline_types.SourceContent;
+const SourceLocation = pipeline_types.SourceLocation;
 const EdgeType = types.EdgeType;
-const IngestionError = pipeline.IngestionError;
+const IngestionError = pipeline_types.IngestionError;
 
 /// Configuration for semantic parsing behavior
 pub const ZigParserConfig = struct {
@@ -499,6 +499,7 @@ test "pattern parser basic functionality" {
     const content = SourceContent{
         .data = simple_source,
         .content_type = "text/zig",
+        .source_uri = "test.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -569,6 +570,7 @@ test "pattern parser handles struct methods" {
     const content = SourceContent{
         .data = struct_source,
         .content_type = "text/zig",
+        .source_uri = "test_struct.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -641,6 +643,7 @@ test "pattern parser handles malformed code gracefully" {
     const content = SourceContent{
         .data = malformed_source,
         .content_type = "text/zig",
+        .source_uri = "test_malformed.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -741,6 +744,7 @@ test "pattern parser extracts comprehensive metadata" {
     const content = SourceContent{
         .data = metadata_source,
         .content_type = "text/zig",
+        .source_uri = "test_comprehensive.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };

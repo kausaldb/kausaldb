@@ -6,7 +6,7 @@
 
 const std = @import("std");
 
-const pipeline = @import("../../ingestion/pipeline.zig");
+const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
 const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
 
@@ -14,7 +14,7 @@ const testing = std.testing;
 
 const ZigParser = zig_parser_mod.ZigParser;
 const ZigParserConfig = zig_parser_mod.ZigParserConfig;
-const SourceContent = pipeline.SourceContent;
+const SourceContent = pipeline_types.SourceContent;
 const EdgeType = types.EdgeType;
 
 test "parser integration through pipeline interface" {
@@ -74,6 +74,7 @@ test "parser integration through pipeline interface" {
     const content = SourceContent{
         .data = test_source,
         .content_type = "text/zig",
+        .source_uri = "test.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -165,6 +166,7 @@ test "parser error handling and resilience" {
     const content = SourceContent{
         .data = malformed_source,
         .content_type = "text/zig",
+        .source_uri = "malformed.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -173,7 +175,7 @@ test "parser error handling and resilience" {
     const units = parser.parser().parse(allocator, content) catch |err| {
         // Acceptable failure modes
         switch (err) {
-            error.ParseFailed => return, // Parser rejected malformed input
+            error.ParsingFailed => return, // Parser rejected malformed input
             else => return err, // Unexpected error
         }
     };
@@ -245,6 +247,7 @@ test "parser metadata extraction and visibility" {
     const content = SourceContent{
         .data = visibility_source,
         .content_type = "text/zig",
+        .source_uri = "test_source.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -310,6 +313,7 @@ test "parser configuration options work correctly" {
     const content = SourceContent{
         .data = source_with_tests,
         .content_type = "text/zig",
+        .source_uri = "visibility.zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
@@ -403,6 +407,7 @@ test "parser handles edge cases gracefully" {
         const content = SourceContent{
             .data = test_case.source,
             .content_type = "text/zig",
+            .source_uri = filename,
             .metadata = metadata,
             .timestamp_ns = @intCast(std.time.nanoTimestamp()),
         };
@@ -412,7 +417,7 @@ test "parser handles edge cases gracefully" {
             .parser().parse(allocator, content) catch |err| {
             // Acceptable failures for edge cases
             switch (err) {
-                error.ParseFailed => continue,
+                error.ParsingFailed => continue,
                 else => return err,
             }
         };

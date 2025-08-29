@@ -11,7 +11,7 @@ const common = @import("common.zig");
 
 const stdx = internal.stdx;
 
-const SourceContent = internal.SourceContent;
+const SourceContent = internal.pipeline_types.SourceContent;
 const ZigParser = internal.ZigParser;
 const ZigParserConfig = internal.ZigParserConfig;
 
@@ -134,6 +134,7 @@ fn run_single_iteration(allocator: std.mem.Allocator, random: std.Random) !commo
 
     const source_content = SourceContent{
         .data = source_code,
+        .source_uri = "fuzz_test.zig",
         .content_type = "text/zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),

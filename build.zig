@@ -220,6 +220,21 @@ pub fn build(b: *std.Build) void {
     const fuzz_step = b.step("fuzz", "Run fuzz testing");
     fuzz_step.dependOn(&fuzz_cmd.step);
 
+    // Commit message validator executable
+    const commit_msg_validator_exe = b.addExecutable(.{
+        .name = "commit-msg-validator",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dev/commit_msg_validator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    commit_msg_validator_exe.root_module.addImport("build_options", build_options.createModule());
+    b.installArtifact(commit_msg_validator_exe);
+
+    const commit_msg_validator_step = b.step("commit-msg-validator", "Build commit message validator");
+    commit_msg_validator_step.dependOn(&b.addInstallArtifact(commit_msg_validator_exe, .{}).step);
+
     // === INDIVIDUAL TEST TARGETS ===
 
     // Quick access to run just unit tests (no integration tests)

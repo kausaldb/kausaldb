@@ -6,16 +6,16 @@
 
 const std = @import("std");
 
-const pipeline = @import("../../ingestion/pipeline.zig");
+const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
 const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
 
 const testing = std.testing;
 
-const IngestionPipeline = pipeline.IngestionPipeline;
-const Parser = pipeline.Parser;
-const ParsedUnit = pipeline.ParsedUnit;
-const SourceContent = pipeline.SourceContent;
+// IngestionPipeline removed - using simplified direct processing approach
+const Parser = pipeline_types.Parser;
+const ParsedUnit = pipeline_types.ParsedUnit;
+const SourceContent = pipeline_types.SourceContent;
 const ZigParser = zig_parser_mod.ZigParser;
 const ZigParserConfig = zig_parser_mod.ZigParserConfig;
 const EdgeType = types.EdgeType;
@@ -60,8 +60,9 @@ test "parser extracts functions and creates call edges" {
     const content = SourceContent{
         .data = zig_source,
         .content_type = "text/zig",
+        .source_uri = "test.zig",
         .metadata = metadata,
-        .timestamp_ns = 0,
+        .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
     const units = try parser.parser().parse(allocator, content);
@@ -142,13 +143,14 @@ test "parser handles malformed code gracefully" {
     const content = SourceContent{
         .data = malformed_source,
         .content_type = "text/zig",
+        .source_uri = "malformed.zig",
         .metadata = metadata,
-        .timestamp_ns = 0,
+        .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
     // Parser should not crash and should extract what it can
     const units = parser.parser().parse(allocator, content) catch |err| switch (err) {
-        error.ParseFailed => {
+        error.ParsingFailed => {
             // Acceptable failure mode
             return;
         },
@@ -221,8 +223,9 @@ test "parser extracts struct definitions and metadata" {
     const content = SourceContent{
         .data = struct_source,
         .content_type = "text/zig",
+        .source_uri = "struct.zig",
         .metadata = metadata,
-        .timestamp_ns = 0,
+        .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
     std.debug.print("DEBUG HANG: About to call parser.parse() in 'extracts struct definitions'\n", .{});
@@ -322,8 +325,9 @@ test "parser preserves source location information" {
     const content = SourceContent{
         .data = multi_line_source,
         .content_type = "text/zig",
+        .source_uri = "multi_line.zig",
         .metadata = metadata,
-        .timestamp_ns = 0,
+        .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
     std.debug.print("DEBUG HANG: About to call parser.parse() in 'preserves source location'\n", .{});
@@ -386,6 +390,7 @@ test "parser handles test declarations" {
     const content = SourceContent{
         .data = test_source,
         .content_type = "text/zig",
+        .source_uri = "with_tests.zig",
         .metadata = metadata,
         .timestamp_ns = 0,
     };

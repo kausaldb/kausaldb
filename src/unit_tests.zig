@@ -41,10 +41,7 @@ comptime {
     _ = @import("dev/shell.zig");
 
     // Ingestion modules
-    _ = @import("ingestion/git_source.zig");
-    _ = @import("ingestion/glob_matcher.zig");
-    _ = @import("ingestion/pipeline.zig");
-    _ = @import("ingestion/semantic_chunker.zig");
+    // Pipeline and semantic_chunker removed - using simplified direct approach
     _ = @import("ingestion/zig/parser.zig");
 
     // Query modules

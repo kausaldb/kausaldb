@@ -166,9 +166,11 @@ pub const E2EHarness = struct {
         try argv_list.appendSlice(self.allocator, args);
 
         // Execute using the same pattern as working debug tests
+        // Increase max_output_bytes to handle verbose debug output from successful ingestion
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = argv_list.items,
+            .max_output_bytes = 1024 * 1024, // 1MB instead of default 50KB
         });
 
         const exit_code: u8 = switch (result.term) {

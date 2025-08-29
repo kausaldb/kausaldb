@@ -19,7 +19,7 @@ pub const query_engine = internal.query_engine;
 pub const query_operations = internal.query_operations;
 pub const production_vfs = internal.production_vfs;
 pub const ownership = internal.ownership;
-pub const pipeline = internal.pipeline;
+
 pub const zig_parser = internal.zig_parser;
 pub const assert = internal.assert;
 
@@ -99,7 +99,7 @@ fn print_usage() !void {
         \\
         \\Types:
         \\  storage     - Storage engine benchmarks
-        \\  query       - Query engine benchmarks  
+        \\  query       - Query engine benchmarks
         \\  parsing     - Parsing performance benchmarks
         \\  compaction  - Compaction benchmarks
         \\  all         - Run all benchmarks

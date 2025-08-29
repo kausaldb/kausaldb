@@ -7,13 +7,15 @@ const builtin = @import("builtin");
 const std = @import("std");
 
 const coordinator = @import("../benchmark.zig");
+const internal = @import("internal");
+const pipeline_types = internal.pipeline_types;
 
 const BenchmarkResult = coordinator.BenchmarkResult;
 const StatisticalSampler = coordinator.StatisticalSampler;
 const WarmupUtils = coordinator.WarmupUtils;
 const ZigParser = coordinator.zig_parser.ZigParser;
 const ZigParserConfig = coordinator.zig_parser.ZigParserConfig;
-const SourceContent = coordinator.pipeline.SourceContent;
+const SourceContent = pipeline_types.SourceContent;
 
 // Performance thresholds based on measured parsing performance with regression margins
 const SMALL_FILE_PARSE_THRESHOLD_NS = 60_000; // 60μs for small files (<1KB) - measured ~43μs
@@ -116,15 +118,15 @@ pub fn run_medium_file_parsing(allocator: std.mem.Allocator) !BenchmarkResult {
         try medium_source.writer().print(
             \\pub const Struct{d} = struct {{
             \\    value: u32,
-            \\    
+            \\
             \\    pub fn init(value: u32) Struct{d} {{
             \\        return Struct{d}{{ .value = value }};
             \\    }}
-            \\    
+            \\
             \\    pub fn read_value(self: *const Struct{d}) u32 {{
             \\        return self.value;
             \\    }}
-            \\    
+            \\
             \\    pub fn update_value(self: *Struct{d}, value: u32) void {{
             \\        self.value = value;
             \\    }}
@@ -183,14 +185,14 @@ pub fn run_large_file_parsing(allocator: std.mem.Allocator) !BenchmarkResult {
             \\    if (config.debug) {{
             \\        std.debug.print("Processing data chunk {d}\n", .{{i}});
             \\    }}
-            \\    
+            \\
             \\    var result = std.array_list.Managed(u8).init(std.heap.page_allocator);
             \\    defer result.deinit();
-            \\    
+            \\
             \\    for (data) |byte| {{
             \\        try result.append(byte ^ 0xFF);
             \\    }}
-            \\    
+            \\
             \\    return result.toOwnedSlice();
             \\}}
             \\
@@ -242,15 +244,15 @@ pub fn run_semantic_extraction(allocator: std.mem.Allocator) !BenchmarkResult {
         \\pub const DataStructure = struct {
         \\    id: u32,
         \\    name: []const u8,
-        \\    
+        \\
         \\    pub fn init(id: u32, name: []const u8) DataStructure {
         \\        return DataStructure{ .id = id, .name = name };
         \\    }
-        \\    
+        \\
         \\    pub fn validate(self: *const DataStructure) bool {
         \\        return self.id > 0 and self.name.len > 0;
         \\    }
-        \\    
+        \\
         \\    fn get_private_info(self: *const DataStructure) []const u8 {
         \\        return PRIVATE_CONSTANT;
         \\    }
@@ -292,6 +294,7 @@ pub fn run_semantic_extraction(allocator: std.mem.Allocator) !BenchmarkResult {
 
     const content = SourceContent{
         .data = semantic_test_source,
+        .source_uri = "semantic_test.zig",
         .content_type = "text/zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
@@ -386,6 +389,7 @@ fn run_parsing_benchmark(
 
     const content = SourceContent{
         .data = source_code,
+        .source_uri = "benchmark_test.zig",
         .content_type = "text/zig",
         .metadata = metadata,
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),

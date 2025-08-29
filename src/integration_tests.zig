@@ -19,11 +19,11 @@ comptime {
     _ = @import("tests/golden_masters_test.zig");
     _ = @import("tests/ingestion/cross_file_resolution_test.zig");
     _ = @import("tests/ingestion/ingestion.zig");
-    _ = @import("tests/ingestion/ingestion_backpressure_integration.zig");
+
     _ = @import("tests/memory/corruption_prevention_test.zig");
     _ = @import("tests/memory/profiling_validation.zig");
     _ = @import("tests/misc/lifecycle.zig");
-    _ = @import("tests/misc/zig_parser_integration.zig");
+    _ = @import("tests/ingestion/zig_parser_integration.zig");
     _ = @import("tests/performance/large_block_benchmark.zig");
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
     _ = @import("tests/query/advanced_algorithms_edge_cases.zig");

@@ -19,7 +19,7 @@
 const std = @import("std");
 const context_types = @import("context.zig");
 const context_block = @import("../../core/types.zig");
-const ingestion = @import("../pipeline.zig");
+const ingestion = @import("../pipeline_types.zig");
 
 const CrossFileSymbol = context_types.CrossFileSymbol;
 const EdgeType = context_block.EdgeType;
