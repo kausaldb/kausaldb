@@ -10,6 +10,7 @@
 //! Wyhash chosen for speed and quality on 64-bit systems.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const context_block = @import("../core/types.zig");
 const assert_mod = @import("../core/assert.zig");
@@ -99,9 +100,14 @@ pub const BloomFilter = struct {
 
     /// Add a BlockId to the filter
     pub fn add(self: *BloomFilter, block_id: BlockId) void {
+        // Compute base hashes once and reuse for all positions
+        const h1 = std.hash.Wyhash.hash(0, &block_id.bytes);
+        const h2 = std.hash.Wyhash.hash(0x9e3779b9, &block_id.bytes);
+
         var i: u8 = 0;
         while (i < self.hash_count) : (i += 1) {
-            const bit_index = self.hash_block_id(block_id, i);
+            const combined = h1 +% (@as(u64, i) *% h2);
+            const bit_index = @as(u32, @truncate(combined)) % self.bit_count;
             self.enable_bit(bit_index);
         }
     }
@@ -110,9 +116,14 @@ pub const BloomFilter = struct {
     /// Returns true if item MIGHT be in set (could be false positive)
     /// Returns false if item is DEFINITELY NOT in set (no false negatives)
     pub fn might_contain(self: *const BloomFilter, block_id: BlockId) bool {
+        // Compute base hashes once and reuse for all positions
+        const h1 = std.hash.Wyhash.hash(0, &block_id.bytes);
+        const h2 = std.hash.Wyhash.hash(0x9e3779b9, &block_id.bytes);
+
         var i: u8 = 0;
         while (i < self.hash_count) : (i += 1) {
-            const bit_index = self.hash_block_id(block_id, i);
+            const combined = h1 +% (@as(u64, i) *% h2);
+            const bit_index = @as(u32, @truncate(combined)) % self.bit_count;
             if (!self.test_bit(bit_index)) {
                 return false; // Definitely not in set
             }
@@ -182,21 +193,6 @@ pub const BloomFilter = struct {
             .bit_count = bit_count,
             .allocator = allocator,
         };
-    }
-
-    /// Double hashing using Wyhash for speed and quality
-    /// Uses h1(x) + i * h2(x) pattern to generate hash_count different hash values
-    fn hash_block_id(self: *const BloomFilter, block_id: BlockId, index: u8) u32 {
-        var hasher1 = std.hash.Wyhash.init(0);
-        hasher1.update(&block_id.bytes);
-        const h1 = hasher1.final();
-
-        var hasher2 = std.hash.Wyhash.init(0x9e3779b9);
-        hasher2.update(&block_id.bytes);
-        const h2 = hasher2.final();
-
-        const combined = h1 +% (@as(u64, index) *% h2);
-        return @as(u32, @truncate(combined)) % self.bit_count;
     }
 
     fn enable_bit(self: *BloomFilter, bit_index: u32) void {
@@ -403,8 +399,14 @@ test "Bloom filter performance characteristics" {
     const add_duration = add_time - start_time;
     const lookup_duration = lookup_time - add_time;
 
-    const max_add_time = 100_000_000; // 100ms for 10k adds (more lenient)
-    const max_lookup_time = 100_000_000; // 100ms for 10k lookups (more lenient)
+    // Adaptive thresholds based on environment and optimization level
+    const base_add_time = 50_000_000; // 50ms baseline
+    const base_lookup_time = 50_000_000; // 50ms baseline
+
+    // Allow more time in debug builds or when assertions are active
+    const debug_multiplier: u64 = if (builtin.mode == .Debug) 4 else 2;
+    const max_add_time = base_add_time * debug_multiplier;
+    const max_lookup_time = base_lookup_time * debug_multiplier;
 
     try std.testing.expect(add_duration < max_add_time);
     try std.testing.expect(lookup_duration < max_lookup_time);
