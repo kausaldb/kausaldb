@@ -32,13 +32,7 @@ pub const PerformanceTier = enum {
 
     /// Detect performance tier from environment
     pub fn detect() PerformanceTier {
-        // Check for debug builds which may have sanitizers enabled
-        if (builtin.mode == .Debug) {
-            // In debug mode, use relaxed thresholds by default
-            return .local;
-        }
-
-        // Check for sanitizer builds from environment (fallback)
+        // Check for sanitizer builds from environment first (highest priority)
         if (std.process.getEnvVarOwned(std.heap.page_allocator, "KAUSALDB_SANITIZER_BUILD")) |sanitizer_value| {
             defer std.heap.page_allocator.free(sanitizer_value);
             if (std.mem.eql(u8, sanitizer_value, "true")) return .sanitizer;
@@ -82,6 +76,12 @@ pub const PerformanceTier = enum {
             defer std.heap.page_allocator.free(mode);
             if (std.mem.eql(u8, mode, "production")) return .production;
         } else |_| {}
+
+        // Check for debug builds last (fallback for local development)
+        if (builtin.mode == .Debug) {
+            // In debug mode without CI environment, use local thresholds
+            return .local;
+        }
 
         // Default to local development
         return .local;
