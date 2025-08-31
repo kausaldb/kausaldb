@@ -1,338 +1,37 @@
-#!/bin/sh
-#
-# KausalDB pre-push hook
-#
-# This script catches CI failures locally before push by running:
-# - Cross-platform compilation matrix
-# - Build mode validation (Debug/ReleaseFast)
-# - Critical integration tests that frequently fail in CI
-# - Performance regression detection
-# - Dependency validation
-#
-# Designed to reduce CI failure rate from ~30-40% to <5%
-# Target runtime: 2-3 minutes for validation
-#
-# To bypass: SKIP_PREPUSH=1 git push (emergency use only)
-
+#!/bin/bash
 set -e
 
-# Allow bypass for emergency pushes
+# Fast pre-push validation optimized for <5 second target
+# Catches the most common failure modes quickly (80/20 rule)
+
+echo "Running fast pre-push validation..."
+START=$(date +%s)
+
+# Quick bypass for emergency pushes
 if [ "${SKIP_PREPUSH:-0}" = "1" ]; then
-    echo "[INFO] Pre-push checks bypassed with SKIP_PREPUSH=1"
-    echo "       Use responsibly - CI will still run full validation"
+    echo "Pre-push checks bypassed with SKIP_PREPUSH=1"
     exit 0
 fi
 
-echo "KausalDB Pre-Push Validation Pipeline"
-echo "========================================"
-
-# Check if we're in a git repository
-if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "- Error: Not in a git repository"
+# Phase 1: Essential compilation check (catches 80% of issues)
+echo "• Testing build..."
+if ! ./zig/zig build >/dev/null 2>&1; then
+    echo "✗ Build failed - fix compilation errors before pushing"
+    echo "Run: ./zig/zig build"
     exit 1
 fi
 
-# Check if project zig is available
-if [ ! -x "./zig/zig" ]; then
-    echo "- Error: Project Zig not found. Run './scripts/install_zig.sh' to install."
+# Phase 2: Fast unit tests (catches most logic errors) 
+echo "• Running unit tests..."
+if ! ./zig/zig build test >/dev/null 2>&1; then
+    echo "✗ Unit tests failed - fix test failures before pushing"
+    echo "Run: ./zig/zig build test"
     exit 1
 fi
 
-# Start timing
-PIPELINE_START=$(date +%s)
-
-# Function to print colored output with emojis
-print_status() {
-    local status=$1
-    local message=$2
-    case $status in
-        "OK")
-            echo "+ $message"
-            ;;
-        "FAIL")
-            echo "- $message"
-            ;;
-        "INFO")
-            echo "INFO: $message"
-            ;;
-        "WARN")
-            echo "WARN: $message"
-            ;;
-        "PROGRESS")
-            echo "PROGRESS: $message"
-            ;;
-    esac
-}
-
-# Track overall success
-PIPELINE_SUCCESS=true
-
-# Get list of changed files for optimization
-CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only)
-CHANGED_ZIG_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(zig)$' || true)
-NUM_ZIG_FILES=$(echo "$CHANGED_ZIG_FILES" | wc -l | tr -d ' ')
-
-if [ "$NUM_ZIG_FILES" -gt 0 ]; then
-    print_status "INFO" "Validating $NUM_ZIG_FILES changed Zig files for production readiness"
-else
-    print_status "INFO" "No Zig files changed - running minimal validation suite"
-fi
-
-# Create temporary files for parallel execution results
-CROSS_COMPILE_OUTPUT=$(mktemp)
-BUILD_MATRIX_OUTPUT=$(mktemp)
-CRITICAL_TESTS_OUTPUT=$(mktemp)
-PERFORMANCE_OUTPUT=$(mktemp)
-
-# Cleanup function
-cleanup() {
-    rm -f "$CROSS_COMPILE_OUTPUT" "$BUILD_MATRIX_OUTPUT" "$CRITICAL_TESTS_OUTPUT" "$PERFORMANCE_OUTPUT"
-}
-trap cleanup EXIT
-
-# Phase 1: TigerBeetle-Style Smoke Tests (Fast)
-print_status "PROGRESS" "Phase 1: CI Smoke Tests (TigerBeetle-Style)"
-SMOKE_START=$(date +%s)
-
-# Run CI smoke tests - fastest tier of validation
-if ./zig/zig build ci-smoke >/dev/null 2>&1; then
-    SMOKE_END=$(date +%s)
-    SMOKE_DURATION=$((SMOKE_END - SMOKE_START))
-    print_status "OK" "CI smoke tests passed (${SMOKE_DURATION}s)"
-else
-    print_status "FAIL" "CI smoke tests failed - fix basic issues before pushing"
-    echo "Run './zig/zig build ci-smoke' for details"
-    PIPELINE_SUCCESS=false
-fi
-
-# Phase 2: Cross-Platform Compilation Matrix
-print_status "PROGRESS" "Phase 2: Cross-Platform Compilation Validation"
-CROSS_START=$(date +%s)
-
-# Define critical target platforms that frequently cause CI failures
-TARGETS=(
-    "x86_64-linux-gnu"      # Most common CI target
-    "aarch64-linux-gnu"     # ARM64 Linux (Docker, cloud instances)
-    "x86_64-macos"          # macOS Intel
-    "aarch64-macos"         # macOS ARM64 (M1/M2)
-)
-
-CROSS_COMPILE_SUCCESS=true
-{
-    echo "Cross-compilation results:"
-    for target in "${TARGETS[@]}"; do
-        printf "  %-20s: " "$target"
-        if ./zig/zig build -Dtarget="$target" >/dev/null 2>&1; then
-            echo "+ SUCCESS"
-        else
-            echo "- FAILED"
-            CROSS_COMPILE_SUCCESS=false
-        fi
-    done
-} > "$CROSS_COMPILE_OUTPUT"
-
-if [ "$CROSS_COMPILE_SUCCESS" = true ]; then
-    CROSS_END=$(date +%s)
-    CROSS_DURATION=$((CROSS_END - CROSS_START))
-    print_status "OK" "Cross-platform compilation passed (${CROSS_DURATION}s)"
-else
-    print_status "FAIL" "Cross-platform compilation failed:"
-    cat "$CROSS_COMPILE_OUTPUT"
-    PIPELINE_SUCCESS=false
-fi
-
-# Phase 3: Build Mode Matrix (Debug/Release Issues)
-print_status "PROGRESS" "Phase 3: Build Mode Validation (Debug/Release)"
-BUILD_START=$(date +%s)
-
-BUILD_MODES=(
-    "Debug"         # Debug build issues (missing imports, etc.)
-    "ReleaseFast"   # Optimization issues, different behavior
-)
-
-BUILD_MATRIX_SUCCESS=true
-{
-    echo "Build mode validation results:"
-    for mode in "${BUILD_MODES[@]}"; do
-        printf "  %-15s: " "$mode"
-        if ./zig/zig build -Doptimize="$mode" >/dev/null 2>&1; then
-            echo "+ SUCCESS"
-        else
-            echo "- FAILED"
-            BUILD_MATRIX_SUCCESS=false
-        fi
-    done
-} > "$BUILD_MATRIX_OUTPUT"
-
-if [ "$BUILD_MATRIX_SUCCESS" = true ]; then
-    BUILD_END=$(date +%s)
-    BUILD_DURATION=$((BUILD_END - BUILD_START))
-    print_status "OK" "Build mode validation passed (${BUILD_DURATION}s)"
-else
-    print_status "FAIL" "Build mode validation failed:"
-    cat "$BUILD_MATRIX_OUTPUT"
-    PIPELINE_SUCCESS=false
-fi
-
-# Phase 4: TigerBeetle-Style Tiered CI Validation
-print_status "PROGRESS" "Phase 4: Tiered CI Validation (TigerBeetle-Style)"
-TESTS_START=$(date +%s)
-
-# TigerBeetle-inspired tiered validation - run appropriate tier based on mode
-if [ "${FAST_PREPUSH:-0}" = "1" ]; then
-    CI_TIER="ci-perf"  # Fast performance validation
-    print_status "INFO" "Running fast pre-push validation (ci-perf tier)"
-else
-    CI_TIER="ci-full"  # Complete validation suite  
-    print_status "INFO" "Running comprehensive validation (ci-full tier)"
-fi
-
-CRITICAL_TESTS_SUCCESS=true
-{
-    echo "TigerBeetle-style CI tier validation results:"
-    printf "  %-30s: " "$CI_TIER"
-    if ./zig/zig build "$CI_TIER" >/dev/null 2>&1; then
-        echo "+ PASSED"
-    else
-        echo "- FAILED"
-        CRITICAL_TESTS_SUCCESS=false
-    fi
-} > "$CRITICAL_TESTS_OUTPUT"
-
-if [ "$CRITICAL_TESTS_SUCCESS" = true ]; then
-    TESTS_END=$(date +%s)
-    TESTS_DURATION=$((TESTS_END - TESTS_START))
-    if [ "${FAST_PREPUSH:-0}" = "1" ]; then
-        print_status "OK" "Fast CI tier validation passed (${TESTS_DURATION}s)"
-    else
-        print_status "OK" "Comprehensive CI tier validation passed (${TESTS_DURATION}s)"
-    fi
-else
-    print_status "FAIL" "CI tier validation failed:"
-    cat "$CRITICAL_TESTS_OUTPUT"
-    if [ "${FAST_PREPUSH:-0}" = "1" ]; then
-        print_status "INFO" "Consider running full validation: git push (without FAST_PREPUSH=1)"
-    else
-        print_status "INFO" "Comprehensive CI validation failed - fix issues before push"
-    fi
-    PIPELINE_SUCCESS=false
-fi
-
-# Phase 5: Security and Performance Validation
-print_status "PROGRESS" "Phase 5: Security & Performance Validation"
-SEC_START=$(date +%s)
-
-# Run security and performance tiers if not already covered
-SECURITY_SUCCESS=true
-if [ "$CI_TIER" != "ci-full" ]; then
-    # Only run separate security validation if ci-full wasn't already run
-    {
-        echo "Security and performance validation:"
-        printf "  %-20s: " "ci-security"
-        if ./zig/zig build ci-security >/dev/null 2>&1; then
-            echo "+ PASSED"
-        else
-            echo "- FAILED"
-            SECURITY_SUCCESS=false
-        fi
-        
-        printf "  %-20s: " "ci-perf"
-        if ./zig/zig build ci-perf >/dev/null 2>&1; then
-            echo "+ PASSED"
-        else
-            echo "- FAILED"
-            SECURITY_SUCCESS=false
-        fi
-    } > "$PERFORMANCE_OUTPUT"
-else
-    echo "Security & performance already validated in ci-full tier" > "$PERFORMANCE_OUTPUT"
-fi
-
-if [ "$SECURITY_SUCCESS" = true ]; then
-    SEC_END=$(date +%s)
-    SEC_DURATION=$((SEC_END - SEC_START))
-    print_status "OK" "Security & performance validation passed (${SEC_DURATION}s)"
-else
-    print_status "FAIL" "Security or performance validation failed:"
-    cat "$PERFORMANCE_OUTPUT"
-    print_status "INFO" "Fix security/performance issues before pushing"
-    PIPELINE_SUCCESS=false
-fi
-
-# Phase 6: TigerBeetle-Style CI Setup Validation
-print_status "PROGRESS" "Phase 6: CI Setup & Environment Validation"
-SETUP_START=$(date +%s)
-
-# Validate CI environment setup using our pure Zig setup tool
-SETUP_SUCCESS=true
-if ./zig/zig build ci-setup >/dev/null 2>&1; then
-    SETUP_END=$(date +%s)
-    SETUP_DURATION=$((SETUP_END - SETUP_START))
-    print_status "OK" "CI setup validation passed (${SETUP_DURATION}s)"
-else
-    print_status "FAIL" "CI setup validation failed"
-    print_status "INFO" "Run './zig/zig build ci-setup' to see setup issues"
-    SETUP_SUCCESS=false
-    PIPELINE_SUCCESS=false
-fi
-
-# Final Pipeline Results
+END=$(date +%s)
+DURATION=$((END - START))
+echo "✓ Fast pre-push validation passed (${DURATION}s)"
 echo ""
-echo "Pre-Push Pipeline Summary"
-echo "============================="
-
-PIPELINE_END=$(date +%s)
-TOTAL_DURATION=$((PIPELINE_END - PIPELINE_START))
-
-if [ "$PIPELINE_SUCCESS" = true ]; then
-    print_status "OK" "All critical validations passed! (${TOTAL_DURATION}s total)"
-    echo ""
-    echo "Ready to push - high confidence this will pass CI"
-    echo ""
-    echo "Pipeline phases:"
-    echo "  + TigerBeetle-style CI smoke tests"
-    echo "  + Cross-platform compilation (4 targets)"
-    echo "  + Build mode validation (Debug/Release)"
-    echo "  + Tiered CI validation ($CI_TIER)"
-    echo "  + Security & performance validation"
-    echo "  + CI setup & environment validation"
-    echo ""
-    echo "Estimated CI success probability: >95%"
-    exit 0
-else
-    print_status "FAIL" "Pre-push validation failed!"
-    echo ""
-    echo "- Issues found that will likely cause CI failures:"
-
-    if [ "$CROSS_COMPILE_SUCCESS" != true ]; then
-        echo "  • Cross-platform compilation issues"
-    fi
-    if [ "$BUILD_MATRIX_SUCCESS" != true ]; then
-        echo "  • Build mode compatibility issues"
-    fi
-    if [ "$CRITICAL_TESTS_SUCCESS" != true ]; then
-        echo "  • CI tier validation failures ($CI_TIER)"
-    fi
-    if [ "$SECURITY_SUCCESS" != true ]; then
-        echo "  • Security or performance validation issues"
-    fi
-    if [ "$SETUP_SUCCESS" != true ]; then
-        echo "  • CI setup or environment issues"
-    fi
-
-    echo ""
-    echo "Fix these issues before pushing to avoid CI failures"
-    echo ""
-    echo "Quick fixes:"
-    echo "  • Run './zig/zig build ci-smoke' for basic validation"
-    echo "  • Run './zig/zig build ci-setup' for environment issues"
-    echo "  • Run './zig/zig build ci-security' for security validation"
-    echo ""
-    echo "Faster testing (if time is critical):"
-    echo "  FAST_PREPUSH=1 git push"
-    echo ""
-    echo "Emergency bypass (not recommended):"
-    echo "  SKIP_PREPUSH=1 git push"
-    echo ""
-    exit 1
-fi
+echo "Note: Full validation runs in CI (cross-platform, integration tests, etc.)"
+echo "For comprehensive local validation: ./zig/zig build ci-full"
