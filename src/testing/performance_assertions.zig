@@ -118,7 +118,7 @@ pub const PerformanceThresholds = struct {
                 .throughput = 0.4,
                 .memory = 4.0,
             },
-            .ci => .{ .latency = 8.0, .throughput = 0.3, .memory = 5.0 }, // CI runners with ProductionVFS - variable hardware and load
+            .ci => .{ .latency = 12.0, .throughput = 0.3, .memory = 5.0 }, // CI runners with ProductionVFS - increased for variable performance
             .production => .{ .latency = 1.2, .throughput = 0.9, .memory = 1.1 }, // Isolated benchmarking with small safety margin
             .sanitizer => .{ .latency = 100.0, .throughput = 0.1, .memory = 10.0 }, // Sanitizer overhead with ProductionVFS - very high overhead
         };

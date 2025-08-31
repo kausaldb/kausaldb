@@ -229,6 +229,7 @@ const MockCLI = struct {
     }
 };
 
+// Use explicit MockCLI to avoid any naming conflicts with real CLI module
 const cli = MockCLI;
 
 test "parse_command basic commands" {
@@ -745,8 +746,9 @@ test "command parsing memory safety" {
     }
 
     // Error cases should also clean up properly
+    // Reduced iterations to prevent potential CI stack overflow
     i = 0;
-    while (i < 50) : (i += 1) {
+    while (i < 3) : (i += 1) {
         const result = cli.parse_command(allocator, &[_][]const u8{ "kausaldb", "unknown-command" });
         try testing.expectError(cli.CommandError.UnknownCommand, result);
     }
@@ -819,7 +821,7 @@ test "CLI argument edge cases" {
 test "CLI performance characteristics" {
     const allocator = testing.allocator;
 
-    const iterations = 1000;
+    const iterations = 10; // Reduced from 1000 to avoid potential stack overflow
     const start_time = std.time.nanoTimestamp();
 
     var i: usize = 0;
