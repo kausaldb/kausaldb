@@ -307,7 +307,7 @@ test "storage engine write throughput measurement" {
         test_blocks[i] = try TestData.create_test_block(allocator, @intCast(i + 1));
     }
 
-    // Optimized batch storage performance measurement  
+    // Optimized batch storage performance measurement
     // Single WAL flush at end reduces filesystem sync overhead
     for (0..write_iterations) |i| {
         const start_time = std.time.nanoTimestamp();
@@ -316,7 +316,7 @@ test "storage engine write throughput measurement" {
 
         try write_measurement.add_measurement(@intCast(end_time - start_time));
     }
-    
+
     // Explicit WAL flush to ensure all operations are durable
     try harness.storage().flush_wal();
 

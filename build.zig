@@ -365,4 +365,13 @@ pub fn build(b: *std.Build) void {
     ci_full_step.dependOn(ci_security_step);
     ci_full_step.dependOn(ci_setup_step);
     ci_full_step.dependOn(ci_matrix_step);
+
+    // Git hooks management (copies to standard .git/hooks/ location)
+    const hooks_install_step = b.step("hooks-install", "Install project git hooks to .git/hooks/");
+    const hooks_copy_cmd = b.addSystemCommand(&.{ "sh", "-c", "mkdir -p .git/hooks && cp .githooks/pre-commit .githooks/commit-msg .githooks/pre-push .git/hooks/ && chmod +x .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/pre-push && echo 'Project hooks installed to .git/hooks/'" });
+    hooks_install_step.dependOn(&hooks_copy_cmd.step);
+
+    const hooks_uninstall_step = b.step("hooks-uninstall", "Remove project hooks from .git/hooks/");
+    const hooks_remove_cmd = b.addSystemCommand(&.{ "sh", "-c", "rm -f .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/pre-push && echo 'Project hooks removed from .git/hooks/'" });
+    hooks_uninstall_step.dependOn(&hooks_remove_cmd.step);
 }

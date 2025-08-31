@@ -28,8 +28,8 @@ const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 
 // Optimized limits for CI performance while maintaining test coverage
-const MAX_TEST_DURATION_MS = 5000;  // Reduced from 10000 for faster CI
-const MAX_NETWORK_OPERATIONS = 100; // Reduced from 1000 for faster CI  
+const MAX_TEST_DURATION_MS = 5000; // Reduced from 10000 for faster CI
+const MAX_NETWORK_OPERATIONS = 100; // Reduced from 1000 for faster CI
 const PARTITION_HEAL_TIMEOUT_MS = 1000; // Reduced from 2000 for faster CI
 
 test "write succeeds after partition heals" {

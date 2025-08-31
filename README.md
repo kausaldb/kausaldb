@@ -19,8 +19,11 @@ KausalDB models your codebase as a directed graph of dependencies and relationsh
 git clone https://github.com/kausaldb/kausaldb
 cd kausaldb
 
-# One-time setup (installs Zig toolchain and Git hooks)
-./scripts/setup.sh
+# One-time setup: install Zig toolchain
+./scripts/install_zig.sh
+
+# Optional: install project git hooks
+./zig/zig build hooks-install
 
 # Build and start the server
 ./zig/zig build server
