@@ -354,8 +354,8 @@ test "fuzz: error recovery and consistency" {
 
     // First, store some valid blocks
     const valid_blocks_count = 20;
-    var stored_ids = std.ArrayList(BlockId){};
-    defer stored_ids.deinit(std.testing.allocator);
+    var stored_ids = std.array_list.Managed(BlockId).init(std.testing.allocator);
+    defer stored_ids.deinit();
 
     var i: u32 = 0;
     while (i < valid_blocks_count) : (i += 1) {
@@ -368,7 +368,7 @@ test "fuzz: error recovery and consistency" {
         };
         defer std.testing.allocator.free(valid_block.content);
 
-        try stored_ids.append(std.testing.allocator, valid_block.id);
+        try stored_ids.append(valid_block.id);
         try engine.put_block(valid_block);
     }
 
@@ -477,8 +477,8 @@ test "fuzz: concurrent-like operation patterns" {
     // (even though the engine is single-threaded)
     const pattern_iterations = 150;
     var prng = std.Random.DefaultPrng.init(12345);
-    var active_blocks = std.ArrayList(BlockId){};
-    defer active_blocks.deinit(std.testing.allocator);
+    var active_blocks = std.array_list.Managed(BlockId).init(std.testing.allocator);
+    defer active_blocks.deinit();
 
     var i: u32 = 0;
     while (i < pattern_iterations) : (i += 1) {
@@ -501,7 +501,7 @@ test "fuzz: concurrent-like operation patterns" {
                     };
 
                     if (engine.put_block(burst_block)) |_| {
-                        try active_blocks.append(std.testing.allocator, burst_block.id);
+                        try active_blocks.append(burst_block.id);
                     } else |_| {
                         // Burst might overwhelm system, which is acceptable
                     }
@@ -537,7 +537,7 @@ test "fuzz: concurrent-like operation patterns" {
                     };
 
                     if (engine.put_block(mixed_block)) |_| {
-                        try active_blocks.append(std.testing.allocator, mixed_block.id);
+                        try active_blocks.append(mixed_block.id);
                     } else |_| {}
                 }
             },
@@ -574,7 +574,7 @@ test "fuzz: concurrent-like operation patterns" {
                     };
 
                     if (engine.put_block(random_block)) |_| {
-                        try active_blocks.append(std.testing.allocator, random_block.id);
+                        try active_blocks.append(random_block.id);
                     } else |_| {}
                 }
             },

@@ -19,7 +19,6 @@ comptime {
     _ = @import("tests/golden_masters_test.zig");
     _ = @import("tests/ingestion/cross_file_resolution_test.zig");
     _ = @import("tests/ingestion/ingestion.zig");
-
     _ = @import("tests/memory/corruption_prevention_test.zig");
     _ = @import("tests/memory/profiling_validation.zig");
     _ = @import("tests/misc/lifecycle.zig");
@@ -62,6 +61,7 @@ comptime {
     _ = @import("tests/stress/memory_fault_injection.zig");
     _ = @import("tests/stress/memory_pressure.zig");
     _ = @import("tests/stress/storage_load.zig");
+    _ = @import("tests/vfs/vfs_integration.zig");
 }
 
 const quine =
@@ -83,30 +83,30 @@ const quine =
     \\        .iterate = true,
     \\    });
     \\
-    \\    var integration_tests_contents = std.ArrayList(u8){};
-    \\    defer integration_tests_contents.deinit(arena);
+    \\    var integration_tests_contents = std.array_list.Managed(u8).init(arena);
+    \\    defer integration_tests_contents.deinit();
     \\    const writer = integration_tests_contents.writer(arena);
-    \\    try writer.writeAll("comptime {\n");
+    \\    try writer.writeAll("comptime {\\n");
     \\
     \\    for (try integration_test_files(arena, src_dir)) |test_file| {
-    \\        try writer.print("    _ = @import(\"{s}\");\n", .{test_file});
+    \\        try writer.print("    _ = @import(\\\"{s}\\\");\\n", .{test_file});
     \\    }
     \\
-    \\    try writer.writeAll("}\n\n");
+    \\    try writer.writeAll("}\\n\\n");
     \\
-    \\    var quine_lines = std.mem.splitScalar(u8, quine, '\n');
-    \\    try writer.writeAll("const quine =\n");
+    \\    var quine_lines = std.mem.splitScalar(u8, quine, '\\n');
+    \\    try writer.writeAll("const quine =\\n");
     \\    while (quine_lines.next()) |line| {
-    \\        try writer.print("    \\\\{s}\n", .{line});
+    \\        try writer.print("    \\\\\\\\{s}\\n", .{line});
     \\    }
-    \\    try writer.writeAll(";\n\n");
+    \\    try writer.writeAll(";\\n\\n");
     \\
     \\    try writer.writeAll(quine);
     \\
     \\    assert(std.mem.eql(u8, @src().file, "integration_tests.zig"));
     \\    const integration_tests_contents_disk = try src_dir.readFileAlloc(arena, @src().file, 1 * MiB);
     \\    assert(std.mem.startsWith(u8, integration_tests_contents_disk, "comptime {"));
-    \\    assert(std.mem.endsWith(u8, integration_tests_contents.items, "}\n"));
+    \\    assert(std.mem.endsWith(u8, integration_tests_contents.items, "}\\n"));
     \\
     \\    const integration_tests_needs_update = !std.mem.startsWith(
     \\        u8,
@@ -122,9 +122,9 @@ const quine =
     \\                .flags = .{ .exclusive = false, .truncate = true },
     \\            });
     \\        } else {
-    \\            std.debug.print("integration_tests.zig needs updating.\n", .{});
+    \\            std.debug.print("integration_tests.zig needs updating.\\n", .{});
     \\            std.debug.print(
-    \\                "Rerun with SNAP_UPDATE=1 environmental variable to update the contents.\n",
+    \\                "Rerun with SNAP_UPDATE=1 environmental variable to update the contents.\\n",
     \\                .{},
     \\            );
     \\            assert(false);
@@ -133,8 +133,8 @@ const quine =
     \\}
     \\
     \\fn integration_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []const u8 {
-    \\    var result = std.ArrayList([]const u8){};
-    \\    defer result.deinit(arena);
+    \\    var result = std.array_list.Managed([]const u8).init(arena);
+    \\    defer result.deinit();
     \\
     \\    var tests_dir = try src_dir.openDir("tests", .{
     \\        .access_sub_paths = true,
@@ -152,7 +152,7 @@ const quine =
     \\
     \\        // Replace path separator for Windows consistency
     \\        if (builtin.os.tag == .windows) {
-    \\            std.mem.replaceScalar(u8, entry_path, '\\\\', '/');
+    \\            std.mem.replaceScalar(u8, entry_path, '\\\\\\\\', '/');
     \\        }
     \\
     \\        if (!std.mem.endsWith(u8, entry_path, ".zig")) continue;
@@ -165,11 +165,11 @@ const quine =
     \\
     \\        // Only include files that actually contain tests
     \\        const contents = tests_dir.readFileAlloc(arena, entry_path, 1 * MiB) catch continue;
-    \\        var line_iterator = std.mem.splitScalar(u8, contents, '\\n');
+    \\        var line_iterator = std.mem.splitScalar(u8, contents, '\\\\n');
     \\        while (line_iterator.next()) |line| {
     \\            const line_trimmed = std.mem.trimLeft(u8, line, " ");
     \\            if (std.mem.startsWith(u8, line_trimmed, "test ")) {
-    \\                try result.append(arena, file_path);
+    \\                try result.append(file_path);
     \\                break;
     \\            }
     \\        }
@@ -198,99 +198,26 @@ const assert = assert_mod.assert;
 
 const MiB = 1024 * 1024;
 
-test quine {
-    // Arena Coordinator Pattern: bounded operations with O(1) cleanup
-    const backing_allocator = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(backing_allocator);
-    defer arena.deinit();
+test "integration test discovery - validate all test modules are imported" {
+    // Auto-discover missing integration test imports using test discovery system
+    // If this test fails, run: ./zig/zig build update-integration-tests
 
-    // build.zig runs this in the root dir.
-    var src_dir = try std.fs.cwd().openDir("src", .{
-        .access_sub_paths = true,
-        .iterate = true,
-    });
-    defer src_dir.close();
+    const discovery = @import("dev/test_discovery.zig");
+    var result = try discovery.discover_and_validate_tests(
+        std.testing.allocator,
+        "tests", // Search src/tests/ directory
+        "src/integration_tests.zig",
+        "tests/",
+    );
+    defer result.deinit();
 
-    // Read current file in bounded chunks to avoid memory explosion
-    assert(std.mem.eql(u8, @src().file, "integration_tests.zig"));
-    const current_file = try src_dir.openFile(@src().file, .{});
-    defer current_file.close();
-
-    // Bounded operation: limit file size to prevent memory issues
-    const file_stat = try current_file.stat();
-    if (file_stat.size > 2 * MiB) {
-        std.debug.print("integration_tests.zig too large ({} bytes) for validation\n", .{file_stat.size});
-        return;
-    }
-
-    const current_contents = try current_file.readToEndAlloc(arena.allocator(), @intCast(file_stat.size));
-
-    // Arena Reset Pattern: process files one at a time with bounded memory
-    var missing_imports = false;
-    var tests_dir = try src_dir.openDir("tests", .{
-        .access_sub_paths = true,
-        .iterate = true,
-    });
-    defer tests_dir.close();
-
-    var walker = try tests_dir.walk(arena.allocator());
-    defer walker.deinit();
-
-    while (try walker.next()) |entry| {
-        if (entry.kind != .file) continue;
-        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
-
-        // Skip test framework files
-        if (std.mem.eql(u8, entry.basename, "harness.zig")) continue;
-        if (std.mem.eql(u8, entry.basename, "mock_vfs_helper.zig")) continue;
-
-        // Bounded file check: prevent memory explosion
-        const entry_stat = tests_dir.statFile(entry.path) catch continue;
-        if (entry_stat.size > 32 * 1024) continue;
-
-        // Arena per operation: read small chunk to check for tests
-        var file_arena = std.heap.ArenaAllocator.init(backing_allocator);
-        defer file_arena.deinit(); // O(1) cleanup per file
-
-        const read_size = @min(@as(usize, 4096), @as(usize, @intCast(entry_stat.size)));
-        const file_content = tests_dir.readFileAlloc(file_arena.allocator(), entry.path, read_size) catch continue;
-
-        // Check if file has tests
-        var has_tests = false;
-        var lines = std.mem.splitScalar(u8, file_content, '\n');
-        while (lines.next()) |line| {
-            const trimmed = std.mem.trimLeft(u8, line, " ");
-            if (std.mem.startsWith(u8, trimmed, "test ")) {
-                has_tests = true;
-                break;
-            }
+    if (result.missing_imports.items.len > 0) {
+        std.debug.print("\nMissing integration test imports found:\n", .{});
+        for (result.missing_imports.items) |missing| {
+            std.debug.print("  - {s}\n", .{missing});
         }
-
-        if (has_tests) {
-            // Bounded string operation: create import line in file arena
-            const import_path = file_arena.allocator().dupe(u8, entry.path) catch continue;
-
-            // Windows path normalization
-            if (builtin.os.tag == .windows) {
-                std.mem.replaceScalar(u8, import_path, '\\', '/');
-            }
-
-            // Create expected import line with tests/ prefix
-            const file_path = std.fmt.allocPrint(file_arena.allocator(), "tests/{s}", .{import_path}) catch continue;
-            const expected_import = std.fmt.allocPrint(file_arena.allocator(), "_ = @import(\"{s}\");", .{file_path}) catch continue;
-
-            if (std.mem.indexOf(u8, current_contents, expected_import) == null) {
-                std.debug.print("Missing import in comptime block: {s}\n", .{file_path});
-                missing_imports = true;
-            }
-        }
-        // file_arena.deinit() called automatically - O(1) memory reset
-    }
-
-    if (missing_imports) {
-        std.debug.print("integration_tests.zig comptime block needs updating.\n", .{});
-        std.debug.print("Add the missing imports shown above.\n", .{});
-        assert(!missing_imports);
+        std.debug.print("\nRun: ./zig/zig build update-integration-tests\n\n", .{});
+        return error.TestFailed;
     }
 }
 

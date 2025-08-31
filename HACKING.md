@@ -1,12 +1,14 @@
 # Hacking
 
+Core patterns and philosophy for KausalDB development. For setup instructions, see [CONTRIBUTING.md](CONTRIBUTING.md). For comprehensive guides, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
 ## Build System
 
 ```bash
-./scripts/install_zig.sh    # Installs exact Zig version
-./scripts/setup_hooks.sh    # Git hooks (mandatory)
-./zig/zig build test        # Fast loop
-./zig/zig build ci          # Full validation
+./zig/zig build ci-setup      # Install toolchain and setup hooks
+./zig/zig build test          # Fast unit tests
+./zig/zig build ci-smoke      # Quick validation (<3 min)
+./zig/zig build ci-full       # Complete validation suite
 ```
 
 ## Testing Philosophy
@@ -44,7 +46,7 @@ defer _ = gpa.deinit();
 
 **Tier 2: Sanitizers**
 ```bash
-./zig/zig build test-sanitizer
+./zig/zig build test -fsanitize-address
 ```
 
 **Tier 3: Interactive**
@@ -58,8 +60,7 @@ Benchmark first. Optimize second.
 
 ```bash
 ./zig/zig build benchmark
-./scripts/check_regression.sh baseline  # Update baseline
-./scripts/check_regression.sh           # Check for regressions
+./zig/zig build ci-perf       # Performance regression testing
 ```
 
 Current targets:
@@ -117,17 +118,16 @@ Test categories:
 
 ## CI Pipeline
 
-Pre-push hook runs local CI. Catches most failures.
+Pre-commit hooks run smoke tests automatically:
 
 ```bash
-./scripts/local_ci.sh  # ~2 minutes locally
+./zig/zig build ci-smoke    # Runs automatically on commit
+./zig/zig build ci-full     # Complete validation
+./zig/zig build ci-stress   # Load testing
+./zig/zig build ci-security # Security scanning
 ```
 
-GitHub Actions runs:
-1. Cross-platform compilation
-2. Full test suite with sanitizers
-3. Performance regression detection
-4. Memory leak detection
+GitHub Actions runs cross-platform matrix testing with the same targets.
 
 ## Common Patterns
 

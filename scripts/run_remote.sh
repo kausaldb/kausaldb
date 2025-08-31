@@ -194,32 +194,14 @@ check_connection() {
 
 # Sync files
 sync_files() {
-    local rsync_opts=(-avz --delete --progress)
-    local excludes=(
-        '.git'
-        '*cache'
-        'zig-cache'
-        '.zig-cache'
-        'zig-out'
-        'zig'
-        '*.tmp'
-        '.DS_Store'
-        'node_modules'
-        'target'
-        '.vscode/settings.json'
-    )
-
-    # Add excludes
-    for exclude in "${excludes[@]}"; do
-        rsync_opts+=(--exclude="$exclude")
-    done
-
+    local rsync_opts=(-avz --progress --delete)
+    
     # Add dry-run if requested
     if [[ "$DRY_RUN" == "true" ]]; then
         rsync_opts+=(--dry-run)
         log_info "DRY RUN - showing what would be synced:"
     else
-        log_info "Syncing local changes to $SERVER:$REMOTE_PATH..."
+        log_info "Syncing git-tracked files to $SERVER:$REMOTE_PATH..."
     fi
 
     # Add verbose if requested
@@ -227,12 +209,28 @@ sync_files() {
         rsync_opts+=(--verbose)
     fi
 
-    # Sync main project files (including scripts directory)
-    if rsync "${rsync_opts[@]}" . "$SERVER:$REMOTE_PATH/"; then
+    # Create temporary file list of git-tracked files
+    local temp_file_list
+    temp_file_list=$(mktemp)
+    trap "rm -f '$temp_file_list'" EXIT
+
+    # Get list of git-tracked files, excluding .git directory itself
+    if ! git ls-files > "$temp_file_list"; then
+        log_error "Failed to get git-tracked files list. Are you in a git repository?"
+        return 1
+    fi
+
+    # Count files for progress indication
+    local file_count
+    file_count=$(wc -l < "$temp_file_list")
+    log_info "Found $file_count git-tracked files to sync"
+
+    # Use rsync with --files-from to sync only git-tracked files
+    if rsync "${rsync_opts[@]}" --files-from="$temp_file_list" . "$SERVER:$REMOTE_PATH/"; then
         if [[ "$DRY_RUN" == "true" ]]; then
             log_success "Dry run completed - no files were actually transferred"
         else
-            log_success "File sync completed (including scripts directory)"
+            log_success "Git-tracked file sync completed ($file_count files)"
         fi
     else
         log_error "File sync failed"

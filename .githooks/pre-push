@@ -90,18 +90,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Phase 1: Code Quality Validation (Fast)
-print_status "PROGRESS" "Phase 1: Code Quality & Style Validation"
-QUALITY_START=$(date +%s)
+# Phase 1: TigerBeetle-Style Smoke Tests (Fast)
+print_status "PROGRESS" "Phase 1: CI Smoke Tests (TigerBeetle-Style)"
+SMOKE_START=$(date +%s)
 
-# Run existing pre-commit checks (formatting, tidy, compilation)
-if ! ./.githooks/pre-commit; then
-    print_status "FAIL" "Code quality checks failed - fix issues before pushing"
-    PIPELINE_SUCCESS=false
+# Run CI smoke tests - fastest tier of validation
+if ./zig/zig build ci-smoke >/dev/null 2>&1; then
+    SMOKE_END=$(date +%s)
+    SMOKE_DURATION=$((SMOKE_END - SMOKE_START))
+    print_status "OK" "CI smoke tests passed (${SMOKE_DURATION}s)"
 else
-    QUALITY_END=$(date +%s)
-    QUALITY_DURATION=$((QUALITY_END - QUALITY_START))
-    print_status "OK" "Code quality validation passed (${QUALITY_DURATION}s)"
+    print_status "FAIL" "CI smoke tests failed - fix basic issues before pushing"
+    echo "Run './zig/zig build ci-smoke' for details"
+    PIPELINE_SUCCESS=false
 fi
 
 # Phase 2: Cross-Platform Compilation Matrix
@@ -173,129 +174,106 @@ else
     PIPELINE_SUCCESS=false
 fi
 
-# Phase 4: Critical Integration Tests (CI Failure Hotspots)
-print_status "PROGRESS" "Phase 4: Critical Integration Tests"
+# Phase 4: TigerBeetle-Style Tiered CI Validation
+print_status "PROGRESS" "Phase 4: Tiered CI Validation (TigerBeetle-Style)"
 TESTS_START=$(date +%s)
 
-# These are the tests that frequently fail in CI and should be caught locally
-# Use test-all to mirror exact CI behavior and catch integration issues
-CRITICAL_TESTS=(
-    "test-all"                  # Complete test suite - mirrors CI exactly
-)
-
-# For faster validation, set FAST_PREPUSH=1 to run individual test suites
+# TigerBeetle-inspired tiered validation - run appropriate tier based on mode
 if [ "${FAST_PREPUSH:-0}" = "1" ]; then
-    CRITICAL_TESTS=(
-        "test"                      # Core unit tests
-        "test-integration"          # Integration tests
-        "test-fault-injection"      # Fault injection tests
-        "test-simulation"           # Simulation tests
-    )
-    print_status "INFO" "Running fast pre-push validation (FAST_PREPUSH=1)"
+    CI_TIER="ci-perf"  # Fast performance validation
+    print_status "INFO" "Running fast pre-push validation (ci-perf tier)"
 else
-    print_status "INFO" "Running comprehensive validation - set FAST_PREPUSH=1 for faster mode"
+    CI_TIER="ci-full"  # Complete validation suite  
+    print_status "INFO" "Running comprehensive validation (ci-full tier)"
 fi
 
 CRITICAL_TESTS_SUCCESS=true
 {
-    echo "Critical integration test results:"
-    for test in "${CRITICAL_TESTS[@]}"; do
-        printf "  %-30s: " "$test"
-        if ./zig/zig build "$test" >/dev/null 2>&1; then
-            echo "+ PASSED"
-        else
-            echo "- FAILED"
-            CRITICAL_TESTS_SUCCESS=false
-        fi
-    done
+    echo "TigerBeetle-style CI tier validation results:"
+    printf "  %-30s: " "$CI_TIER"
+    if ./zig/zig build "$CI_TIER" >/dev/null 2>&1; then
+        echo "+ PASSED"
+    else
+        echo "- FAILED"
+        CRITICAL_TESTS_SUCCESS=false
+    fi
 } > "$CRITICAL_TESTS_OUTPUT"
 
 if [ "$CRITICAL_TESTS_SUCCESS" = true ]; then
     TESTS_END=$(date +%s)
     TESTS_DURATION=$((TESTS_END - TESTS_START))
     if [ "${FAST_PREPUSH:-0}" = "1" ]; then
-        print_status "OK" "Fast critical tests passed (${TESTS_DURATION}s)"
+        print_status "OK" "Fast CI tier validation passed (${TESTS_DURATION}s)"
     else
-        print_status "OK" "Comprehensive test suite passed (${TESTS_DURATION}s)"
+        print_status "OK" "Comprehensive CI tier validation passed (${TESTS_DURATION}s)"
     fi
 else
-    print_status "FAIL" "Critical tests failed:"
+    print_status "FAIL" "CI tier validation failed:"
     cat "$CRITICAL_TESTS_OUTPUT"
     if [ "${FAST_PREPUSH:-0}" = "1" ]; then
         print_status "INFO" "Consider running full validation: git push (without FAST_PREPUSH=1)"
     else
-        print_status "INFO" "Comprehensive test suite failed - these mirror CI exactly"
+        print_status "INFO" "Comprehensive CI validation failed - fix issues before push"
     fi
     PIPELINE_SUCCESS=false
 fi
 
-# Phase 5: Performance Regression Detection
-print_status "PROGRESS" "Phase 5: Performance Regression Detection"
-PERF_START=$(date +%s)
+# Phase 5: Security and Performance Validation
+print_status "PROGRESS" "Phase 5: Security & Performance Validation"
+SEC_START=$(date +%s)
 
-# Quick benchmark to catch major performance regressions
-PERFORMANCE_SUCCESS=true
-if command -v ./zig-out/bin/benchmark >/dev/null 2>&1; then
+# Run security and performance tiers if not already covered
+SECURITY_SUCCESS=true
+if [ "$CI_TIER" != "ci-full" ]; then
+    # Only run separate security validation if ci-full wasn't already run
     {
-        echo "Performance regression check:"
-        # Run quick storage benchmark (most critical for performance)
-        if timeout 30s ./zig-out/bin/benchmark storage --quick 2>&1; then
-            echo "+ Performance benchmarks completed"
+        echo "Security and performance validation:"
+        printf "  %-20s: " "ci-security"
+        if ./zig/zig build ci-security >/dev/null 2>&1; then
+            echo "+ PASSED"
         else
-            echo "- Performance benchmarks failed or timed out"
-            PERFORMANCE_SUCCESS=false
+            echo "- FAILED"
+            SECURITY_SUCCESS=false
         fi
-    } > "$PERFORMANCE_OUTPUT" 2>&1
+        
+        printf "  %-20s: " "ci-perf"
+        if ./zig/zig build ci-perf >/dev/null 2>&1; then
+            echo "+ PASSED"
+        else
+            echo "- FAILED"
+            SECURITY_SUCCESS=false
+        fi
+    } > "$PERFORMANCE_OUTPUT"
 else
-    # Build benchmark if not available
-    if ./zig/zig build benchmark >/dev/null 2>&1; then
-        {
-            echo "Performance regression check:"
-            if timeout 30s ./zig-out/bin/benchmark storage --quick 2>&1; then
-                echo "+ Performance benchmarks completed"
-            else
-                echo "- Performance benchmarks failed or timed out"
-                PERFORMANCE_SUCCESS=false
-            fi
-        } > "$PERFORMANCE_OUTPUT" 2>&1
-    else
-        {
-            echo "WARN: Benchmark binary not available - skipping performance check"
-        } > "$PERFORMANCE_OUTPUT"
-    fi
+    echo "Security & performance already validated in ci-full tier" > "$PERFORMANCE_OUTPUT"
 fi
 
-if [ "$PERFORMANCE_SUCCESS" = true ]; then
-    PERF_END=$(date +%s)
-    PERF_DURATION=$((PERF_END - PERF_START))
-    print_status "OK" "Performance regression check passed (${PERF_DURATION}s)"
+if [ "$SECURITY_SUCCESS" = true ]; then
+    SEC_END=$(date +%s)
+    SEC_DURATION=$((SEC_END - SEC_START))
+    print_status "OK" "Security & performance validation passed (${SEC_DURATION}s)"
 else
-    print_status "WARN" "Performance regression check had issues:"
+    print_status "FAIL" "Security or performance validation failed:"
     cat "$PERFORMANCE_OUTPUT"
-    print_status "INFO" "Performance issues don't block push but should be investigated"
+    print_status "INFO" "Fix security/performance issues before pushing"
+    PIPELINE_SUCCESS=false
 fi
 
-# Phase 6: Dependency Validation
-print_status "PROGRESS" "Phase 6: Dependency & Import Validation"
-DEP_START=$(date +%s)
+# Phase 6: TigerBeetle-Style CI Setup Validation
+print_status "PROGRESS" "Phase 6: CI Setup & Environment Validation"
+SETUP_START=$(date +%s)
 
-# Check for common dependency issues that cause CI failures
-DEP_SUCCESS=true
-
-# Look for potential libc dependencies without proper guards
-if grep -r "linkLibC\|@cImport" src/ tests/ 2>/dev/null | grep -v "// libc-ok" >/dev/null; then
-    print_status "WARN" "Found potential libc dependencies - ensure proper conditional compilation"
-    print_status "INFO" "Add '// libc-ok' comment if intentional and properly guarded"
-fi
-
-# Check for missing imports (common CI failure)
-if ! ./zig/zig build test >/dev/null 2>&1; then
-    print_status "FAIL" "Import/dependency validation failed"
-    DEP_SUCCESS=false
+# Validate CI environment setup using our pure Zig setup tool
+SETUP_SUCCESS=true
+if ./zig/zig build ci-setup >/dev/null 2>&1; then
+    SETUP_END=$(date +%s)
+    SETUP_DURATION=$((SETUP_END - SETUP_START))
+    print_status "OK" "CI setup validation passed (${SETUP_DURATION}s)"
 else
-    DEP_END=$(date +%s)
-    DEP_DURATION=$((DEP_END - DEP_START))
-    print_status "OK" "Dependency validation passed (${DEP_DURATION}s)"
+    print_status "FAIL" "CI setup validation failed"
+    print_status "INFO" "Run './zig/zig build ci-setup' to see setup issues"
+    SETUP_SUCCESS=false
+    PIPELINE_SUCCESS=false
 fi
 
 # Final Pipeline Results
@@ -312,12 +290,12 @@ if [ "$PIPELINE_SUCCESS" = true ]; then
     echo "Ready to push - high confidence this will pass CI"
     echo ""
     echo "Pipeline phases:"
-    echo "  + Code quality & style validation"
+    echo "  + TigerBeetle-style CI smoke tests"
     echo "  + Cross-platform compilation (4 targets)"
     echo "  + Build mode validation (Debug/Release)"
-    echo "  + Critical integration tests"
-    echo "  + Performance regression detection"
-    echo "  + Dependency & import validation"
+    echo "  + Tiered CI validation ($CI_TIER)"
+    echo "  + Security & performance validation"
+    echo "  + CI setup & environment validation"
     echo ""
     echo "Estimated CI success probability: >95%"
     exit 0
@@ -333,19 +311,22 @@ else
         echo "  • Build mode compatibility issues"
     fi
     if [ "$CRITICAL_TESTS_SUCCESS" != true ]; then
-        echo "  • Critical integration test failures"
+        echo "  • CI tier validation failures ($CI_TIER)"
     fi
-    if [ "$DEP_SUCCESS" != true ]; then
-        echo "  • Dependency/import issues"
+    if [ "$SECURITY_SUCCESS" != true ]; then
+        echo "  • Security or performance validation issues"
+    fi
+    if [ "$SETUP_SUCCESS" != true ]; then
+        echo "  • CI setup or environment issues"
     fi
 
     echo ""
     echo "Fix these issues before pushing to avoid CI failures"
     echo ""
     echo "Quick fixes:"
-    echo "  • Run './zig/zig build fmt-fix' for formatting"
-    echo "  • Run './zig/zig build tidy' for style issues"
-    echo "  • Check build logs for specific compilation errors"
+    echo "  • Run './zig/zig build ci-smoke' for basic validation"
+    echo "  • Run './zig/zig build ci-setup' for environment issues"
+    echo "  • Run './zig/zig build ci-security' for security validation"
     echo ""
     echo "Faster testing (if time is critical):"
     echo "  FAST_PREPUSH=1 git push"

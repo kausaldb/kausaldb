@@ -1,10 +1,11 @@
 # Contributing
 
+Quick start guide for contributors. For detailed development information, see [HACKING.md](HACKING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
 ## Setup
 
 ```bash
-./scripts/install_zig.sh      # Exact Zig version required
-./scripts/setup_hooks.sh       # Pre-commit/push hooks (mandatory)
+./zig/zig build ci-setup      # Install toolchain and Git hooks
 ```
 
 ## Workflow
@@ -13,9 +14,10 @@
 **Pre-push**: Full CI validation locally. ~2 minutes. Catches most CI failures.
 
 ```bash
-./zig/zig build test           # Fast developer loop
-./scripts/local_ci.sh          # Full CI check before push
-./scripts/check_regression.sh  # Performance validation
+./zig/zig build test           # Fast unit tests
+./zig/zig build ci-smoke       # Quick validation (~3 min)
+./zig/zig build ci-full        # Complete validation suite
+./zig/zig build ci-perf        # Performance regression testing
 ```
 
 ## Standards
@@ -74,7 +76,7 @@ counter += 1;
 ## Debugging
 
 1. **Memory issues**: Enable GPA safety
-2. **Deeper analysis**: `./zig/zig build test-sanitizer`
+2. **Deeper analysis**: `./zig/zig build test -fsanitize-address`
 3. **Performance**: `./zig/zig build benchmark`
 
 ## Commits

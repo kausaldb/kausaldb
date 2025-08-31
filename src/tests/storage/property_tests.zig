@@ -124,19 +124,19 @@ test "property: put-then-get consistency" {
 
     // Property: Every block we put should be immediately retrievable
     const test_iterations = 50;
-    var stored_blocks = std.ArrayList(ContextBlock){};
+    var stored_blocks = std.array_list.Managed(ContextBlock).init(std.testing.allocator);
     defer {
         for (stored_blocks.items) |block| {
             std.testing.allocator.free(block.content);
             std.testing.allocator.free(block.source_uri);
         }
-        stored_blocks.deinit(std.testing.allocator);
+        stored_blocks.deinit();
     }
 
     var i: u32 = 0;
     while (i < test_iterations) : (i += 1) {
         const test_block = try generate_test_block(i + 1000, std.testing.allocator);
-        try stored_blocks.append(std.testing.allocator, test_block);
+        try stored_blocks.append(test_block);
 
         // Put the block
         try put_block_with_backpressure(&engine, test_block);
@@ -184,8 +184,8 @@ test "property: block count consistency" {
     try expectEqual(@as(u32, 0), initial_count);
 
     const test_iterations = 30;
-    var stored_ids = std.ArrayList(BlockId){};
-    defer stored_ids.deinit(std.testing.allocator);
+    var stored_ids = std.array_list.Managed(BlockId).init(std.testing.allocator);
+    defer stored_ids.deinit();
 
     var i: u32 = 0;
     var memtable_count: u32 = 0;
@@ -194,7 +194,7 @@ test "property: block count consistency" {
         defer std.testing.allocator.free(test_block.content);
         defer std.testing.allocator.free(test_block.source_uri);
 
-        try stored_ids.append(std.testing.allocator, test_block.id);
+        try stored_ids.append(test_block.id);
         try put_block_with_backpressure(&engine, test_block);
         memtable_count += 1;
 
@@ -295,19 +295,19 @@ test "property: flush operation invariants" {
 
     // Insert some test data
     const num_blocks = 20;
-    var stored_blocks = std.ArrayList(ContextBlock){};
+    var stored_blocks = std.array_list.Managed(ContextBlock).init(std.testing.allocator);
     defer {
         for (stored_blocks.items) |block| {
             std.testing.allocator.free(block.content);
             std.testing.allocator.free(block.source_uri);
         }
-        stored_blocks.deinit(std.testing.allocator);
+        stored_blocks.deinit();
     }
 
     var i: u32 = 0;
     while (i < num_blocks) : (i += 1) {
         const test_block = try generate_test_block(i + 4000, std.testing.allocator);
-        try stored_blocks.append(std.testing.allocator, test_block);
+        try stored_blocks.append(test_block);
         try put_block_with_backpressure(&engine, test_block);
     }
 

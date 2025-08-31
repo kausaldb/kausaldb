@@ -36,6 +36,9 @@ comptime {
     _ = @import("core/vfs.zig");
 
     // Dev modules
+    _ = @import("dev/ci/security_scanner.zig");
+    _ = @import("dev/ci/setup_runner.zig");
+    _ = @import("dev/ci/stress_runner.zig");
     _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/shell.zig");
@@ -206,97 +209,26 @@ const quine =
     \\
 ;
 
-test quine {
-    // Arena Coordinator Pattern: bounded operations with O(1) cleanup
-    const backing_allocator = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(backing_allocator);
-    defer arena.deinit();
+test "unit test discovery - validate all src modules with tests are imported" {
+    // Auto-discover missing unit test imports using test discovery system
+    // If this test fails, run: ./zig/zig build update-unit-tests
 
-    // build.zig runs this in the root dir.
-    var src_dir = try std.fs.cwd().openDir("src", .{
-        .access_sub_paths = true,
-        .iterate = true,
-    });
-    defer src_dir.close();
+    const discovery = @import("dev/test_discovery.zig");
+    var result = try discovery.discover_and_validate_tests(
+        std.testing.allocator,
+        ".", // Search src/ directory
+        "src/unit_tests.zig",
+        "",
+    );
+    defer result.deinit();
 
-    // Read current file in bounded chunks to avoid memory explosion
-    assert(std.mem.eql(u8, @src().file, "unit_tests.zig"));
-    const current_file = try src_dir.openFile(@src().file, .{});
-    defer current_file.close();
-
-    // Bounded operation: limit file size to prevent memory issues
-    const file_stat = try current_file.stat();
-    if (file_stat.size > 2 * MiB) {
-        std.debug.print("unit_tests.zig too large ({} bytes) for validation\n", .{file_stat.size});
-        return;
-    }
-
-    // Safety: File stat size guaranteed to be within allocator limits
-    const current_contents = try current_file.readToEndAlloc(arena.allocator(), @intCast(file_stat.size));
-
-    // Arena Reset Pattern: process files one at a time with bounded memory
-    var missing_imports = false;
-    var walker = try src_dir.walk(arena.allocator());
-    defer walker.deinit();
-
-    while (try walker.next()) |entry| {
-        if (entry.kind != .file) continue;
-        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
-
-        // Skip special files
-        if (std.mem.eql(u8, entry.basename, "unit_tests.zig")) continue;
-        if (std.mem.eql(u8, entry.basename, "integration_tests.zig")) continue;
-        if (std.mem.eql(u8, entry.basename, "kausaldb.zig")) continue;
-        if (std.mem.eql(u8, entry.basename, "main.zig")) continue;
-        if (std.mem.startsWith(u8, entry.path, "tests/")) continue;
-
-        // Bounded file check: prevent memory explosion
-        const entry_stat = src_dir.statFile(entry.path) catch continue;
-        if (entry_stat.size > 32 * 1024) continue;
-
-        // Arena per operation: read small chunk to check for tests
-        var file_arena = std.heap.ArenaAllocator.init(backing_allocator);
-        defer file_arena.deinit(); // O(1) cleanup per file
-
-        // Safety: Entry stat size clamped to safe read buffer size
-        const read_size = @min(@as(usize, 4096), @as(usize, @intCast(entry_stat.size)));
-        const file_content = src_dir.readFileAlloc(file_arena.allocator(), entry.path, read_size) catch continue;
-
-        // Check if file has tests
-        var has_tests = false;
-        var lines = std.mem.splitScalar(u8, file_content, '\n');
-        while (lines.next()) |line| {
-            const trimmed = std.mem.trimLeft(u8, line, " ");
-            if (std.mem.startsWith(u8, trimmed, "test ")) {
-                has_tests = true;
-                break;
-            }
+    if (result.missing_imports.items.len > 0) {
+        std.debug.print("\nMissing unit test imports found:\n", .{});
+        for (result.missing_imports.items) |missing| {
+            std.debug.print("  - {s}\n", .{missing});
         }
-
-        if (has_tests) {
-            // Bounded string operation: create import line in file arena
-            const import_pattern = file_arena.allocator().dupe(u8, entry.path) catch continue;
-
-            // Windows path normalization
-            if (builtin.os.tag == .windows) {
-                std.mem.replaceScalar(u8, import_pattern, '\\', '/');
-            }
-
-            // Create expected import line
-            const expected_import = std.fmt.allocPrint(file_arena.allocator(), "_ = @import(\"{s}\");", .{import_pattern}) catch continue;
-
-            if (std.mem.indexOf(u8, current_contents, expected_import) == null) {
-                std.debug.print("Missing import in comptime block: {s}\n", .{entry.path});
-                missing_imports = true;
-            }
-        }
-        // file_arena.deinit() called automatically - O(1) memory reset
-    }
-
-    if (missing_imports) {
-        std.debug.print("unit_tests.zig comptime block needs updating.\n", .{});
-        std.debug.print("Add the missing imports shown above.\n", .{});
-        assert(!missing_imports);
+        std.debug.print("\nRun: ./zig/zig build update-unit-tests\n\n", .{});
+        return error.TestFailed;
     }
 }
 

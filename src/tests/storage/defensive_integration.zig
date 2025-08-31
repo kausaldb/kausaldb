@@ -152,12 +152,12 @@ test "storage engine memory behavior under load" {
 
     // Simulate memory behavior under load
     const iterations: u32 = 100;
-    var allocated_contents = std.ArrayList([]u8){};
+    var allocated_contents = std.array_list.Managed([]u8).init(std.testing.allocator);
     defer {
         for (allocated_contents.items) |content| {
             std.testing.allocator.free(content);
         }
-        allocated_contents.deinit(std.testing.allocator);
+        allocated_contents.deinit();
     }
 
     for (0..iterations) |i| {
@@ -166,7 +166,7 @@ test "storage engine memory behavior under load" {
         std.mem.writeInt(u128, &id_bytes, @intCast(i + 1), .big);
 
         const content = try std.fmt.allocPrint(std.testing.allocator, "test_content_{}", .{i});
-        try allocated_contents.append(std.testing.allocator, content);
+        try allocated_contents.append(content);
 
         const test_block = ContextBlock{
             .id = BlockId{ .bytes = id_bytes },

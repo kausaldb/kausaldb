@@ -6,43 +6,43 @@ Comprehensive guide for KausalDB development, testing, and contribution.
 
 ```bash
 # Install toolchain and setup
-./scripts/install_zig.sh
-./scripts/setup_hooks.sh
+./zig/zig build ci-setup
 
 # Run tests
-zig run tools/dev.zig -- test           # Fast unit tests
-zig run tools/dev.zig -- test --filter integration  # Integration tests
-zig run tools/dev.zig -- ci             # Full CI pipeline locally
+./zig/zig build test                     # Fast unit tests
+./zig/zig build test-integration         # Integration tests
+./zig/zig build ci-full                  # Full CI pipeline locally
 
 # Development workflow
-zig build run                            # Run server
-zig run tools/dev.zig -- check          # Code quality checks
-zig run tools/dev.zig -- bench          # Performance benchmarks
+./zig/zig build run                      # Run server
+./zig/zig build ci-smoke                 # Code quality checks
+./zig/zig build benchmark               # Performance benchmarks
 ```
 
 ## Development Workflow
 
 ### Unified Developer Tool
 
-All development tasks are managed through `tools/dev.zig`:
+All development tasks are managed through build targets:
 
 ```bash
 # Testing
-zig run tools/dev.zig -- test                    # Run fast tests
-zig run tools/dev.zig -- test --filter storage   # Test specific component
-zig run tools/dev.zig -- test --safety          # Enable safety checks
-zig run tools/dev.zig -- test --iterations 10   # Stress testing
+./zig/zig build test                             # Fast unit tests
+./zig/zig build test --test-filter="storage"     # Test specific component
+./zig/zig build test -fsanitize-address          # Enable safety checks
+./zig/zig build ci-stress                        # Stress testing
 
 # Code Quality
-zig run tools/dev.zig -- check                   # Format + tidy + compile
-zig build fmt-fix                                # Auto-fix formatting
+./zig/zig build ci-smoke                         # Format + tidy + fast tests
+./zig/zig build fmt-fix                          # Auto-fix formatting
 
 # Performance
-zig run tools/dev.zig -- bench block-write       # Specific benchmark
-zig run tools/dev.zig -- fuzz 300               # Fuzz for 5 minutes
+./zig/zig build benchmark                        # Run benchmarks
+./zig/zig build fuzz                             # Fuzz testing
+./zig/zig build ci-perf                          # Performance validation
 
-# CI Simulation
-zig run tools/dev.zig -- ci                      # Run full CI locally
+# CI Validation
+./zig/zig build ci-full                          # Complete CI pipeline locally
 ```
 
 ### Git Workflow
@@ -241,16 +241,12 @@ kausaldb/
 │   ├── core/              # Core utilities (assert, memory, vfs)
 │   ├── storage/           # Storage engine components
 │   ├── query/             # Query engine
+│   ├── dev/               # Development tools (CI, benchmarks, etc.)
 │   ├── tests/             # Integration tests with API access
-│   │   ├── harness.zig    # Test framework
-│   │   ├── storage/       # Storage tests
-│   │   └── query/         # Query tests
 │   └── main.zig           # Entry point
 ├── tests/                  # E2E tests (binary interface only)
-├── tools/                  # Development tools
-│   └── dev.zig            # Unified developer tool
 ├── docs/                   # Documentation
-└── build.zig              # Build configuration
+└── build.zig              # Build configuration with CI targets
 ```
 
 ## Contributing
@@ -259,7 +255,7 @@ kausaldb/
 
 1. **Run full validation**:
 ```bash
-zig run tools/dev.zig -- ci
+./zig/zig build ci-full
 ```
 
 2. **Update documentation** if changing APIs
@@ -315,9 +311,9 @@ zig build test -Denable-memory-guard=true
 **Performance regression**:
 ```bash
 # Compare benchmarks
-zig run tools/dev.zig -- bench > before.txt
+./zig/zig build benchmark > before.txt
 # ... make changes ...
-zig run tools/dev.zig -- bench > after.txt
+./zig/zig build benchmark > after.txt
 diff before.txt after.txt
 ```
 
@@ -332,9 +328,9 @@ diff before.txt after.txt
 
 ### Pre-release Checklist
 
-- [ ] All tests pass: `zig run tools/dev.zig -- ci`
-- [ ] No memory leaks: `zig build test --safety`
-- [ ] Performance targets met: `zig run tools/dev.zig -- bench`
+- [ ] All tests pass: `./zig/zig build ci-full`
+- [ ] No memory leaks: `./zig/zig build test -fsanitize-address`
+- [ ] Performance targets met: `./zig/zig build ci-perf`
 - [ ] Documentation current
 - [ ] CHANGELOG updated
 - [ ] Version bumped in `build.zig`
