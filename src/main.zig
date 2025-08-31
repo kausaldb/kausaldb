@@ -34,6 +34,10 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    // Use configurable database path - defaults to .kausal-data for production
+    const db_path = std.process.getEnvVarOwned(allocator, "KAUSAL_DB_PATH") catch ".kausal-data";
+    defer if (!std.mem.eql(u8, db_path, ".kausal-data")) allocator.free(db_path);
+
     // Detect natural language commands vs legacy commands
     const use_natural_cli = detect_natural_command(args);
 
@@ -44,7 +48,7 @@ pub fn main() !void {
                 if (args.len >= 2) {
                     std.debug.print("Unknown command: {s}\n", .{args[1]});
                 }
-                var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
+                var natural_context = try NaturalExecutionContext.init(allocator, db_path);
                 defer natural_context.deinit();
                 try natural_executor.execute_natural_command(&natural_context, .{ .help = .{} });
                 std.process.exit(1);
@@ -57,7 +61,7 @@ pub fn main() !void {
         };
         defer natural_parse_result.deinit();
 
-        var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
+        var natural_context = try NaturalExecutionContext.init(allocator, db_path);
         defer natural_context.deinit();
 
         try natural_executor.execute_natural_command(&natural_context, natural_parse_result.command);
@@ -72,7 +76,7 @@ pub fn main() !void {
                     .command = cli.Command{ .help = .{} },
                     .allocator = allocator,
                 };
-                var context = try ExecutionContext.init(allocator, ".kausal-data");
+                var context = try ExecutionContext.init(allocator, db_path);
                 defer context.deinit();
                 try cli.execute_command(&context, help_result);
                 std.process.exit(1);
@@ -86,7 +90,7 @@ pub fn main() !void {
         };
         defer parse_result.deinit();
 
-        var context = try ExecutionContext.init(allocator, ".kausal-data");
+        var context = try ExecutionContext.init(allocator, db_path);
         defer context.deinit();
 
         try cli.execute_command(&context, parse_result);

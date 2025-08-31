@@ -547,7 +547,7 @@ test "IngestionContext formatting" {
         .unit_type = "function",
         .file_size = 8192,
         .max_allowed_size = 10240,
-        .parsing_stage = "tokenization",
+        .parsing_stage = "lexical_analysis",
     };
 
     var buf: [1024]u8 = undefined;
@@ -561,7 +561,7 @@ test "IngestionContext formatting" {
     try std.testing.expect(std.mem.indexOf(u8, formatted, "line=245") != null);
     try std.testing.expect(std.mem.indexOf(u8, formatted, "function") != null);
     try std.testing.expect(std.mem.indexOf(u8, formatted, "file_size=8192") != null);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, "tokenization") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "lexical_analysis") != null);
 }
 
 test "ingestion context helpers" {
