@@ -33,6 +33,7 @@ comptime {
     _ = @import("tests/fault_injection/wal_cleanup_faults.zig");
     _ = @import("tests/fault_injection/wal_durability_faults.zig");
     _ = @import("tests/golden_masters_test.zig");
+    _ = @import("tests/harness.zig");
     _ = @import("tests/ingestion/cross_file_resolution_test.zig");
     _ = @import("tests/ingestion/ingestion.zig");
     _ = @import("tests/ingestion/zig_parser_integration.zig");
@@ -44,6 +45,7 @@ comptime {
     _ = @import("tests/query/advanced_algorithms_edge_cases.zig");
     _ = @import("tests/query/advanced_traversal.zig");
     _ = @import("tests/query/complex_workloads.zig");
+
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/recovery/wal.zig");
     _ = @import("tests/recovery/wal_corruption.zig");
@@ -68,6 +70,7 @@ comptime {
     _ = @import("tests/storage/enhanced_compaction_strategies.zig");
     _ = @import("tests/storage/fuzz_tests.zig");
     _ = @import("tests/storage/memtable_simple_operations.zig");
+    _ = @import("tests/storage/mock_vfs_helper.zig");
     _ = @import("tests/storage/property_tests.zig");
     _ = @import("tests/storage/tiered_compaction_validation.zig");
     _ = @import("tests/storage/wal_entry_stream.zig");

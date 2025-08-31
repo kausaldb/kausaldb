@@ -48,7 +48,11 @@ comptime {
     _ = @import("dev/shell.zig");
 
     // Ingestion modules
+
     _ = @import("ingestion/zig/parser.zig");
+
+    // Main module
+    _ = @import("kausaldb.zig");
 
     // Query modules
     _ = @import("query/cache.zig");
@@ -73,19 +77,23 @@ comptime {
     _ = @import("storage/metadata_index.zig");
     _ = @import("storage/metrics.zig");
     _ = @import("storage/recovery.zig");
-    _ = @import("storage/sstable_manager.zig");
     _ = @import("storage/sstable.zig");
+    _ = @import("storage/sstable_manager.zig");
     _ = @import("storage/tiered_compaction.zig");
     _ = @import("storage/validation.zig");
     _ = @import("storage/wal.zig");
 
-    // WAL modules
+    // Storage WAL modules
     _ = @import("storage/wal/core.zig");
     _ = @import("storage/wal/corruption_tracker.zig");
     _ = @import("storage/wal/entry.zig");
     _ = @import("storage/wal/recovery.zig");
     _ = @import("storage/wal/stream.zig");
     _ = @import("storage/wal/types.zig");
+
+    // Testing modules
+
+    _ = @import("testing/property_testing.zig");
 }
 
 test "unit test discovery - informational scan for new test files" {
