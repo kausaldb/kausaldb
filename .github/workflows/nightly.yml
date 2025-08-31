@@ -191,17 +191,17 @@ jobs:
       - name: Memory Safety with AddressSanitizer
         run: |
           echo "Memory safety analysis with AddressSanitizer..."
-          ./zig/zig build test-all -fsanitize-address
+          ./zig/zig build ci-security
 
       - name: ThreadSanitizer Analysis
         run: |
           echo "Concurrency safety analysis..."
-          ./zig/zig build test-all -fsanitize-thread || echo "ThreadSanitizer completed"
+          ./zig/zig build ci-security || echo "ThreadSanitizer completed"
 
       - name: UndefinedBehaviorSanitizer
         run: |
           echo "Undefined behavior analysis..."
-          ./zig/zig build test-all -fsanitize-undefined-behavior
+          ./zig/zig build ci-security
 
       - name: Upload Security Results
         if: always()

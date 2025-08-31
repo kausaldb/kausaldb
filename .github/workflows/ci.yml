@@ -182,8 +182,8 @@ jobs:
 
       - name: Memory Safety Analysis
         run: |
-          echo "Running memory safety checks with AddressSanitizer..."
-          ./zig/zig build test -fsanitize-address
+          echo "Running memory safety checks..."
+          ./zig/zig build ci-security
           echo "Memory safety validation completed"
 
       - name: Valgrind Analysis (Critical Components)
