@@ -57,23 +57,25 @@ fn platform_global_sync() PlatformSyncError!void {
     const start_time = std.time.nanoTimestamp();
     errdefer {
         const end_time = std.time.nanoTimestamp();
-        // Safety: Timestamp difference guaranteed to be positive and within u64 range
-        const duration_ns = @as(u64, @intCast(end_time - start_time));
+        // Defensive: Handle potential negative time differences or timing anomalies
+        const duration_ns = if (end_time >= start_time)
+            @as(u64, @intCast(end_time - start_time))
+        else
+            0;
         std.debug.print("platform_global_sync failed on {s} after {}ns ({}µs)\n", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
     }
 
     switch (builtin.os.tag) {
         .linux => {
-            // Linux: Use POSIX sync() call via libc
+            // Linux: Use POSIX sync() call via standard library
             // sync() forces write of all modified in-core data to disk
             // POSIX.1-2001 standard - modern Linux waits for completion
-            const result = std.c.sync();
-            _ = result; // sync() returns void, no error checking possible
+            std.posix.sync();
         },
         .macos => {
             // macOS: sync() schedules all filesystem buffers to be written to disk
             // Darwin implementation waits for completion, ensuring durability
-            std.c.sync();
+            std.posix.sync();
         },
         .windows => {
             // Windows: No direct equivalent to POSIX sync()
@@ -89,7 +91,11 @@ fn platform_global_sync() PlatformSyncError!void {
     }
 
     const end_time = std.time.nanoTimestamp();
-    const duration_ns = @as(u64, @intCast(end_time - start_time));
+    // Defensive: Handle potential negative time differences or timing anomalies
+    const duration_ns = if (end_time >= start_time)
+        @as(u64, @intCast(end_time - start_time))
+    else
+        0;
     std.debug.print("platform_global_sync completed on {s} in {}ns ({}µs)\n", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
 }
 
@@ -426,7 +432,10 @@ test "ProductionVFS basic file operations" {
     defer prod_vfs.deinit();
     const vfs_interface = prod_vfs.vfs();
 
-    const test_path = "/tmp/kausaldb_test_file";
+    // Use unique file path to avoid conflicts between concurrent test runs
+    const timestamp = std.time.nanoTimestamp();
+    const test_path = try std.fmt.allocPrint(allocator, "/tmp/kausaldb_test_file_{}", .{timestamp});
+    defer allocator.free(test_path);
     const test_data = "Hello, KausalDB!";
 
     {
