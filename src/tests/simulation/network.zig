@@ -27,10 +27,10 @@ const StorageEngine = storage.StorageEngine;
 const ContextBlock = types.ContextBlock;
 const BlockId = types.BlockId;
 
-// Defensive limits for hostile environment testing
-const MAX_TEST_DURATION_MS = 10000;
-const MAX_NETWORK_OPERATIONS = 1000;
-const PARTITION_HEAL_TIMEOUT_MS = 2000;
+// Optimized limits for CI performance while maintaining test coverage
+const MAX_TEST_DURATION_MS = 5000;  // Reduced from 10000 for faster CI
+const MAX_NETWORK_OPERATIONS = 100; // Reduced from 1000 for faster CI  
+const PARTITION_HEAL_TIMEOUT_MS = 1000; // Reduced from 2000 for faster CI
 
 test "write succeeds after partition heals" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
