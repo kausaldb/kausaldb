@@ -12,6 +12,16 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(bool, "debug_tests", optimize == .Debug);
     build_options.addOption(bool, "sanitizers_active", false);
 
+    // Log level configuration - default to warn for CI/test builds to reduce noise
+    const log_level = b.option(std.log.Level, "log-level", "Set the log level (debug, info, warn, err)") orelse .warn;
+    build_options.addOption(std.log.Level, "log_level", log_level);
+
+    // Helper function to create test build options with warn log level
+    const test_build_options = b.addOptions();
+    test_build_options.addOption(bool, "debug_tests", optimize == .Debug);
+    test_build_options.addOption(bool, "sanitizers_active", false);
+    test_build_options.addOption(std.log.Level, "log_level", .warn);
+
     // Core kausaldb module
     const kausaldb_module = b.createModule(.{
         .root_source_file = b.path("src/kausaldb.zig"),
@@ -58,7 +68,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    unit_tests.root_module.addImport("build_options", build_options.createModule());
+    unit_tests.root_module.addImport("build_options", test_build_options.createModule());
 
     // Create test step that handles both filtered and unfiltered cases
     const test_step = b.step("test", "Run unit tests (use --test-filter=\"name\" to filter)");
@@ -83,7 +93,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    integration_tests.root_module.addImport("build_options", build_options.createModule());
+    integration_tests.root_module.addImport("build_options", test_build_options.createModule());
 
     // Create integration test step that handles both filtered and unfiltered cases
     const integration_step = b.step("test-integration", "Run integration tests (use --test-filter=\"name\" to filter)");
@@ -109,7 +119,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    e2e_test.root_module.addImport("build_options", build_options.createModule());
+    e2e_test.root_module.addImport("build_options", test_build_options.createModule());
 
     const run_e2e_test = b.addRunArtifact(e2e_test);
     run_e2e_test.step.dependOn(&exe.step); // E2E tests need the binary
@@ -138,7 +148,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
-    benchmark_exe.root_module.addImport("build_options", build_options.createModule());
+    benchmark_exe.root_module.addImport("build_options", test_build_options.createModule());
     benchmark_exe.root_module.addImport("internal", internal_module);
     b.installArtifact(benchmark_exe);
 
@@ -176,7 +186,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    fuzz_exe.root_module.addImport("build_options", build_options.createModule());
+    fuzz_exe.root_module.addImport("build_options", test_build_options.createModule());
     fuzz_exe.root_module.addImport("internal", internal_module);
     b.installArtifact(fuzz_exe);
 
@@ -260,7 +270,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    stress_test_exe.root_module.addImport("build_options", build_options.createModule());
+    stress_test_exe.root_module.addImport("build_options", test_build_options.createModule());
 
     const run_stress_test = b.addRunArtifact(stress_test_exe);
     if (b.args) |args| run_stress_test.addArgs(args);
@@ -279,7 +289,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    security_scan_exe.root_module.addImport("build_options", build_options.createModule());
+    security_scan_exe.root_module.addImport("build_options", test_build_options.createModule());
 
     const run_security_scan = b.addRunArtifact(security_scan_exe);
     if (b.args) |args| run_security_scan.addArgs(args);
@@ -295,7 +305,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    setup_exe.root_module.addImport("build_options", build_options.createModule());
+    setup_exe.root_module.addImport("build_options", test_build_options.createModule());
 
     const run_setup = b.addRunArtifact(setup_exe);
     if (b.args) |args| run_setup.addArgs(args);
