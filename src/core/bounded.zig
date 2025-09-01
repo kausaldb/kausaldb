@@ -482,11 +482,170 @@ pub fn BoundedQueueType(comptime T: type, comptime max_size: usize) type {
         }
 
         /// Get remaining capacity.
-        pub fn remaining_capacity(self: *const BoundedQueue) usize {
+        pub fn remaining_capacity(self: *const @This()) usize {
             return MAX_SIZE - self.len;
         }
     };
 }
+
+/// Bounded graph builder for Context Engine graph construction.
+/// Enforces compile-time limits on nodes and edges to prevent resource exhaustion.
+///
+/// # Type Parameters
+/// - `max_nodes`: Maximum number of nodes in the graph
+/// - `max_edges`: Maximum number of edges in the graph
+///
+/// # Design Principles
+/// - Compile-time bounds prevent unbounded graph growth
+/// - Arena-compatible for O(1) cleanup
+/// - Deduplication prevents duplicate nodes/edges
+pub fn BoundedGraphBuilderType(comptime max_nodes: usize, comptime max_edges: usize) type {
+    validate_bounded_usage(usize, max_nodes, "BoundedGraphBuilder nodes");
+    validate_bounded_usage(usize, max_edges, "BoundedGraphBuilder edges");
+
+    return struct {
+        const Self = @This();
+
+        /// Set of unique node IDs in the graph
+        nodes: BoundedHashMapType([16]u8, void, max_nodes),
+
+        /// List of edges between nodes
+        edges: BoundedArrayType(GraphEdge, max_edges),
+
+        /// Temporary working set for traversal algorithms
+        working_set: BoundedArrayType([16]u8, max_nodes),
+
+        pub const MAX_NODES = max_nodes;
+        pub const MAX_EDGES = max_edges;
+
+        pub const GraphEdge = struct {
+            source: [16]u8,
+            target: [16]u8,
+            edge_type: u8, // Will be EdgeType when available
+        };
+
+        pub const GraphStats = struct {
+            node_count: u32,
+            edge_count: u32,
+            max_node_utilization_percent: u32,
+            max_edge_utilization_percent: u32,
+        };
+
+        /// Initialize empty graph builder
+        pub fn init() Self {
+            return Self{
+                .nodes = BoundedHashMapType([16]u8, void, max_nodes).init(),
+                .edges = BoundedArrayType(GraphEdge, max_edges).init(),
+                .working_set = BoundedArrayType([16]u8, max_nodes).init(),
+            };
+        }
+
+        /// Add node to graph with deduplication
+        pub fn add_node(self: *Self, node_id: [16]u8) !void {
+            // Deduplication handled by HashMap - put returns existing entry if present
+            try self.nodes.put(node_id, {});
+        }
+
+        /// Add edge to graph with validation
+        pub fn add_edge(self: *Self, source: [16]u8, target: [16]u8, edge_type: u8) !void {
+            // Ensure both nodes exist in graph
+            if (self.nodes.get(source) == null) return error.SourceNodeNotFound;
+            if (self.nodes.get(target) == null) return error.TargetNodeNotFound;
+
+            // Check for duplicate edges
+            for (self.edges.slice()) |existing| {
+                if (std.mem.eql(u8, &existing.source, &source) and
+                    std.mem.eql(u8, &existing.target, &target) and
+                    existing.edge_type == edge_type)
+                {
+                    return; // Duplicate edge, skip
+                }
+            }
+
+            const edge = GraphEdge{
+                .source = source,
+                .target = target,
+                .edge_type = edge_type,
+            };
+            try self.edges.append(edge);
+        }
+
+        /// Find neighbors of a node (outgoing edges)
+        pub fn find_neighbors(self: *const Self, node_id: [16]u8) !BoundedArrayType([16]u8, max_nodes) {
+            var neighbors = BoundedArrayType([16]u8, max_nodes).init();
+
+            for (self.edges.slice()) |edge| {
+                if (std.mem.eql(u8, &edge.source, &node_id)) {
+                    // Avoid duplicates
+                    if (!neighbors.contains(edge.target)) {
+                        try neighbors.append(edge.target);
+                    }
+                }
+            }
+
+            return neighbors;
+        }
+
+        /// Find incoming edges to a node
+        pub fn find_incoming(self: *const Self, node_id: [16]u8) !BoundedArrayType([16]u8, max_nodes) {
+            var incoming = BoundedArrayType([16]u8, max_nodes).init();
+
+            for (self.edges.slice()) |edge| {
+                if (std.mem.eql(u8, &edge.target, &node_id)) {
+                    if (!incoming.contains(edge.source)) {
+                        try incoming.append(edge.source);
+                    }
+                }
+            }
+
+            return incoming;
+        }
+
+        /// Check if node exists in graph
+        pub fn has_node(self: *const Self, node_id: [16]u8) bool {
+            return self.nodes.get(node_id) != null;
+        }
+
+        /// Clear all nodes and edges for reuse
+        pub fn clear(self: *Self) void {
+            self.nodes.clear();
+            self.edges.clear();
+            self.working_set.clear();
+        }
+
+        /// Query graph statistics for resource monitoring
+        pub fn query_stats(self: *const Self) GraphStats {
+            const node_count = @as(u32, @intCast(self.nodes.length()));
+            const edge_count = @as(u32, @intCast(self.edges.length()));
+
+            return GraphStats{
+                .node_count = node_count,
+                .edge_count = edge_count,
+                .max_node_utilization_percent = (node_count * 100) / MAX_NODES,
+                .max_edge_utilization_percent = (edge_count * 100) / MAX_EDGES,
+            };
+        }
+
+        /// Validate graph integrity
+        pub fn validate(self: *const Self) !void {
+            // Ensure all edges reference existing nodes
+            for (self.edges.slice()) |edge| {
+                fatal_assert(self.has_node(edge.source), "Edge references non-existent source node", .{});
+                fatal_assert(self.has_node(edge.target), "Edge references non-existent target node", .{});
+            }
+        }
+    };
+}
+
+/// Convenience type aliases for common bounded collection patterns
+/// Arena coordinator pattern for stable interfaces across arena operations
+pub const ArenaCoordinator = struct {
+    /// Reset all managed arenas in O(1) operation
+    pub fn reset(self: *@This()) void {
+        // Implementation will coordinate with arena system
+        _ = self;
+    }
+};
 
 /// Compile-time validation for bounded collection usage.
 /// Ensures collections are properly sized for their use case.

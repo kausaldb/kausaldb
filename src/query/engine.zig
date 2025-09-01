@@ -597,6 +597,39 @@ pub const QueryEngine = struct {
         );
     }
 
+    /// Workspace-aware outgoing traversal with filtering
+    pub fn traverse_outgoing_in_workspace(
+        self: *QueryEngine,
+        start_id: BlockId,
+        max_depth: u32,
+        workspace: []const u8,
+    ) !TraversalResult {
+        const traversal_result = try self.traverse_outgoing(start_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, workspace);
+    }
+
+    /// Workspace-aware incoming traversal with filtering
+    pub fn traverse_incoming_in_workspace(
+        self: *QueryEngine,
+        start_id: BlockId,
+        max_depth: u32,
+        workspace: []const u8,
+    ) !TraversalResult {
+        const traversal_result = try self.traverse_incoming(start_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, workspace);
+    }
+
+    /// Workspace-aware bidirectional traversal with filtering
+    pub fn traverse_bidirectional_in_workspace(
+        self: *QueryEngine,
+        start_id: BlockId,
+        max_depth: u32,
+        workspace: []const u8,
+    ) !TraversalResult {
+        const traversal_result = try self.traverse_bidirectional(start_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, workspace);
+    }
+
     /// Get current query execution statistics
     pub fn statistics(self: *const QueryEngine) QueryStatistics {
         return .{
@@ -766,7 +799,7 @@ pub const QueryEngine = struct {
             var parsed = std.json.parseFromSlice(
                 std.json.Value,
                 self.allocator,
-                block.context_block.metadata_json,
+                block.block.metadata_json,
                 .{},
             ) catch continue;
             defer parsed.deinit();
@@ -797,8 +830,8 @@ pub const QueryEngine = struct {
         symbol_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        _ = codebase; // TODO: Filter by codebase in traversal
-        return self.traverse_bidirectional(symbol_id, max_depth);
+        const traversal_result = try self.traverse_bidirectional(symbol_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, codebase);
     }
 
     /// Execute a semantic search query
