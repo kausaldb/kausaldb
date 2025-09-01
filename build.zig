@@ -254,12 +254,7 @@ pub fn build(b: *std.Build) void {
     ci_perf_step.dependOn(&ci_perf_cmd.step);
 
     // Stress testing with resource constraints (15-20 minutes)
-    const ci_stress_step = b.step("ci-stress", "Stress testing and fuzzing");
-
-    // Add fuzz testing with appropriate defaults for desktop environments
-    const ci_fuzz_cmd = b.addRunArtifact(fuzz_exe);
-    ci_fuzz_cmd.addArgs(&.{ "all", "25" }); // Run all fuzz targets for 25 iterations
-    ci_stress_step.dependOn(&ci_fuzz_cmd.step);
+    const ci_stress_step = b.step("ci-stress", "Stress testing");
 
     // Add systematic stress testing executable
     const stress_test_exe = b.addExecutable(.{

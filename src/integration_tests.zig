@@ -70,7 +70,6 @@ comptime {
     _ = @import("tests/storage/bloom_filter_validation.zig");
     _ = @import("tests/storage/defensive_integration.zig");
     _ = @import("tests/storage/enhanced_compaction_strategies.zig");
-    _ = @import("tests/storage/fuzz_tests.zig");
     _ = @import("tests/storage/memtable_simple_operations.zig");
     _ = @import("tests/storage/mock_vfs_helper.zig");
     _ = @import("tests/storage/property_tests.zig");

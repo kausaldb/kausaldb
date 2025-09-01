@@ -66,10 +66,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    print("╔══════════════════════════════════════════════════════════════════╗\n", .{});
+    print("╔═════════════════════════════════════════════════════════════════╗\n", .{});
     print("║                   KausalDB Security Scanner                     ║\n", .{});
     print("║                Cross-Platform Security Analysis                 ║\n", .{});
-    print("╚══════════════════════════════════════════════════════════════════╝\n\n", .{});
+    print("╚═════════════════════════════════════════════════════════════════╝\n\n", .{});
 
     var report = SecurityReport.init(allocator);
     defer report.deinit();
@@ -266,9 +266,10 @@ fn scan_build_configuration(allocator: std.mem.Allocator, report: *SecurityRepor
 }
 
 fn print_security_report(report: *const SecurityReport) !void {
-    print("\n╔══════════════════════════════════════════════════════════════════╗\n", .{});
+    print("\n", .{});
+    print("╔═════════════════════════════════════════════════════════════════╗\n", .{});
     print("║                       SECURITY SCAN RESULTS                     ║\n", .{});
-    print("╚══════════════════════════════════════════════════════════════════╝\n\n", .{});
+    print("╚═════════════════════════════════════════════════════════════════╝\n\n", .{});
 
     print("Scan Summary:\n", .{});
     print("  Files scanned: {}\n", .{report.scanned_files});

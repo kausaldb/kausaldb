@@ -37,10 +37,10 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    print("╔══════════════════════════════════════════════════════════════════╗\n", .{});
+    print("╔═════════════════════════════════════════════════════════════════╗\n", .{});
     print("║                    KausalDB CI Stress Runner                    ║\n", .{});
     print("║                Cross-Platform Stress Testing                    ║\n", .{});
-    print("╚══════════════════════════════════════════════════════════════════╝\n\n", .{});
+    print("╚═════════════════════════════════════════════════════════════════╝\n\n", .{});
 
     var config = StressTestConfig{};
 
@@ -267,7 +267,7 @@ fn run_normal_test(allocator: std.mem.Allocator, timeout_seconds: u32) bool {
 
 fn print_results(result: StressTestResult) void {
     print("╔══════════════════════════════════════════════════════════════════╗\n", .{});
-    print("║                        STRESS TEST RESULTS                      ║\n", .{});
+    print("║                        STRESS TEST RESULTS                       ║\n", .{});
     print("╚══════════════════════════════════════════════════════════════════╝\n\n", .{});
 
     print("Overall Results:\n", .{});

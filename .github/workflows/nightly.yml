@@ -27,7 +27,7 @@ jobs:
       - name: Extended Fuzzing Campaign
         run: |
           echo "Starting systematic fuzzing campaign..."
-          ./zig/zig build ci-stress --timeout=7200
+          ./zig/zig build ci-stress -- --timeout 7200
           echo "Fuzzing campaign completed"
 
       - name: Upload Fuzz Results
@@ -57,12 +57,12 @@ jobs:
       - name: Memory Pressure Endurance
         run: |
           echo "Starting memory pressure endurance testing..."
-          ./zig/zig build ci-stress --memory-limit=1024 --cycles=20 --timeout=3600
+          ./zig/zig build ci-stress -- --memory-limit 1024 --cycles 20 --timeout 3600
 
       - name: High-Load Stress Testing
         run: |
           echo "High-load stress testing with concurrent operations..."
-          ./zig/zig build ci-stress --concurrent-processes=8 --cycles=10
+          ./zig/zig build ci-stress -- --concurrent-processes 8 --cycles 10
 
       - name: Upload Stress Results
         if: always()
@@ -90,7 +90,7 @@ jobs:
         run: |
           echo "Running comprehensive performance validation..."
           mkdir -p performance-results
-          ./zig/zig build ci-perf --comprehensive --output=performance-results/
+          ./zig/zig build benchmark all
 
       - name: Performance Regression Analysis
         run: |
@@ -156,7 +156,7 @@ jobs:
           ./zig/zig build ci-perf -Doptimize=${{ matrix.target.optimize }}
           if [[ "${{ matrix.target.optimize }}" == "ReleaseFast" ]]; then
             echo "Running stress tests on optimized build..."
-            ./zig/zig build ci-stress --cycles=5
+            ./zig/zig build ci-stress -- --cycles 5
           fi
 
       - name: Upload Platform Results
@@ -186,7 +186,7 @@ jobs:
       - name: Deep Security Analysis
         run: |
           echo "Running comprehensive security analysis..."
-          ./zig/zig build ci-security --deep-scan --all-files
+          ./zig/zig build ci-security
 
       - name: Memory Safety with AddressSanitizer
         run: |
@@ -231,7 +231,7 @@ jobs:
       - name: Generate Comprehensive Report
         run: |
           echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║                    NIGHTLY VALIDATION SUMMARY                   ║"
+          echo "║                    NIGHTLY VALIDATION SUMMARY                    ║"
           echo "╚══════════════════════════════════════════════════════════════════╝"
           echo
           echo "Validation Results:"
