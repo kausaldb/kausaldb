@@ -48,6 +48,8 @@ comptime {
 
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/recovery/wal.zig");
+    _ = @import("tests/workspace/filtering_test.zig");
+    _ = @import("tests/workspace/ingestion_deduplication_test.zig");
     _ = @import("tests/recovery/wal_corruption.zig");
     _ = @import("tests/recovery/wal_corruption_fatal.zig");
     _ = @import("tests/recovery/wal_entry_stream_recovery.zig");

@@ -49,13 +49,14 @@ pub const ParseConfig = struct {
 pub fn parse_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
+    codebase_name: []const u8,
     config: ParseConfig,
 ) ![]ContextBlock {
     // Route to appropriate parser based on content type
     if (std.mem.eql(u8, file_content.content_type, "text/zig")) {
-        return parse_zig_file_to_blocks(allocator, file_content, config);
+        return parse_zig_file_to_blocks(allocator, file_content, codebase_name, config);
     } else if (std.mem.startsWith(u8, file_content.content_type, "text/")) {
-        return parse_text_file_to_blocks(allocator, file_content, config);
+        return parse_text_file_to_blocks(allocator, file_content, codebase_name, config);
     } else {
         // Unsupported content type - return empty slice
         return allocator.alloc(ContextBlock, 0);
@@ -66,6 +67,7 @@ pub fn parse_file_to_blocks(
 fn parse_zig_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
+    codebase_name: []const u8,
     config: ParseConfig,
 ) ![]ContextBlock {
     var blocks = std.array_list.Managed(ContextBlock).init(allocator);
@@ -90,7 +92,7 @@ fn parse_zig_file_to_blocks(
         if (config.create_import_blocks and std.mem.startsWith(u8, trimmed_line, "const ") and
             std.mem.indexOf(u8, trimmed_line, "@import(") != null)
         {
-            const import_block = try create_import_block(allocator, file_content.path, trimmed_line, line_num);
+            const import_block = try create_import_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
             try blocks.append(import_block);
             continue;
         }
@@ -99,7 +101,7 @@ fn parse_zig_file_to_blocks(
         if (is_function_declaration(trimmed_line)) {
             // Finish previous function if any
             if (current_function) |func_info| {
-                const func_block = try create_function_block(allocator, file_content.path, func_info, line_num - 1, config);
+                const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info, line_num - 1);
                 try blocks.append(func_block);
             }
 
@@ -115,7 +117,7 @@ fn parse_zig_file_to_blocks(
 
             // End function when braces balance and we're back to top level
             if (brace_depth <= 0 and trimmed_line.len > 0 and trimmed_line[trimmed_line.len - 1] == '}') {
-                const func_block = try create_function_block(allocator, file_content.path, current_function.?, line_num, config);
+                const func_block = try create_function_block(allocator, file_content.path, codebase_name, current_function.?, line_num);
                 try blocks.append(func_block);
 
                 // Function ownership transfers to blocks list, preventing memory leaks
@@ -126,7 +128,7 @@ fn parse_zig_file_to_blocks(
 
         // Handle test blocks
         if (config.include_tests and std.mem.startsWith(u8, trimmed_line, "test ")) {
-            const test_block = try create_test_block(allocator, file_content.path, trimmed_line, line_num);
+            const test_block = try create_test_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
             try blocks.append(test_block);
         }
 
@@ -138,7 +140,7 @@ fn parse_zig_file_to_blocks(
                 std.mem.indexOf(u8, trimmed_line, " = enum {") != null or
                 std.mem.indexOf(u8, trimmed_line, " = union {") != null)
             {
-                const struct_block = try create_struct_block(allocator, file_content.path, trimmed_line, line_num);
+                const struct_block = try create_struct_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
                 try blocks.append(struct_block);
             }
         }
@@ -146,7 +148,7 @@ fn parse_zig_file_to_blocks(
 
     // Handle final function if file ended mid-function
     if (current_function) |*func_info| {
-        const func_block = try create_function_block(allocator, file_content.path, func_info.*, line_num, config);
+        const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num);
         try blocks.append(func_block);
         func_info.deinit();
     }
@@ -158,6 +160,7 @@ fn parse_zig_file_to_blocks(
 fn parse_text_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
+    codebase_name: []const u8,
     config: ParseConfig,
 ) ![]ContextBlock {
     _ = config; // Not used for text files yet
@@ -167,7 +170,7 @@ fn parse_text_file_to_blocks(
     // Create a single documentation block for the entire file
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L1-{d}", .{ file_content.path, count_lines(file_content.data) });
-    const metadata_json = try create_text_metadata_json(allocator, file_content);
+    const metadata_json = try create_text_metadata_json(allocator, file_content, codebase_name);
     const content = try allocator.dupe(u8, file_content.data);
 
     const block = ContextBlock{
@@ -236,16 +239,30 @@ fn parse_function_declaration(allocator: Allocator, line: []const u8, line_num: 
 fn create_function_block(
     allocator: Allocator,
     file_path: []const u8,
+    codebase_name: []const u8,
     func_info: FunctionInfo,
     end_line: u32,
-    config: ParseConfig,
 ) !ContextBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, func_info.start_line, end_line });
 
     // JSON metadata enables downstream query engine to filter and classify blocks
     // without re-parsing source code, trading storage space for query performance
-    const metadata_json = try std.fmt.allocPrint(allocator, "{{\"unit_type\":\"function\",\"unit_id\":\"{s}:{s}\",\"location\":{{\"file_path\":\"{s}\",\"line_start\":{d},\"line_end\":{d},\"col_start\":1,\"col_end\":80}},\"original_metadata\":{{\"visibility\":\"{s}\"}}}}", .{ file_path, func_info.name, file_path, func_info.start_line, end_line, if (func_info.is_public) "public" else "private" });
+    const metadata_json = try std.fmt.allocPrint(allocator, "{{" ++
+        "\"unit_type\":\"function\"," ++
+        "\"unit_id\":\"{s}:{s}\"," ++
+        "\"codebase\":\"{s}\"," ++
+        "\"location\":{{" ++
+        "\"file_path\":\"{s}\"," ++
+        "\"line_start\":{d}," ++
+        "\"line_end\":{d}," ++
+        "\"col_start\":1," ++
+        "\"col_end\":80" ++
+        "}}," ++
+        "\"original_metadata\":{{" ++
+        "\"visibility\":\"{s}\"" ++
+        "}}" ++
+        "}}", .{ file_path, func_info.name, codebase_name, file_path, func_info.start_line, end_line, if (func_info.is_public) "public" else "private" });
 
     // Build content
     var content = std.array_list.Managed(u8).init(allocator);
@@ -253,7 +270,7 @@ fn create_function_block(
 
     try content.appendSlice(func_info.signature);
 
-    if (config.include_function_bodies and func_info.body_lines.items.len > 0) {
+    if (func_info.body_lines.items.len > 0) {
         for (func_info.body_lines.items) |body_line| {
             try content.append('\n');
             try content.appendSlice(body_line);
@@ -270,11 +287,28 @@ fn create_function_block(
 }
 
 /// Create a ContextBlock for an import
-fn create_import_block(allocator: Allocator, file_path: []const u8, line: []const u8, line_num: u32) !ContextBlock {
+fn create_import_block(
+    allocator: Allocator,
+    file_path: []const u8,
+    codebase_name: []const u8,
+    line: []const u8,
+    line_num: u32,
+) !ContextBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
-    const metadata_json = try std.fmt.allocPrint(allocator, "{{\"unit_type\":\"import\",\"unit_id\":\"{s}:import_{d}\",\"location\":{{\"file_path\":\"{s}\",\"line_start\":{d},\"line_end\":{d},\"col_start\":1,\"col_end\":80}}}}", .{ file_path, line_num, file_path, line_num, line_num });
+    const metadata_json = try std.fmt.allocPrint(allocator, "{{" ++
+        "\"unit_type\":\"import\"," ++
+        "\"unit_id\":\"{s}:import_{d}\"," ++
+        "\"codebase\":\"{s}\"," ++
+        "\"location\":{{" ++
+        "\"file_path\":\"{s}\"," ++
+        "\"line_start\":{d}," ++
+        "\"line_end\":{d}," ++
+        "\"col_start\":1," ++
+        "\"col_end\":80" ++
+        "}}" ++
+        "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
     return ContextBlock{
         .id = block_id,
@@ -286,11 +320,28 @@ fn create_import_block(allocator: Allocator, file_path: []const u8, line: []cons
 }
 
 /// Create a ContextBlock for a test
-fn create_test_block(allocator: Allocator, file_path: []const u8, line: []const u8, line_num: u32) !ContextBlock {
+fn create_test_block(
+    allocator: Allocator,
+    file_path: []const u8,
+    codebase_name: []const u8,
+    line: []const u8,
+    line_num: u32,
+) !ContextBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
-    const metadata_json = try std.fmt.allocPrint(allocator, "{{\"unit_type\":\"test\",\"unit_id\":\"{s}:test_{d}\",\"location\":{{\"file_path\":\"{s}\",\"line_start\":{d},\"line_end\":{d},\"col_start\":1,\"col_end\":80}}}}", .{ file_path, line_num, file_path, line_num, line_num });
+    const metadata_json = try std.fmt.allocPrint(allocator, "{{" ++
+        "\"unit_type\":\"test\"," ++
+        "\"unit_id\":\"{s}:test_{d}\"," ++
+        "\"codebase\":\"{s}\"," ++
+        "\"location\":{{" ++
+        "\"file_path\":\"{s}\"," ++
+        "\"line_start\":{d}," ++
+        "\"line_end\":{d}," ++
+        "\"col_start\":1," ++
+        "\"col_end\":80" ++
+        "}}" ++
+        "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
     return ContextBlock{
         .id = block_id,
@@ -302,11 +353,28 @@ fn create_test_block(allocator: Allocator, file_path: []const u8, line: []const 
 }
 
 /// Create a ContextBlock for a struct/const declaration
-fn create_struct_block(allocator: Allocator, file_path: []const u8, line: []const u8, line_num: u32) !ContextBlock {
+fn create_struct_block(
+    allocator: Allocator,
+    file_path: []const u8,
+    codebase_name: []const u8,
+    line: []const u8,
+    line_num: u32,
+) !ContextBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
-    const metadata_json = try std.fmt.allocPrint(allocator, "{{\"unit_type\":\"struct\",\"unit_id\":\"{s}:struct_{d}\",\"location\":{{\"file_path\":\"{s}\",\"line_start\":{d},\"line_end\":{d},\"col_start\":1,\"col_end\":80}}}}", .{ file_path, line_num, file_path, line_num, line_num });
+    const metadata_json = try std.fmt.allocPrint(allocator, "{{" ++
+        "\"unit_type\":\"struct\"," ++
+        "\"unit_id\":\"{s}:struct_{d}\"," ++
+        "\"codebase\":\"{s}\"," ++
+        "\"location\":{{" ++
+        "\"file_path\":\"{s}\"," ++
+        "\"line_start\":{d}," ++
+        "\"line_end\":{d}," ++
+        "\"col_start\":1," ++
+        "\"col_end\":80" ++
+        "}}" ++
+        "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
     return ContextBlock{
         .id = block_id,
@@ -318,8 +386,24 @@ fn create_struct_block(allocator: Allocator, file_path: []const u8, line: []cons
 }
 
 /// Create metadata JSON for text files
-fn create_text_metadata_json(allocator: Allocator, file_content: FileContent) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{{\"unit_type\":\"document\",\"unit_id\":\"{s}:document\",\"location\":{{\"file_path\":\"{s}\",\"line_start\":1,\"line_end\":{d},\"col_start\":1,\"col_end\":80}},\"content_type\":\"{s}\"}}", .{ file_content.path, file_content.path, count_lines(file_content.data), file_content.content_type });
+fn create_text_metadata_json(
+    allocator: Allocator,
+    file_content: FileContent,
+    codebase_name: []const u8,
+) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{{" ++
+        "\"unit_type\":\"document\"," ++
+        "\"unit_id\":\"{s}:document\"," ++
+        "\"codebase\":\"{s}\"," ++
+        "\"location\":{{" ++
+        "\"file_path\":\"{s}\"," ++
+        "\"line_start\":1," ++
+        "\"line_end\":{d}," ++
+        "\"col_start\":1," ++
+        "\"col_end\":80" ++
+        "}}," ++
+        "\"content_type\":\"{s}\"" ++
+        "}}", .{ file_content.path, codebase_name, file_content.path, count_lines(file_content.data), file_content.content_type });
 }
 
 /// Count occurrences of a character in a string

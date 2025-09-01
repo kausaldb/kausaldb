@@ -686,8 +686,6 @@ pub const QueryEngine = struct {
         entity_type: []const u8,
         name: []const u8,
     ) !SemanticQueryResult {
-        _ = codebase; // TODO: Filter by codebase in search
-
         var results = std.array_list.Managed(SemanticResult).init(self.allocator);
         defer results.deinit();
 
@@ -704,6 +702,11 @@ pub const QueryEngine = struct {
             defer parsed.deinit();
 
             const metadata = parsed.value;
+
+            // Filter by codebase first
+            const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
+            if (!std.mem.eql(u8, block_codebase, codebase)) continue;
+
             const unit_type = if (metadata.object.get("unit_type")) |ut| ut.string else continue;
             if (!std.mem.eql(u8, unit_type, entity_type)) continue;
 
@@ -731,8 +734,8 @@ pub const QueryEngine = struct {
         target_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        _ = codebase; // TODO: Filter by codebase in traversal
-        return self.traverse_incoming(target_id, max_depth);
+        const traversal_result = try self.traverse_incoming(target_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, codebase);
     }
 
     /// Find all functions and methods called by a given function (outgoing traversal)
@@ -742,8 +745,49 @@ pub const QueryEngine = struct {
         caller_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        _ = codebase; // TODO: Filter by codebase in traversal
-        return self.traverse_outgoing(caller_id, max_depth);
+        const traversal_result = try self.traverse_outgoing(caller_id, max_depth);
+        return self.filter_traversal_by_codebase(traversal_result, codebase);
+    }
+
+    /// Filter traversal results by codebase
+    fn filter_traversal_by_codebase(
+        self: *QueryEngine,
+        traversal_result: TraversalResult,
+        codebase: []const u8,
+    ) !TraversalResult {
+        var filtered_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(self.allocator);
+        defer filtered_blocks.deinit();
+        var filtered_paths = std.array_list.Managed([]const BlockId).init(self.allocator);
+        defer filtered_paths.deinit();
+        var filtered_depths = std.array_list.Managed(u32).init(self.allocator);
+        defer filtered_depths.deinit();
+
+        for (traversal_result.blocks, 0..) |block, i| {
+            var parsed = std.json.parseFromSlice(
+                std.json.Value,
+                self.allocator,
+                block.context_block.metadata_json,
+                .{},
+            ) catch continue;
+            defer parsed.deinit();
+
+            const metadata = parsed.value;
+            const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
+            if (std.mem.eql(u8, block_codebase, codebase)) {
+                try filtered_blocks.append(block);
+                try filtered_paths.append(traversal_result.paths[i]);
+                try filtered_depths.append(traversal_result.depths[i]);
+            }
+        }
+
+        return TraversalResult.init(
+            self.allocator,
+            filtered_blocks.items,
+            filtered_paths.items,
+            filtered_depths.items,
+            @intCast(filtered_blocks.items.len),
+            if (filtered_depths.items.len > 0) std.mem.max(u32, filtered_depths.items) else 0,
+        );
     }
 
     /// Find all references to a given symbol

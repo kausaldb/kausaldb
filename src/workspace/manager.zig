@@ -383,6 +383,7 @@ pub const WorkspaceManager = struct {
             self.backing_allocator, // Use backing allocator for stable structures
             &self.storage_engine.vfs,
             codebase_path,
+            codebase_name,
             config,
         );
 

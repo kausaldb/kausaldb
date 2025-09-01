@@ -54,6 +54,7 @@ pub fn ingest_directory_to_blocks(
     backing: std.mem.Allocator,
     file_system: *VFS,
     directory_path: []const u8,
+    codebase_name: []const u8,
     config: IngestionConfig,
 ) !struct { blocks: []ContextBlock, stats: IngestionStats } {
     assert(directory_path.len > 0);
@@ -138,6 +139,7 @@ pub fn ingest_directory_to_blocks(
             const file_blocks = parse_file_to_blocks.parse_file_to_blocks(
                 coordinator.allocator(),
                 file_content_struct,
+                codebase_name,
                 parse_config,
             ) catch {
                 stats.errors_encountered += 1;
