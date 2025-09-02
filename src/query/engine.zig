@@ -760,6 +760,48 @@ pub const QueryEngine = struct {
         return SemanticQueryResult.init(self.allocator, results.items, matches_found);
     }
 
+    /// Find blocks associated with a specific file path within a linked codebase
+    pub fn find_by_file_path(
+        self: *QueryEngine,
+        codebase: []const u8,
+        file_path: []const u8,
+    ) !SemanticQueryResult {
+        var results = std.array_list.Managed(SemanticResult).init(self.allocator);
+        defer results.deinit();
+
+        var iterator = self.storage_engine.iterate_all_blocks();
+        var matches_found: u32 = 0;
+
+        while (try iterator.next()) |block| {
+            var parsed = std.json.parseFromSlice(
+                std.json.Value,
+                self.allocator,
+                block.metadata_json,
+                .{},
+            ) catch continue; // Skip blocks with invalid JSON
+            defer parsed.deinit();
+
+            const metadata = parsed.value;
+
+            // Filter by codebase first
+            const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
+            if (!std.mem.eql(u8, block_codebase, codebase)) continue;
+
+            // Check if file path matches
+            const block_file_path = if (metadata.object.get("file_path")) |fp| fp.string else continue;
+            if (std.mem.eql(u8, block_file_path, file_path)) {
+                matches_found += 1;
+
+                try results.append(SemanticResult{
+                    .block = OwnedQueryEngineBlock.init(block),
+                    .similarity_score = 1.0, // Exact match
+                });
+            }
+        }
+
+        return SemanticQueryResult.init(self.allocator, results.items, matches_found);
+    }
+
     /// Find all functions, methods, etc., that call a target function (incoming traversal)
     pub fn find_callers(
         self: *QueryEngine,

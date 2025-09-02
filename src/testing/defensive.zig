@@ -166,7 +166,7 @@ pub const StateMachine = struct {
     current_state: u32,
     valid_transitions: []const []const u32,
     state_history: [16]u32, // Circular buffer for debugging
-    history_index: u4,
+    history_index: u5,
 
     pub fn init(initial_state: u32, valid_transitions: []const []const u32) Self {
         return Self{
@@ -204,7 +204,7 @@ pub const StateMachine = struct {
             }
         }
 
-        defend(.always_active, transition_valid, "Invalid state transition in {s}: {} -> {} (history: {})", .{ context, self.current_state, new_state, self.state_history });
+        defend(.always_active, transition_valid, "Invalid state transition in {s}: {} -> {} (history: {any})", .{ context, self.current_state, new_state, self.state_history });
     }
 
     /// Get current state for validation
@@ -291,7 +291,11 @@ pub const PerformanceGuard = struct {
 pub const ConcurrencyGuard = struct {
     /// Validate operation is on main thread
     pub fn validate_main_thread(comptime context: []const u8) void {
-        defend(.debug_only, concurrency.is_main_thread(), "Thread safety violation in {s}: operation must be on main thread", .{context});
+        _ = context; // Context available for debugging if needed
+        // In KausalDB single-threaded model, validate we're on the main thread
+        if (builtin.mode == .Debug) {
+            concurrency.assert_main_thread();
+        }
     }
 
     /// Validate exclusive access (single-threaded operation)

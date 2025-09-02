@@ -43,12 +43,12 @@ comptime {
     // Dev modules
     _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
-
+    _ = @import("dev/fuzz/common.zig");
     _ = @import("dev/git_test_discovery.zig");
     _ = @import("dev/shell.zig");
 
     // Ingestion modules
-
+    _ = @import("ingestion/ingest_directory.zig");
     _ = @import("ingestion/zig/parser.zig");
 
     // Main module
@@ -56,6 +56,8 @@ comptime {
 
     // Query modules
     _ = @import("query/cache.zig");
+    _ = @import("query/context_query.zig");
+    _ = @import("query/context/engine.zig");
     _ = @import("query/engine.zig");
     _ = @import("query/filtering.zig");
 
@@ -64,10 +66,12 @@ comptime {
     _ = @import("server/handler.zig");
 
     // Simulation modules
+    _ = @import("sim/hostile_vfs.zig");
     _ = @import("sim/simulation_vfs.zig");
     _ = @import("sim/simulation.zig");
 
     // Storage modules
+    _ = @import("storage/batch_writer.zig");
     _ = @import("storage/block_index.zig");
     _ = @import("storage/bloom_filter.zig");
     _ = @import("storage/config.zig");
@@ -92,8 +96,17 @@ comptime {
     _ = @import("storage/wal/types.zig");
 
     // Testing modules
-
+    _ = @import("testing/defensive.zig");
     _ = @import("testing/property_testing.zig");
+    _ = @import("testing/systematic_fuzzing.zig");
+
+    // Hostile scenario modules
+    // TODO: Fix compilation issues in scenario files
+    // _ = @import("tests/scenarios/batch_deduplication.zig");
+    // _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
+    // _ = @import("tests/scenarios/missing_edges_traversal.zig");
+    // _ = @import("tests/scenarios/torn_wal_recovery.zig");
+    // _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 
 test "unit test discovery - informational scan for new test files" {

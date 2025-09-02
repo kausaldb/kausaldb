@@ -116,10 +116,10 @@ pub const TraversalRule = struct {
 
     /// Validate rule has reasonable limits
     pub fn validate(self: @This()) !void {
-        fatal_assert(self.max_depth > 0, "TraversalRule requires positive max_depth", .{});
-        fatal_assert(self.max_depth <= 32, "TraversalRule max_depth too large: {}", .{self.max_depth});
-        fatal_assert(self.max_nodes > 0, "TraversalRule requires positive max_nodes", .{});
-        fatal_assert(self.max_nodes <= 10000, "TraversalRule max_nodes too large: {}", .{self.max_nodes});
+        if (self.max_depth == 0) return error.InvalidMaxDepth;
+        if (self.max_depth > 32) return error.MaxDepthTooLarge;
+        if (self.max_nodes == 0) return error.InvalidMaxNodes;
+        if (self.max_nodes > 10000) return error.MaxNodesTooLarge;
     }
 };
 
@@ -130,10 +130,10 @@ pub const ContextQuery = struct {
     workspace: []const u8,
 
     /// Starting points for context traversal
-    anchors: BoundedArrayType(QueryAnchor, 64),
+    anchors: BoundedArrayType(QueryAnchor, 4),
 
     /// Rules governing graph traversal from anchors
-    rules: BoundedArrayType(TraversalRule, 16),
+    rules: BoundedArrayType(TraversalRule, 2),
 
     /// Global limit on total nodes returned across all traversals
     max_total_nodes: u32,
@@ -150,8 +150,8 @@ pub const ContextQuery = struct {
 
         return ContextQuery{
             .workspace = workspace,
-            .anchors = BoundedArrayType(QueryAnchor, 64){},
-            .rules = BoundedArrayType(TraversalRule, 16){},
+            .anchors = BoundedArrayType(QueryAnchor, 4){},
+            .rules = BoundedArrayType(TraversalRule, 2){},
             .max_total_nodes = DEFAULT_MAX_TOTAL_NODES,
             .timeout_us = DEFAULT_TIMEOUT_US,
         };
@@ -212,15 +212,15 @@ pub const ContextQuery = struct {
 
     /// Calculate estimated resource requirements for query planning
     pub fn estimate_cost(self: @This()) QueryCost {
-        const anchor_count = @as(u32, @intCast(self.anchors.len()));
-        const rule_count = @as(u32, @intCast(self.rules.len()));
+        const anchor_count = @as(u32, @intCast(self.anchors.len));
+        const rule_count = @as(u32, @intCast(self.rules.len));
 
         var max_depth: u32 = 0;
         var total_edge_types: u32 = 0;
 
         for (self.rules.slice()) |rule| {
             if (rule.max_depth > max_depth) max_depth = rule.max_depth;
-            total_edge_types += @as(u32, @intCast(rule.edge_types.len()));
+            total_edge_types += @as(u32, @intCast(rule.edge_types.len));
         }
 
         return QueryCost{
@@ -348,7 +348,7 @@ test "TraversalRule creation and validation" {
 
     // Test limits
     rule.max_depth = 0;
-    try testing.expectError(error.TestUnexpectedResult, rule.validate());
+    try testing.expectError(error.InvalidMaxDepth, rule.validate());
 }
 
 test "ContextQuery creation and validation" {
@@ -371,13 +371,13 @@ test "ContextQuery bounded collections" {
 
     // Test anchor bounds
     var i: u8 = 0;
-    while (i < 64) : (i += 1) {
+    while (i < 4) : (i += 1) {
         const anchor = QueryAnchor{ .block_id = BlockId.from_bytes([_]u8{i} ** 16) };
         try query.add_anchor(anchor);
     }
 
-    // Adding 65th anchor should fail
-    const overflow_anchor = QueryAnchor{ .block_id = BlockId.from_bytes([_]u8{65} ** 16) };
+    // Adding 5th anchor should fail
+    const overflow_anchor = QueryAnchor{ .block_id = BlockId.from_bytes([_]u8{5} ** 16) };
     try testing.expectError(error.Overflow, query.add_anchor(overflow_anchor));
 }
 

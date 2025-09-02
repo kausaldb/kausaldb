@@ -1,5 +1,5 @@
 #!/bin/bash
 set -e
 echo "Running pre-commit checks..."
-./zig/zig build fmt tidy
+./zig/zig build ci-smoke
 echo "Pre-commit checks passed"

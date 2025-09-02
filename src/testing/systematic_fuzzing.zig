@@ -300,15 +300,15 @@ pub fn SystematicFuzzerType(comptime TargetType: type) type {
         config: FuzzConfig,
         stats: FuzzStats,
         prng: std.Random.DefaultPrng,
-        crashes: std.ArrayList(CrashInfo),
+        crashes: std.array_list.Managed(CrashInfo),
         defensive_config: defensive.DefenseConfig,
         input_generator: InputGenerator,
 
         pub fn init(backing_allocator: std.mem.Allocator, config: FuzzConfig) !Self {
             var test_arena = std.heap.ArenaAllocator.init(backing_allocator);
-            const coordinator = ArenaCoordinator{ .arena = &test_arena };
+            const coordinator = ArenaCoordinator{ .arena = &test_arena, .generation = 0 };
 
-            const crashes = std.ArrayList(CrashInfo).init(backing_allocator);
+            const crashes = std.array_list.Managed(CrashInfo).init(backing_allocator);
 
             // Enable all defensive checks during fuzzing
             const defensive_config = defensive.DefenseConfig{

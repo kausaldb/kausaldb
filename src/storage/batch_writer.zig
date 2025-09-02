@@ -239,10 +239,10 @@ pub const BatchWriter = struct {
         for (blocks, 0..) |*block, i| {
             self.current_stats.blocks_submitted += 1;
 
-            // Validate block structure
+            // Block structure validation prevents storage corruption from malformed data
             try self.validate_block_structure(block);
 
-            // Enforce workspace isolation if enabled
+            // Workspace isolation prevents cross-workspace data contamination in multi-tenant scenarios
             if (self.config.enforce_workspace_isolation) {
                 try self.validate_workspace_membership(block, workspace);
             }
@@ -431,7 +431,7 @@ pub const BatchWriter = struct {
         // Arena capacity tracking helps identify memory pressure scenarios
         self.current_stats.memory_used_kb = @as(u32, @intCast(self.batch_arena.queryCapacity() / 1024));
 
-        // Calculate deduplication effectiveness
+        // Deduplication metrics enable optimization of duplicate detection algorithms
         self.current_stats.calculate_deduplication_rate();
 
         // Update lifetime statistics
@@ -440,7 +440,7 @@ pub const BatchWriter = struct {
         self.lifetime_stats.total_blocks_written += self.current_stats.blocks_written;
         self.lifetime_stats.total_processing_time_us += self.current_stats.processing_time_us;
 
-        // Update running averages
+        // Running averages provide stable performance baselines for monitoring
         self.update_lifetime_averages();
     }
 
@@ -522,7 +522,7 @@ test "BatchStatistics calculations" {
 }
 
 test "ConflictResolution enum values" {
-    try testing.expect(@typeInfo(ConflictResolution).Enum.fields.len == 3);
+    try testing.expect(@typeInfo(ConflictResolution).@"enum".fields.len == 3);
 
     const skip = ConflictResolution.skip_older_versions;
     const overwrite = ConflictResolution.overwrite_existing;

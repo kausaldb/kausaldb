@@ -64,7 +64,7 @@ pub fn parse_file_to_blocks(
 }
 
 /// Parse Zig source file directly into ContextBlocks
-fn parse_zig_file_to_blocks( // tidy:ignore
+fn parse_zig_file_to_blocks( // tidy:ignore-length
     allocator: Allocator,
     file_content: FileContent,
     codebase_name: []const u8,
