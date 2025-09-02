@@ -387,7 +387,7 @@ fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8)
 /// Entity types correspond to Zig language constructs that can be indexed.
 /// Returns true if the type is valid, false otherwise.
 pub fn validate_entity_type(entity_type: []const u8) bool {
-    const valid_types = &[_][]const u8{ "function", "struct", "test", "method", "const", "var", "type" };
+    const valid_types = &[_][]const u8{ "function", "struct", "test", "method", "const", "var", "type", "import" };
 
     for (valid_types) |valid_type| {
         if (std.mem.eql(u8, entity_type, valid_type)) return true;
@@ -482,5 +482,6 @@ test "validate entity types" {
     try testing.expect(validate_entity_type("function"));
     try testing.expect(validate_entity_type("struct"));
     try testing.expect(validate_entity_type("test"));
+    try testing.expect(validate_entity_type("import"));
     try testing.expect(!validate_entity_type("invalid"));
 }

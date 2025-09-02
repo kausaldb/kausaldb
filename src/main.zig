@@ -34,6 +34,34 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    // Handle standard UNIX flags before normal processing
+    if (args.len >= 2) {
+        const first_arg = args[1];
+        if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
+            // Convert to help command for natural CLI
+            const help_args = [_][:0]const u8{ args[0], "help" };
+            var help_result = try natural_cli.parse_natural_command(allocator, &help_args);
+            defer help_result.deinit();
+
+            var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
+            defer natural_context.deinit();
+            try natural_executor.execute_natural_command(&natural_context, help_result.command);
+            return;
+        }
+
+        if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
+            // Convert to version command for natural CLI
+            const version_args = [_][:0]const u8{ args[0], "version" };
+            var version_result = try natural_cli.parse_natural_command(allocator, &version_args);
+            defer version_result.deinit();
+
+            var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
+            defer natural_context.deinit();
+            try natural_executor.execute_natural_command(&natural_context, version_result.command);
+            return;
+        }
+    }
+
     // Use configurable database path - defaults to .kausal-data for production
     const db_path = std.process.getEnvVarOwned(allocator, "KAUSAL_DB_PATH") catch ".kausal-data";
     defer if (!std.mem.eql(u8, db_path, ".kausal-data")) allocator.free(db_path);

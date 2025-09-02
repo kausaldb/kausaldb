@@ -458,7 +458,7 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
             , .{cmd.entity_type});
         } else {
             print_stderr("Error: Invalid entity type '{s}'\n", .{cmd.entity_type});
-            write_stdout("Valid types: function, struct, test, method, const, var, type\n");
+            write_stdout("Valid types: function, struct, test, method, const, var, type, import\n");
         }
         return;
     }
@@ -868,7 +868,9 @@ fn show_general_help() void {
         \\  version                       Show version information
         \\  help [topic]                  Show help message
         \\
-        \\Options:
+        \\Global Options:
+        \\  --help, -h                    Show this help message
+        \\  --version, -v                 Show version information
         \\  --json                        Output in JSON format
         \\
         \\Examples:
