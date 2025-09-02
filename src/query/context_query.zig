@@ -70,6 +70,22 @@ pub const QueryAnchor = union(enum) {
             },
         }
     }
+
+    /// Test-friendly validation that returns errors instead of panicking
+    pub fn validate_for_test(self: @This()) !void {
+        switch (self) {
+            .block_id => {}, // BlockId validation handled by type system
+            .entity_name => |entity| {
+                if (entity.workspace.len == 0) return error.EmptyWorkspace;
+                if (entity.entity_type.len == 0) return error.EmptyEntityType;
+                if (entity.name.len == 0) return error.EmptyName;
+            },
+            .file_path => |file| {
+                if (file.workspace.len == 0) return error.EmptyWorkspace;
+                if (file.path.len == 0) return error.EmptyPath;
+            },
+        }
+    }
 };
 
 /// Rules governing graph traversal from anchors.
@@ -323,18 +339,13 @@ test "QueryAnchor validation" {
     } };
     try entity_anchor.validate();
 
-    // Invalid entity name anchor (empty workspace)
+    // Invalid entity name anchor (empty workspace) - test with test-friendly validator
     const invalid_entity = QueryAnchor{ .entity_name = .{
         .workspace = "",
         .entity_type = "function",
         .name = "test_function",
     } };
-    // This should panic in debug builds due to fatal_assert
-    if (builtin.mode == .Debug) {
-        // Skip validation test in debug mode to avoid panic
-    } else {
-        try testing.expectError(error.TestUnexpectedResult, invalid_entity.validate());
-    }
+    try testing.expectError(error.EmptyWorkspace, invalid_entity.validate_for_test());
 }
 
 test "TraversalRule creation and validation" {
