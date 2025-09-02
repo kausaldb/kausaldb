@@ -46,7 +46,7 @@ comptime {
     _ = @import("tests/query/complex_workloads.zig");
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/query/traversal_advanced.zig");
-    _ = @import("tests/query/traversal_bidirectional.zig");
+    _ = @import("tests/query/traversal_termination.zig");
     _ = @import("tests/recovery/wal.zig");
     _ = @import("tests/workspace/filtering_test.zig");
     _ = @import("tests/workspace/ingestion_deduplication_test.zig");

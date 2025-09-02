@@ -281,6 +281,7 @@ pub const TraversalResult = struct {
     /// Free allocated memory for traversal results
     /// Uses O(1) arena deallocation for optimal performance
     pub fn deinit(self: TraversalResult) void {
+        // All memory is managed by the arena - O(1) cleanup
         self.query_arena.deinit();
     }
 

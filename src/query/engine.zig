@@ -604,8 +604,8 @@ pub const QueryEngine = struct {
         max_depth: u32,
         workspace: []const u8,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_outgoing(start_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, workspace);
+        var traversal_result = try self.traverse_outgoing(start_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, workspace);
     }
 
     /// Workspace-aware incoming traversal with filtering
@@ -615,8 +615,8 @@ pub const QueryEngine = struct {
         max_depth: u32,
         workspace: []const u8,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_incoming(start_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, workspace);
+        var traversal_result = try self.traverse_incoming(start_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, workspace);
     }
 
     /// Workspace-aware bidirectional traversal with filtering
@@ -626,8 +626,8 @@ pub const QueryEngine = struct {
         max_depth: u32,
         workspace: []const u8,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_bidirectional(start_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, workspace);
+        var traversal_result = try self.traverse_bidirectional(start_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, workspace);
     }
 
     /// Get current query execution statistics
@@ -811,8 +811,8 @@ pub const QueryEngine = struct {
         target_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_incoming(target_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, codebase);
+        var traversal_result = try self.traverse_incoming(target_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, codebase);
     }
 
     /// Find all functions and methods called by a given function (outgoing traversal)
@@ -822,19 +822,21 @@ pub const QueryEngine = struct {
         caller_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_outgoing(caller_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, codebase);
+        var traversal_result = try self.traverse_outgoing(caller_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, codebase);
     }
 
     /// Filter traversal results by codebase
     fn filter_traversal_by_codebase(
         self: *QueryEngine,
-        traversal_result: TraversalResult,
+        traversal_result: *TraversalResult,
         codebase: []const u8,
     ) !TraversalResult {
-        var filtered_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(self.allocator);
-        var filtered_paths = std.array_list.Managed([]const BlockId).init(self.allocator);
-        var filtered_depths = std.array_list.Managed(u32).init(self.allocator);
+        // Use the existing arena from the traversal result for consistency and proper lifecycle
+        const arena_allocator = traversal_result.query_arena.allocator();
+        var filtered_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(arena_allocator);
+        var filtered_paths = std.array_list.Managed([]const BlockId).init(arena_allocator);
+        var filtered_depths = std.array_list.Managed(u32).init(arena_allocator);
 
         for (traversal_result.blocks, 0..) |block, i| {
             var parsed = std.json.parseFromSlice(
@@ -849,7 +851,9 @@ pub const QueryEngine = struct {
             const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
             if (std.mem.eql(u8, block_codebase, codebase)) {
                 try filtered_blocks.append(block);
-                try filtered_paths.append(traversal_result.paths[i]);
+                // Copy the path data using the arena allocator for consistent lifecycle
+                const path_copy = try arena_allocator.dupe(BlockId, traversal_result.paths[i]);
+                try filtered_paths.append(path_copy);
                 try filtered_depths.append(traversal_result.depths[i]);
             }
         }
@@ -859,14 +863,20 @@ pub const QueryEngine = struct {
         const owned_paths = try filtered_paths.toOwnedSlice();
         const owned_depths = try filtered_depths.toOwnedSlice();
 
-        return TraversalResult.init(
-            self.allocator,
+        // Create new result that reuses the same arena for consistent cleanup
+        var filtered_result = TraversalResult.init(
+            arena_allocator,
             owned_blocks,
             owned_paths,
             owned_depths,
             @intCast(owned_blocks.len),
             if (owned_depths.len > 0) std.mem.max(u32, owned_depths) else 0,
         );
+
+        // Transfer the arena from original result to filtered result
+        filtered_result.query_arena = traversal_result.query_arena;
+
+        return filtered_result;
     }
 
     /// Find all references to a given symbol
@@ -876,8 +886,8 @@ pub const QueryEngine = struct {
         symbol_id: BlockId,
         max_depth: u32,
     ) !TraversalResult {
-        const traversal_result = try self.traverse_bidirectional(symbol_id, max_depth);
-        return self.filter_traversal_by_codebase(traversal_result, codebase);
+        var traversal_result = try self.traverse_bidirectional(symbol_id, max_depth);
+        return self.filter_traversal_by_codebase(&traversal_result, codebase);
     }
 
     /// Execute a semantic search query
