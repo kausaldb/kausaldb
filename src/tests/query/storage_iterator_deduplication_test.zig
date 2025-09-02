@@ -25,21 +25,21 @@ test "storage iterator returns unique blocks only" {
     // Create test blocks with deterministic content
     const test_blocks = [_]ContextBlock{
         ContextBlock{
-            .id = BlockId.from_u32(1),
+            .id = try BlockId.from_hex("00000000000000000000000000000001"),
             .version = 1,
             .source_uri = try testing.allocator.dupe(u8, "file://test1.zig#L1-5"),
             .metadata_json = try testing.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test1.zig:first_function\"}"),
             .content = try testing.allocator.dupe(u8, "pub fn first_function() void {}"),
         },
         ContextBlock{
-            .id = BlockId.from_u32(2),
+            .id = try BlockId.from_hex("00000000000000000000000000000002"),
             .version = 1,
             .source_uri = try testing.allocator.dupe(u8, "file://test2.zig#L10-15"),
             .metadata_json = try testing.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test2.zig:second_function\"}"),
             .content = try testing.allocator.dupe(u8, "pub fn second_function() void {}"),
         },
         ContextBlock{
-            .id = BlockId.from_u32(3),
+            .id = try BlockId.from_hex("00000000000000000000000000000003"),
             .version = 1,
             .source_uri = try testing.allocator.dupe(u8, "file://test3.zig#L20-25"),
             .metadata_json = try testing.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test3.zig:third_function\"}"),
@@ -220,6 +220,7 @@ test "storage iterator works correctly with parsed blocks" {
     const blocks = try parse_file_to_blocks.parse_file_to_blocks(
         testing.allocator,
         file_content,
+        "storage_dedup_test",
         parse_config,
     );
     defer testing.allocator.free(blocks);

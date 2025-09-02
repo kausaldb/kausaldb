@@ -123,7 +123,19 @@ test "unit test discovery - informational scan for new test files" {
         std.testing.allocator.free(expected_files);
     }
 
-    const is_valid = git_discovery.validate_imports(std.testing.allocator, "src/unit_tests.zig", expected_files) catch |err| {
+    // Files that are intentionally excluded due to compilation issues or alternative coverage
+    const excluded_files = &[_][]const u8{
+        // Scenario files with import path issues, covered by integration scenarios_test.zig
+        "tests/scenarios/batch_deduplication.zig",
+        "tests/scenarios/corrupted_sstable_recovery.zig",
+        "tests/scenarios/missing_edges_traversal.zig",
+        "tests/scenarios/torn_wal_recovery.zig",
+        "tests/scenarios/workspace_isolation.zig",
+        // Fuzz modules excluded to avoid conflicts - run separately
+        "dev/fuzz/common.zig",
+    };
+
+    const is_valid = git_discovery.validate_imports_with_exclusions(std.testing.allocator, "src/unit_tests.zig", expected_files, excluded_files) catch |err| {
         std.debug.print("Import validation failed ({}), skipping\n", .{err});
         return;
     };

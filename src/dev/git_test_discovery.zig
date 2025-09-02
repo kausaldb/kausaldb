@@ -11,7 +11,11 @@ pub fn find_unit_test_files(allocator: std.mem.Allocator) ![][]const u8 {
     // Find all .zig files in src/ with test blocks, excluding src/tests/
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &[_][]const u8{ "sh", "-c", "git ls-files 'src/*.zig' 'src/**/*.zig' | grep -v '^src/tests/' | grep -v '^src/unit_tests.zig' | grep -v '^src/integration_tests.zig' | xargs grep -l '^test ' 2>/dev/null || true" },
+        .argv = &[_][]const u8{
+            "sh",
+            "-c",
+            "git ls-files 'src/*.zig' 'src/**/*.zig' | grep -v '^src/tests/' | grep -v '^src/unit_tests.zig' | grep -v '^src/integration_tests.zig' | xargs grep -l '^test ' 2>/dev/null || true",
+        },
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
@@ -92,9 +96,8 @@ fn parse_integration_test_file_list(allocator: std.mem.Allocator, output: []cons
         if (trimmed.len == 0) continue;
 
         if (std.mem.endsWith(u8, trimmed, ".zig") and std.mem.startsWith(u8, trimmed, "src/")) {
-            // Remove "src/" prefix, keep rest: src/tests/foo.zig -> tests/foo.zig
-            const without_ext = trimmed[4 .. trimmed.len - 4]; // Remove "src/" and ".zig"
-            const import_path = try allocator.dupe(u8, without_ext);
+            // Remove "src/" prefix, keep .zig extension: src/tests/foo.zig -> tests/foo.zig
+            const import_path = try allocator.dupe(u8, trimmed[4..]); // Remove "src/" prefix only
             try files.append(import_path);
         }
     }
@@ -149,6 +152,16 @@ pub fn generate_import_block(allocator: std.mem.Allocator, files: [][]const u8) 
 
 /// Check if actual imports match expected imports in registry file
 pub fn validate_imports(allocator: std.mem.Allocator, registry_path: []const u8, expected_files: [][]const u8) !bool {
+    return validate_imports_with_exclusions(allocator, registry_path, expected_files, &[_][]const u8{});
+}
+
+/// Check imports with exclusion list for files covered by other mechanisms
+pub fn validate_imports_with_exclusions(
+    allocator: std.mem.Allocator,
+    registry_path: []const u8,
+    expected_files: [][]const u8,
+    excluded_files: []const []const u8,
+) !bool {
     const file = std.fs.cwd().openFile(registry_path, .{}) catch |err| switch (err) {
         error.FileNotFound => return false,
         else => return err,
@@ -158,18 +171,31 @@ pub fn validate_imports(allocator: std.mem.Allocator, registry_path: []const u8,
     const content = try file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(content);
 
-    // Check each expected file is imported
+    var missing_count: usize = 0;
+
+    // Check each expected file is imported or excluded
     for (expected_files) |expected| {
+        // Check if this file is in the exclusion list
+        var is_excluded = false;
+        for (excluded_files) |excluded| {
+            if (std.mem.eql(u8, expected, excluded)) {
+                is_excluded = true;
+                break;
+            }
+        }
+
+        if (is_excluded) continue;
+
         const import_line = try std.fmt.allocPrint(allocator, "@import(\"{s}\")", .{expected});
         defer allocator.free(import_line);
 
         if (std.mem.indexOf(u8, content, import_line) == null) {
             std.debug.print("Missing import: {s}\n", .{expected});
-            return false;
+            missing_count += 1;
         }
     }
 
-    return true;
+    return missing_count == 0;
 }
 
 test "git test discovery basic functionality" {

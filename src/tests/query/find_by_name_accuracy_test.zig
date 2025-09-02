@@ -74,13 +74,14 @@ test "find_by_name returns exact function matches only" {
     const blocks = try parse_file_to_blocks.parse_file_to_blocks(
         testing.allocator,
         file_content,
+        "find_accuracy_test",
         parse_config,
     );
     defer testing.allocator.free(blocks);
 
     // Store blocks in storage engine
     for (blocks) |block| {
-        try test_harness.storage_engine.put_block(block);
+        try test_harness.storage().put_block(block);
     }
 
     // Query for "init" functions - should find exactly 2 (public init and private_init)
@@ -169,12 +170,13 @@ test "find_by_name filters by entity type correctly" {
     const blocks = try parse_file_to_blocks.parse_file_to_blocks(
         testing.allocator,
         file_content,
+        "find_accuracy_test",
         parse_config,
     );
     defer testing.allocator.free(blocks);
 
     for (blocks) |block| {
-        try test_harness.storage_engine.put_block(block);
+        try test_harness.storage().put_block(block);
     }
 
     // Query for function named "Config" - should find exactly 1 function, not the struct
@@ -242,12 +244,13 @@ test "find_by_name handles complex function names correctly" {
     const blocks = try parse_file_to_blocks.parse_file_to_blocks(
         testing.allocator,
         file_content,
+        "find_accuracy_test",
         parse_config,
     );
     defer testing.allocator.free(blocks);
 
     for (blocks) |block| {
-        try test_harness.storage_engine.put_block(block);
+        try test_harness.storage().put_block(block);
     }
 
     // Test exact name matching for snake_case
@@ -307,12 +310,13 @@ test "find_by_name result consistency across multiple queries" {
     const blocks = try parse_file_to_blocks.parse_file_to_blocks(
         testing.allocator,
         file_content,
+        "find_accuracy_test",
         parse_config,
     );
     defer testing.allocator.free(blocks);
 
     for (blocks) |block| {
-        try test_harness.storage_engine.put_block(block);
+        try test_harness.storage().put_block(block);
     }
 
     // Run the same query multiple times and verify identical results
