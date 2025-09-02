@@ -330,6 +330,306 @@ pub const E2EHarness = struct {
         _ = timeout_ms;
         return self.execute_command(args);
     }
+
+    /// Create enhanced test project with comprehensive entity types for testing
+    pub fn create_enhanced_test_project(self: *Self, project_name: []const u8) ![]const u8 {
+        const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
+
+        try self.cleanup_paths.append(self.allocator, project_path);
+
+        std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        // Create main.zig with various entities and imports
+        const main_zig_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, "main.zig" });
+        defer self.allocator.free(main_zig_path);
+
+        const main_content =
+            \\const std = @import("std");
+            \\const utils = @import("utils.zig");
+            \\const testing = std.testing;
+            \\
+            \\const Config = struct {
+            \\    debug: bool = false,
+            \\    max_items: u32 = 100,
+            \\};
+            \\
+            \\const ErrorType = error{
+            \\    InvalidInput,
+            \\    OutOfMemory,
+            \\};
+            \\
+            \\pub fn main() void {
+            \\    const config = Config{};
+            \\    std.debug.print("Hello, KausalDB!\n", .{});
+            \\    helper_function();
+            \\    utils.utility_function();
+            \\}
+            \\
+            \\fn helper_function() void {
+            \\    const result = calculate_value(42);
+            \\    std.debug.print("Helper result: {}\n", .{result});
+            \\}
+            \\
+            \\pub fn calculate_value(x: i32) i32 {
+            \\    return x * 2 + 1;
+            \\}
+            \\
+            \\const PI: f64 = 3.14159;
+            \\var global_counter: u32 = 0;
+            \\
+            \\const Point = struct {
+            \\    x: f32,
+            \\    y: f32,
+            \\    
+            \\    pub fn distance(self: Point, other: Point) f32 {
+            \\        const dx = self.x - other.x;
+            \\        const dy = self.y - other.y;
+            \\        return std.math.sqrt(dx * dx + dy * dy);
+            \\    }
+            \\};
+            \\
+            \\test "calculate_value basic math" {
+            \\    try testing.expect(calculate_value(21) == 43);
+            \\}
+            \\
+            \\test "point distance calculation" {
+            \\    const p1 = Point{ .x = 0, .y = 0 };
+            \\    const p2 = Point{ .x = 3, .y = 4 };
+            \\    try testing.expect(p1.distance(p2) == 5.0);
+            \\}
+        ;
+
+        {
+            const file = try std.fs.createFileAbsolute(main_zig_path, .{});
+            defer file.close();
+            try file.writeAll(main_content);
+        }
+
+        // Create utils.zig with more entities
+        const utils_zig_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, "utils.zig" });
+        defer self.allocator.free(utils_zig_path);
+
+        const utils_content =
+            \\const std = @import("std");
+            \\const print = std.debug.print;
+            \\
+            \\pub const MAX_SIZE: usize = 1000;
+            \\
+            \\pub fn utility_function() void {
+            \\    const sum = add_numbers(10, 20);
+            \\    print("Utility sum: {}\n", .{sum});
+            \\}
+            \\
+            \\pub fn add_numbers(a: i32, b: i32) i32 {
+            \\    return a + b;
+            \\}
+            \\
+            \\fn private_helper(x: i32) i32 {
+            \\    return x * 3;
+            \\}
+            \\
+            \\pub const Logger = struct {
+            \\    level: LogLevel,
+            \\    
+            \\    pub fn log(self: Logger, message: []const u8) void {
+            \\        print("[{}] {s}\n", .{ self.level, message });
+            \\    }
+            \\};
+            \\
+            \\pub const LogLevel = enum {
+            \\    debug,
+            \\    info,
+            \\    warn,
+            \\    err,
+            \\};
+            \\
+            \\test "add_numbers functionality" {
+            \\    try std.testing.expect(add_numbers(5, 7) == 12);
+            \\}
+        ;
+
+        {
+            const file = try std.fs.createFileAbsolute(utils_zig_path, .{});
+            defer file.close();
+            try file.writeAll(utils_content);
+        }
+
+        return project_path;
+    }
+
+    /// Create large test project for storage pressure testing
+    pub fn create_large_test_project(self: *Self, project_name: []const u8) ![]const u8 {
+        const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
+
+        try self.cleanup_paths.append(self.allocator, project_path);
+
+        std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        // Create multiple files to simulate a larger codebase
+        const file_count = 15;
+
+        for (0..file_count) |i| {
+            const file_name = try std.fmt.allocPrint(self.allocator, "module_{d}.zig", .{i});
+            defer self.allocator.free(file_name);
+
+            const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, file_name });
+            defer self.allocator.free(file_path);
+
+            const content = try std.fmt.allocPrint(self.allocator,
+                \\const std = @import("std");
+                \\
+                \\pub const MODULE_{d}_CONSTANT: u32 = {d};
+                \\
+                \\pub fn module_{d}_function(x: u32) u32 {{
+                \\    return x + MODULE_{d}_CONSTANT;
+                \\}}
+                \\
+                \\pub const Module{d}Struct = struct {{
+                \\    id: u32,
+                \\    data: [100]u8,
+                \\    
+                \\    pub fn init(id: u32) Module{d}Struct {{
+                \\        return Module{d}Struct{{
+                \\            .id = id,
+                \\            .data = [_]u8{{0}} ** 100,
+                \\        }};
+                \\    }}
+                \\    
+                \\    pub fn process(self: *Module{d}Struct) u32 {{
+                \\        return self.id * 2;
+                \\    }}
+                \\}};
+                \\
+                \\test "module_{d}_function test" {{
+                \\    const result = module_{d}_function(10);
+                \\    try std.testing.expect(result == 10 + MODULE_{d}_CONSTANT);
+                \\}}
+                \\
+                \\test "Module{d}Struct test" {{
+                \\    var instance = Module{d}Struct.init(42);
+                \\    const processed = instance.process();
+                \\    try std.testing.expect(processed == 84);
+                \\}}
+            , .{ i, i, i, i, i, i, i, i, i, i, i, i, i });
+            defer self.allocator.free(content);
+
+            const file = try std.fs.createFileAbsolute(file_path, .{});
+            defer file.close();
+            try file.writeAll(content);
+        }
+
+        // Create main.zig that imports several modules
+        const main_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, "main.zig" });
+        defer self.allocator.free(main_path);
+
+        var main_content = std.ArrayList(u8){};
+        defer main_content.deinit(self.allocator);
+
+        try main_content.appendSlice(self.allocator, "const std = @import(\"std\");\n");
+
+        // Import first 8 modules
+        for (0..8) |i| {
+            const import_line = try std.fmt.allocPrint(self.allocator, "const module_{d} = @import(\"module_{d}.zig\");\n", .{ i, i });
+            defer self.allocator.free(import_line);
+            try main_content.appendSlice(self.allocator, import_line);
+        }
+
+        try main_content.appendSlice(self.allocator,
+            \\
+            \\pub fn main() void {
+            \\    std.debug.print("Large codebase test\n", .{});
+            \\
+        );
+
+        for (0..5) |i| {
+            const call_line = try std.fmt.allocPrint(self.allocator, "    _ = module_{d}.module_{d}_function({d});\n", .{ i, i, i * 10 });
+            defer self.allocator.free(call_line);
+            try main_content.appendSlice(self.allocator, call_line);
+        }
+
+        try main_content.appendSlice(self.allocator, "}\n");
+
+        const main_file = try std.fs.createFileAbsolute(main_path, .{});
+        defer main_file.close();
+        try main_file.writeAll(main_content.items);
+
+        return project_path;
+    }
+
+    /// Create project with substantial content for memory testing
+    pub fn create_substantial_content_project(self: *Self, project_name: []const u8) ![]const u8 {
+        const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
+
+        try self.cleanup_paths.append(self.allocator, project_path);
+
+        std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        // Create a file with substantial content (large functions, many parameters, etc)
+        const substantial_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, "substantial.zig" });
+        defer self.allocator.free(substantial_path);
+
+        var content = std.ArrayList(u8){};
+        defer content.deinit(self.allocator);
+
+        try content.appendSlice(self.allocator, "const std = @import(\"std\");\n\n");
+
+        // Generate a large function with many parameters and substantial logic
+        try content.appendSlice(self.allocator, "pub fn large_function(\n");
+        for (0..20) |i| {
+            const param_line = try std.fmt.allocPrint(self.allocator, "    param_{d}: u32,\n", .{i});
+            defer self.allocator.free(param_line);
+            try content.appendSlice(self.allocator, param_line);
+        }
+        try content.appendSlice(self.allocator, ") u32 {\n");
+        try content.appendSlice(self.allocator, "    var result: u32 = 0;\n");
+
+        for (0..20) |i| {
+            const calc_line = try std.fmt.allocPrint(self.allocator, "    result += param_{d} * {d};\n", .{ i, i + 1 });
+            defer self.allocator.free(calc_line);
+            try content.appendSlice(self.allocator, calc_line);
+        }
+
+        try content.appendSlice(self.allocator, "    return result;\n}\n\n");
+
+        // Add a large data structure
+        try content.appendSlice(self.allocator, "pub const LargeStruct = struct {\n");
+        for (0..50) |i| {
+            const field_line = try std.fmt.allocPrint(self.allocator, "    field_{d}: [100]u8,\n", .{i});
+            defer self.allocator.free(field_line);
+            try content.appendSlice(self.allocator, field_line);
+        }
+        try content.appendSlice(self.allocator, "};\n\n");
+
+        // Add multiple smaller functions
+        for (0..30) |i| {
+            const func = try std.fmt.allocPrint(self.allocator,
+                \\pub fn function_{d}(a: u32, b: u32, c: u32) u32 {{
+                \\    const temp1 = a * b;
+                \\    const temp2 = b + c;
+                \\    const temp3 = a - c;
+                \\    return temp1 + temp2 - temp3 + {d};
+                \\}}
+                \\
+            , .{ i, i });
+            defer self.allocator.free(func);
+            try content.appendSlice(self.allocator, func);
+        }
+
+        const file = try std.fs.createFileAbsolute(substantial_path, .{});
+        defer file.close();
+        try file.writeAll(content.items);
+
+        return project_path;
+    }
 };
 
 /// Build KausalDB binary to ensure latest version for testing
