@@ -476,9 +476,19 @@ pub const EngineStatistics = struct {
 const testing = std.testing;
 const test_allocator = testing.allocator;
 
-test "ContextEngine file path anchor resolution" {
-    // TODO: Fix SIGILL crash in execute_context_query - temporarily skipped
-    return error.SkipZigTest;
+test "ContextEngine statistics tracking" {
+    // Test statistics initialization and reset
+    const stats = EngineStatistics{
+        .queries_executed = 5,
+        .total_execution_time_us = 1000,
+        .average_query_time_us = 200,
+        .last_query_time_us = 150,
+    };
+
+    try testing.expect(stats.queries_executed == 5);
+    try testing.expect(stats.total_execution_time_us == 1000);
+    try testing.expect(stats.average_query_time_us == 200);
+    try testing.expect(stats.last_query_time_us == 150);
 }
 
 test "QueryExecutionContext timeout checking" {

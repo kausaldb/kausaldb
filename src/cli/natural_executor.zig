@@ -114,15 +114,10 @@ pub const NaturalExecutionContext = struct {
     }
 
     /// Generate default workspace name based on current working directory.
-    /// Uses current directory basename for more meaningful workspace names.
+    /// Always returns "default" to avoid memory management complexity.
     fn infer_workspace_name(self: *NaturalExecutionContext) []const u8 {
-        const cwd = std.fs.cwd().realpathAlloc(self.allocator, ".") catch {
-            return "default"; // Fallback to "default" if we can't get current directory
-        };
-        defer self.allocator.free(cwd);
-
-        const basename = std.fs.path.basename(cwd);
-        return self.allocator.dupe(u8, basename) catch "default";
+        _ = self;
+        return "default";
     }
 
     fn ensure_storage_initialized(self: *NaturalExecutionContext) !void {

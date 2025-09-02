@@ -347,11 +347,139 @@ test "simple glob matching" {
 }
 
 test "git ls-files integration" {
-    // TODO: Fix integration test after VFS interface is stabilized
-    return error.SkipZigTest;
+    var harness = try StorageHarness.init(testing.allocator, "git_ls_files_test");
+    defer harness.deinit();
+
+    const test_vfs = harness.vfs_ptr();
+
+    // Create test directory structure with some ignored files
+    try test_vfs.mkdir_all("git_test");
+    try test_vfs.mkdir_all("git_test/src");
+    try test_vfs.mkdir_all("git_test/zig-cache");
+
+    // Create files that should be included
+    {
+        var file = try test_vfs.create("git_test/src/main.zig");
+        defer file.close();
+        _ = try file.write("pub fn main() !void {}");
+    }
+    {
+        var file = try test_vfs.create("git_test/src/lib.zig");
+        defer file.close();
+        _ = try file.write("pub const version = \"0.1.0\";");
+    }
+
+    // Create files that should be ignored
+    {
+        var file = try test_vfs.create("git_test/zig-cache/temp.tmp");
+        defer file.close();
+        _ = try file.write("temporary file");
+    }
+    {
+        var file = try test_vfs.create("git_test/.DS_Store");
+        defer file.close();
+        _ = try file.write("system file");
+    }
+
+    var file_list = std.array_list.Managed([]const u8).init(testing.allocator);
+    defer {
+        for (file_list.items) |path| {
+            testing.allocator.free(path);
+        }
+        file_list.deinit();
+    }
+
+    const include_patterns = [_][]const u8{"**/*.zig"};
+    const exclude_patterns = [_][]const u8{ "zig-cache/**", ".*" };
+
+    // Test git ls-files collection (will fallback to manual since no real git repo)
+    try collect_git_tracked_files(
+        testing.allocator,
+        test_vfs,
+        "git_test",
+        &include_patterns,
+        &exclude_patterns,
+        &file_list,
+    );
+
+    // Should find the .zig files but not ignored files
+    try testing.expect(file_list.items.len >= 2);
+
+    var found_main = false;
+    var found_lib = false;
+    for (file_list.items) |file_path| {
+        if (std.mem.endsWith(u8, file_path, "main.zig")) found_main = true;
+        if (std.mem.endsWith(u8, file_path, "lib.zig")) found_lib = true;
+        // Should not find ignored files
+        try testing.expect(std.mem.indexOf(u8, file_path, "zig-cache") == null);
+        try testing.expect(std.mem.indexOf(u8, file_path, ".DS_Store") == null);
+    }
+
+    try testing.expect(found_main);
+    try testing.expect(found_lib);
 }
 
 test "ingest directory basic functionality" {
-    // TODO: Fix integration test after VFS interface is stabilized
-    return error.SkipZigTest;
+    var harness = try StorageHarness.init(testing.allocator, "ingest_directory_test");
+    defer harness.deinit();
+
+    const test_vfs = harness.vfs_ptr();
+
+    // Create test directory structure
+    try test_vfs.mkdir_all("test_project");
+    try test_vfs.mkdir_all("test_project/src");
+
+    // Create test files
+    {
+        var file = try test_vfs.create("test_project/src/main.zig");
+        defer file.close();
+        _ = try file.write(
+            \\pub fn main() !void {
+            \\    std.debug.print("Hello, World!\n", .{});
+            \\}
+        );
+    }
+    {
+        var file = try test_vfs.create("test_project/src/utils.zig");
+        defer file.close();
+        _ = try file.write(
+            \\pub fn add(a: i32, b: i32) i32 {
+            \\    return a + b;
+            \\}
+        );
+    }
+
+    // Configure ingestion
+    const config = IngestionConfig{
+        .include_patterns = &[_][]const u8{"**/*.zig"},
+        .exclude_patterns = &[_][]const u8{"zig-cache/**"},
+        .include_function_bodies = true,
+        .include_private = true,
+        .include_tests = false, // Keep simple for unit test
+        .max_file_size = 1024 * 1024, // 1MB
+    };
+
+    // Ingest directory using arena coordinator
+    const result = try ingest_directory_to_blocks(
+        harness.storage_engine.coordinator(),
+        testing.allocator,
+        test_vfs,
+        "test_project",
+        "test_codebase",
+        config,
+    );
+
+    // Verify results
+    try testing.expect(result.blocks.len >= 2); // At least main.zig and utils.zig
+    try testing.expect(result.stats.files_processed >= 2);
+    try testing.expect(result.stats.blocks_generated >= 2);
+
+    // Verify block structure
+    for (result.blocks) |block| {
+        try testing.expect(block.content.len > 0);
+        try testing.expect(block.metadata_json.len > 0);
+        try testing.expect(std.mem.indexOf(u8, block.metadata_json, "test_codebase") != null);
+        // Source URI format varies - just ensure it's not empty
+        try testing.expect(block.source_uri.len > 0);
+    }
 }

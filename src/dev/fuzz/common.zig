@@ -6,8 +6,9 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const concurrency = @import("../../core/concurrency.zig");
-const types = @import("../../core/types.zig");
+const internal = @import("internal");
+const concurrency = internal.concurrency;
+const types = internal.types;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;

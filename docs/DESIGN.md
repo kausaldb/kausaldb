@@ -99,6 +99,50 @@ All I/O through VFS abstraction. Production uses real filesystem. Tests use dete
 
 **Invariant Enforcement**:
 
+- Pre-condition validation at API boundaries
+- Post-condition verification on critical paths
+- State machine invariant checking
+
+### Context Engine
+
+**Batch-Oriented Query Processing**: Moves complexity from client to server. Instead of multiple round-trip queries, clients submit complete context requests executed atomically with bounded resources.
+
+**Three-Phase Execution**:
+
+1. **Anchor Resolution**: Convert query anchors (block IDs, entity names, file paths) to concrete block references with workspace validation
+2. **Graph Traversal**: Execute bounded traversal rules to build context graph within resource limits
+3. **Result Packaging**: Assemble final context with workspace isolation guarantees
+
+**Bounded Resource Pools**: Compile-time limits prevent unbounded memory growth:
+
+```zig
+pub const ContextQuery = struct {
+    anchors: BoundedArrayType(QueryAnchor, 4),     // Max 4 starting points
+    rules: BoundedArrayType(TraversalRule, 2),     // Max 2 traversal rules
+    max_total_nodes: u32 = 1000,                   // Global node limit
+};
+```
+
+**Arena-per-Query Pattern**: Each context query gets isolated arena memory with O(1) cleanup:
+
+```zig
+pub fn execute_context_query(self: *ContextEngine, query: ContextQuery) !ContextResult {
+    self.coordinator.reset();                       // O(1) cleanup from previous query
+    self.query_arena = ArenaAllocator.init(self.allocator);
+
+    // Build bounded context graph...
+    defer self.query_arena.deinit();               // O(1) cleanup guarantee
+}
+```
+
+**Workspace Isolation**: All context operations strictly enforce workspace boundaries to prevent cross-contamination between projects or codebases.
+
+**Multi-Anchor Support**:
+
+- **Block ID**: Direct block lookup (fastest path)
+- **Entity Name**: Semantic search within workspace scope
+- **File Path**: File-based context resolution with metadata matching
+
 - Pre/post condition validation
 - State machine verification
 - Bounds checking on all operations
