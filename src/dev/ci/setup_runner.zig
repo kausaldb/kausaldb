@@ -223,11 +223,11 @@ fn setup_git_hooks(allocator: std.mem.Allocator) !bool {
         return false;
     }
 
-    // Configure Git to use .githooks directory
-    var git_config = std.process.Child.init(&.{ "git", "config", "core.hooksPath", ".githooks" }, allocator);
-    const config_term = git_config.spawnAndWait() catch return false;
+    // Copy hooks to .git/hooks directory (standard approach)
+    var copy_hooks = std.process.Child.init(&.{ "sh", "-c", "mkdir -p .git/hooks && cp .githooks/pre-commit .githooks/commit-msg .githooks/pre-push .git/hooks/ && chmod +x .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/pre-push" }, allocator);
+    const copy_term = copy_hooks.spawnAndWait() catch return false;
 
-    return switch (config_term) {
+    return switch (copy_term) {
         .Exited => |code| code == 0,
         else => false,
     };
