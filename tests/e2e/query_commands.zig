@@ -389,7 +389,130 @@ test "trace command direction validation" {
 }
 
 test "complex query scenarios end-to-end" {
-    // TODO: Temporarily skipped - test hangs on workspace sync operations
-    // Re-enable after workspace command timeout/error handling is improved
-    return error.SkipZigTest;
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "complex_scenarios");
+    defer test_harness.deinit();
+
+    // Create a realistic multi-file project structure
+    const backend_path = try test_harness.create_test_project("backend");
+    const frontend_path = try test_harness.create_test_project("frontend");
+
+    // Create an additional complex file in the backend project
+    const api_zig_path = try std.fs.path.join(testing.allocator, &[_][]const u8{ backend_path, "api.zig" });
+    defer testing.allocator.free(api_zig_path);
+
+    const api_content =
+        \\const std = @import("std");
+        \\const utils = @import("utils.zig");
+        \\
+        \\pub const ApiServer = struct {
+        \\    port: u16,
+        \\
+        \\    pub fn init(port: u16) ApiServer {
+        \\        return ApiServer{ .port = port };
+        \\    }
+        \\
+        \\    pub fn start(self: *ApiServer) !void {
+        \\        std.debug.print("Starting API server on port {}\n", .{self.port});
+        \\        self.process_requests();
+        \\    }
+        \\
+        \\    fn process_requests(self: *ApiServer) void {
+        \\        // Simulate request processing
+        \\        const result = utils.add_numbers(10, 20);
+        \\        std.debug.print("API processed request: {}\n", .{result});
+        \\    }
+        \\};
+        \\
+        \\pub fn create_server() ApiServer {
+        \\    return ApiServer.init(8080);
+        \\}
+    ;
+
+    {
+        const file = try std.fs.createFileAbsolute(api_zig_path, .{});
+        defer file.close();
+        try file.writeAll(api_content);
+    }
+
+    // Link both projects with aliases
+    var backend_link = try test_harness.execute_workspace_command("link {s} as backend", .{backend_path});
+    defer backend_link.deinit();
+    try backend_link.expect_success();
+
+    var frontend_link = try test_harness.execute_workspace_command("link {s} as frontend", .{frontend_path});
+    defer frontend_link.deinit();
+    try frontend_link.expect_success();
+
+    // Sync both projects - this is where hangs occurred previously
+    // Test with reduced timeout expectations
+    var backend_sync = try test_harness.execute_workspace_command("sync backend", .{});
+    defer backend_sync.deinit();
+    try backend_sync.expect_success();
+
+    var frontend_sync = try test_harness.execute_workspace_command("sync frontend", .{});
+    defer frontend_sync.deinit();
+    try frontend_sync.expect_success();
+
+    // Test 1: Cross-workspace function search
+    var find_main_backend = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "backend" });
+    defer find_main_backend.deinit();
+    try find_main_backend.expect_success();
+
+    var find_main_frontend = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "frontend" });
+    defer find_main_frontend.deinit();
+    try find_main_frontend.expect_success();
+
+    // Test 2: Find functions that exist in our created files
+    var find_calculate = try test_harness.execute_command(&[_][]const u8{ "find", "function", "calculate_value", "in", "backend" });
+    defer find_calculate.deinit();
+    try find_calculate.expect_success();
+
+    var find_add_numbers = try test_harness.execute_command(&[_][]const u8{ "find", "function", "add_numbers", "in", "backend" });
+    defer find_add_numbers.deinit();
+    try find_add_numbers.expect_success();
+
+    // Test 3: Show callers relationships (should handle gracefully if target not found)
+    var show_callers = try test_harness.execute_command(&[_][]const u8{ "show", "callers", "helper_function" });
+    defer show_callers.deinit();
+    try show_callers.expect_success();
+
+    // Test 4: Trace callees with depth
+    var trace_callees = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--depth", "2" });
+    defer trace_callees.deinit();
+    try trace_callees.expect_success();
+
+    // Test 5: JSON output for complex queries
+    var json_find = try test_harness.execute_command(&[_][]const u8{ "find", "function", "create_server", "in", "backend", "--json" });
+    defer json_find.deinit();
+    try json_find.expect_success();
+
+    if (json_find.contains_output("{")) {
+        var parsed = test_harness.validate_json_output(json_find.stdout) catch |err| {
+            std.debug.print("Invalid JSON output: {s}\n", .{json_find.stdout});
+            return err;
+        };
+        defer parsed.deinit();
+        try testing.expect(parsed.value == .object);
+    }
+
+    // Test 6: Query all workspaces without specification (should aggregate results)
+    var find_all = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main" });
+    defer find_all.deinit();
+    try find_all.expect_success();
+    try testing.expect(find_all.stdout.len > 0);
+
+    // Test 7: Error handling - invalid workspace
+    var invalid_workspace = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "nonexistent" });
+    defer invalid_workspace.deinit();
+    // Should complete without crashing (either succeed with no results or graceful error)
+    try testing.expect(invalid_workspace.exit_code == 0 or invalid_workspace.stderr.len > 0);
+
+    // Test 8: Complex trace scenarios
+    var trace_both = try test_harness.execute_command(&[_][]const u8{ "trace", "both", "utils", "--depth", "1" });
+    defer trace_both.deinit();
+    try trace_both.expect_success();
+
+    // Verify that the test completed all scenarios without hanging
+    // Success is measured by reaching this point without timeout
+    try testing.expect(true);
 }
