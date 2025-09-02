@@ -858,12 +858,16 @@ pub const StorageEngine = struct {
         current_sstable_index: u32,
         current_sstable_iterator: ?sstable.SSTableIterator,
         current_sstable: ?*SSTable,
+        seen_blocks: std.AutoHashMap(BlockId, void),
 
         /// Iterate through memtable first, then all SSTables in order
         pub fn next(self: *BlockIterator) !?ContextBlock {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
-                return entry.value_ptr.block;
+                const block = entry.value_ptr.block;
+                // Track block to prevent duplicates from SSTables (skip dedup on OOM)
+                self.seen_blocks.put(block.id, {}) catch {};
+                return block;
             }
 
             // Then iterate through SSTables
@@ -907,7 +911,15 @@ pub const StorageEngine = struct {
                 self.sstable_manager.arena_coordinator.validate_coordinator();
 
                 if (try self.current_sstable_iterator.?.next()) |sstable_block| {
-                    return sstable_block.read(.sstable_manager).*;
+                    const block = sstable_block.read(.sstable_manager).*;
+                    // Skip if we've already seen this block (deduplication)
+                    // If OOM, skip deduplication and return block anyway
+                    const gop = self.seen_blocks.getOrPut(block.id) catch return block;
+                    if (!gop.found_existing) {
+                        return block;
+                    }
+                    // Continue to next block if duplicate
+                    continue;
                 } else {
                     if (self.current_sstable_iterator) |*iter| {
                         iter.deinit();
@@ -933,6 +945,7 @@ pub const StorageEngine = struct {
                 table.deinit();
                 self.backing_allocator.destroy(table);
             }
+            self.seen_blocks.deinit();
         }
     };
 
@@ -946,6 +959,7 @@ pub const StorageEngine = struct {
             .current_sstable_index = 0,
             .current_sstable_iterator = null,
             .current_sstable = null,
+            .seen_blocks = std.AutoHashMap(BlockId, void).init(self.backing_allocator),
         };
     }
 

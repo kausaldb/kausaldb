@@ -362,6 +362,7 @@ pub fn execute_keyword_query(
     try results.ensureTotalCapacity(query.max_results);
 
     var iterator = storage_engine.iterate_all_blocks();
+    defer iterator.deinit();
 
     var matches_found: u32 = 0;
     while (try iterator.next()) |block| {

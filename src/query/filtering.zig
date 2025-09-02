@@ -281,8 +281,7 @@ pub const FilteredQueryIterator = struct {
     }
 
     pub fn deinit(self: *FilteredQueryIterator) void {
-        // Storage iterator is owned by StorageEngine, no cleanup needed
-        _ = self;
+        self.storage_iterator.deinit();
     }
 };
 
@@ -496,6 +495,7 @@ pub fn execute_filtered_query(
     try matched_blocks.ensureTotalCapacity(max_to_collect);
 
     var iterator = storage_engine.iterate_all_blocks();
+    defer iterator.deinit();
 
     while (try iterator.next()) |block| {
         const ctx_block = block;

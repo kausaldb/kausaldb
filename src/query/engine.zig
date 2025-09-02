@@ -723,6 +723,7 @@ pub const QueryEngine = struct {
         defer results.deinit();
 
         var iterator = self.storage_engine.iterate_all_blocks();
+        defer iterator.deinit();
         var matches_found: u32 = 0;
 
         while (try iterator.next()) |block| {
@@ -770,6 +771,7 @@ pub const QueryEngine = struct {
         defer results.deinit();
 
         var iterator = self.storage_engine.iterate_all_blocks();
+        defer iterator.deinit();
         var matches_found: u32 = 0;
 
         while (try iterator.next()) |block| {
