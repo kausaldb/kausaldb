@@ -35,6 +35,13 @@ comptime {
 
     // Shell integration scenarios
     _ = @import("e2e/shell_scenarios.zig");
+
+    // Comprehensive CLI testing coverage for robustness validation
+    _ = @import("e2e/cli_flag_validation.zig");
+    _ = @import("e2e/relationship_commands_safety.zig");
+    _ = @import("e2e/entity_type_validation.zig");
+    _ = @import("e2e/storage_pressure_testing.zig");
+    _ = @import("e2e/error_handling_scenarios.zig");
 }
 
 test "e2e test registry initialization" {
@@ -50,7 +57,7 @@ test "e2e test module count validation" {
     // E2E tests focus on binary interface validation, not internal test discovery
     // Manual import management ensures only working tests are included
 
-    const total_imports = 7; // Count of imports in comptime block above
+    const total_imports = 12; // Count of imports in comptime block above
     try std.testing.expect(total_imports > 0);
 
     std.debug.print("E2E test registry: {d} modules imported\n", .{total_imports});
