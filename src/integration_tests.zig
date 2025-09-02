@@ -42,11 +42,11 @@ comptime {
     _ = @import("tests/misc/lifecycle.zig");
     _ = @import("tests/performance/large_block_benchmark.zig");
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
-    _ = @import("tests/query/advanced_algorithms_edge_cases.zig");
-    _ = @import("tests/query/advanced_traversal.zig");
+    _ = @import("tests/query/algorithms_edge_cases.zig");
     _ = @import("tests/query/complex_workloads.zig");
-
     _ = @import("tests/query/streaming_optimizations.zig");
+    _ = @import("tests/query/traversal_advanced.zig");
+    _ = @import("tests/query/traversal_bidirectional.zig");
     _ = @import("tests/recovery/wal.zig");
     _ = @import("tests/workspace/filtering_test.zig");
     _ = @import("tests/workspace/ingestion_deduplication_test.zig");

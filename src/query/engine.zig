@@ -833,11 +833,8 @@ pub const QueryEngine = struct {
         codebase: []const u8,
     ) !TraversalResult {
         var filtered_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(self.allocator);
-        defer filtered_blocks.deinit();
         var filtered_paths = std.array_list.Managed([]const BlockId).init(self.allocator);
-        defer filtered_paths.deinit();
         var filtered_depths = std.array_list.Managed(u32).init(self.allocator);
-        defer filtered_depths.deinit();
 
         for (traversal_result.blocks, 0..) |block, i| {
             var parsed = std.json.parseFromSlice(
@@ -857,13 +854,18 @@ pub const QueryEngine = struct {
             }
         }
 
+        // Transfer ownership to avoid use-after-free
+        const owned_blocks = try filtered_blocks.toOwnedSlice();
+        const owned_paths = try filtered_paths.toOwnedSlice();
+        const owned_depths = try filtered_depths.toOwnedSlice();
+
         return TraversalResult.init(
             self.allocator,
-            filtered_blocks.items,
-            filtered_paths.items,
-            filtered_depths.items,
-            @intCast(filtered_blocks.items.len),
-            if (filtered_depths.items.len > 0) std.mem.max(u32, filtered_depths.items) else 0,
+            owned_blocks,
+            owned_paths,
+            owned_depths,
+            @intCast(owned_blocks.len),
+            if (owned_depths.len > 0) std.mem.max(u32, owned_depths) else 0,
         );
     }
 
