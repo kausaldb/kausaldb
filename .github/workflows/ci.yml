@@ -140,7 +140,7 @@ jobs:
         uses: ./.github/actions/setup-zig
 
       - name: Run Fuzz Tests
-        run: ./zig/zig build fuzz all 10
+        run: ./zig/zig build fuzz -- all 10
 
       - name: Upload Fuzz Results
         if: always()
