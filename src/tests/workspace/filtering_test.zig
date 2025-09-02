@@ -25,6 +25,7 @@ test "workspace filtering isolates query results by codebase" {
         .metadata_json = try test_harness.storage_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"main.zig:init\",\"codebase\":\"kausaldb\"}"),
         .content = try test_harness.storage_harness.allocator.dupe(u8, "pub fn init() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.storage_harness.allocator, kausal_block);
 
     const limbo_block = ContextBlock{
         .id = BlockId.generate(),
@@ -33,6 +34,7 @@ test "workspace filtering isolates query results by codebase" {
         .metadata_json = try test_harness.storage_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"db.zig:init\",\"codebase\":\"limbo\"}"),
         .content = try test_harness.storage_harness.allocator.dupe(u8, "pub fn init() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.storage_harness.allocator, limbo_block);
 
     // Store both blocks
     try test_harness.storage().put_block(kausal_block);
@@ -70,6 +72,8 @@ test "workspace filtering handles nonexistent codebase" {
         .metadata_json = try test_harness.storage_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test.zig:test_func\",\"codebase\":\"kausaldb\"}"),
         .content = try test_harness.storage_harness.allocator.dupe(u8, "pub fn test_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.storage_harness.allocator, block);
+
     try test_harness.storage().put_block(block);
 
     // Query for function in nonexistent codebase
@@ -93,6 +97,7 @@ test "workspace filtering skips blocks with malformed metadata" {
         .metadata_json = try test_harness.storage_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test.zig:bad_func\"}"), // Missing codebase
         .content = try test_harness.storage_harness.allocator.dupe(u8, "pub fn bad_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.storage_harness.allocator, malformed_block);
 
     // Valid block with codebase
     const valid_block = ContextBlock{
@@ -102,6 +107,7 @@ test "workspace filtering skips blocks with malformed metadata" {
         .metadata_json = try test_harness.storage_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"good.zig:good_func\",\"codebase\":\"kausaldb\"}"),
         .content = try test_harness.storage_harness.allocator.dupe(u8, "pub fn good_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.storage_harness.allocator, valid_block);
 
     try test_harness.storage().put_block(malformed_block);
     try test_harness.storage().put_block(valid_block);

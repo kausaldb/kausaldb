@@ -24,6 +24,7 @@ test "storage deduplication prevents duplicate blocks with same ID" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test.zig:test_func\",\"codebase\":\"test\"}"),
         .content = try test_harness.allocator.dupe(u8, "pub fn test_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, block);
 
     // Store same block multiple times (simulating duplicate ingestion)
     try test_harness.storage_engine.put_block(block);
@@ -58,6 +59,7 @@ test "blocks with different IDs are stored separately" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test1.zig:same_func\",\"codebase\":\"test\"}"),
         .content = try test_harness.allocator.dupe(u8, "pub fn same_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, block1);
 
     const block2 = ContextBlock{
         .id = BlockId.generate(),
@@ -66,6 +68,7 @@ test "blocks with different IDs are stored separately" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"test2.zig:same_func\",\"codebase\":\"test\"}"),
         .content = try test_harness.allocator.dupe(u8, "pub fn same_func() {}"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, block2);
 
     try test_harness.storage_engine.put_block(block1);
     try test_harness.storage_engine.put_block(block2);
@@ -98,6 +101,7 @@ test "block updates replace existing blocks correctly" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"update.zig:evolving_func\",\"codebase\":\"test\"}"),
         .content = try test_harness.allocator.dupe(u8, "pub fn evolving_func() { // v1 }"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, initial_block);
 
     // Create updated block with same ID
     const updated_block = ContextBlock{
@@ -107,6 +111,7 @@ test "block updates replace existing blocks correctly" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{\"unit_type\":\"function\",\"unit_id\":\"update.zig:evolving_func\",\"codebase\":\"test\"}"),
         .content = try test_harness.allocator.dupe(u8, "pub fn evolving_func() { // v2 - updated }"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, updated_block);
 
     try test_harness.storage_engine.put_block(initial_block);
     try test_harness.storage_engine.put_block(updated_block);
@@ -143,6 +148,7 @@ test "empty metadata handles deduplication gracefully" {
         .metadata_json = try test_harness.allocator.dupe(u8, "{}"),
         .content = try test_harness.allocator.dupe(u8, "// minimal content"),
     };
+    defer harness.TestData.cleanup_test_block(test_harness.allocator, minimal_block);
 
     // Store it multiple times
     try test_harness.storage_engine.put_block(minimal_block);
