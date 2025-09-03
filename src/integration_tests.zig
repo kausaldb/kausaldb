@@ -77,7 +77,6 @@ comptime {
     _ = @import("tests/storage/enhanced_compaction_strategies.zig");
     _ = @import("tests/storage/fuzz_tests.zig");
     _ = @import("tests/storage/memtable_simple_operations.zig");
-    _ = @import("tests/storage/mock_vfs_helper.zig");
     _ = @import("tests/storage/property_tests.zig");
     _ = @import("tests/storage/tiered_compaction_validation.zig");
     _ = @import("tests/storage/wal_entry_stream.zig");
@@ -110,7 +109,9 @@ test "integration test discovery - informational scan for new test files" {
     }
 
     // Files that are intentionally excluded because they're covered by centralized frameworks
-    const excluded_files = &[_][]const u8{};
+    const excluded_files = &[_][]const u8{
+        "tests/storage/mock_vfs_helper.zig", // Removed: redundant with SimulationHarness
+    };
 
     const is_valid = git_discovery.validate_imports_with_exclusions(std.testing.allocator, "src/integration_tests.zig", expected_files, excluded_files) catch |err| {
         std.debug.print("Import validation failed ({}), skipping\n", .{err});

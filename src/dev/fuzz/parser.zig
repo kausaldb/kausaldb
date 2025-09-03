@@ -18,10 +18,10 @@ pub fn run_continuous(allocator: std.mem.Allocator) void {
     var iterations: u32 = 0;
 
     while (true) {
-        const result = run_single_iteration(allocator, random.random()) catch |err| {
+        const result = run_single_iteration(allocator, random.random()) catch |err| blk: {
             failures += 1;
             std.debug.print("Fuzz iteration failed: {any}\n", .{err});
-            common.FuzzResult.crash;
+            break :blk common.FuzzResult.crash;
         };
 
         iterations += 1;
@@ -63,10 +63,10 @@ pub fn run_timed(allocator: std.mem.Allocator, duration_ms: u64) !void {
     std.debug.print("Running file parsing fuzz test for {}ms...\n", .{duration_ms});
 
     while (std.time.milliTimestamp() < end_time) {
-        const result = run_single_iteration(allocator, random.random()) catch |err| {
+        const result = run_single_iteration(allocator, random.random()) catch |err| blk: {
             failures += 1;
             std.debug.print("Fuzz iteration failed: {any}\n", .{err});
-            common.FuzzResult.crash;
+            break :blk common.FuzzResult.crash;
         };
 
         iterations += 1;
@@ -123,8 +123,8 @@ fn run_single_iteration(allocator: std.mem.Allocator, random: std.Random) !commo
 
 /// Generate malformed Zig source code for fuzz testing
 fn generate_malformed_zig_source(allocator: std.mem.Allocator, random: std.Random) ![]u8 {
-    var source = std.ArrayList(u8).init(allocator);
-    defer source.deinit();
+    var source = std.ArrayList(u8){};
+    defer source.deinit(allocator);
 
     // Add some valid-looking Zig constructs
     const templates = [_][]const u8{
@@ -151,7 +151,7 @@ fn generate_malformed_zig_source(allocator: std.mem.Allocator, random: std.Rando
     var i: u32 = 0;
     while (i < valid_parts) : (i += 1) {
         const template = templates[random.intRangeAtMost(usize, 0, templates.len - 1)];
-        try source.appendSlice(template);
+        try source.appendSlice(allocator, template);
     }
 
     // Real-world files contain these corruption patterns from editor crashes,
@@ -180,7 +180,7 @@ fn generate_malformed_zig_source(allocator: std.mem.Allocator, random: std.Rando
     i = 0;
     while (i < corruption_count) : (i += 1) {
         const corruption = corruption_types[random.intRangeAtMost(usize, 0, corruption_types.len - 1)];
-        try source.appendSlice(corruption);
+        try source.appendSlice(allocator, corruption);
     }
 
     // Random bytes simulate file corruption and encoding edge cases
@@ -189,9 +189,9 @@ fn generate_malformed_zig_source(allocator: std.mem.Allocator, random: std.Rando
         var j: u32 = 0;
         while (j < random_bytes) : (j += 1) {
             const byte = random.int(u8);
-            try source.append(byte);
+            try source.append(allocator, byte);
         }
     }
 
-    return source.toOwnedSlice();
+    return source.toOwnedSlice(allocator);
 }
