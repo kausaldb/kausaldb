@@ -20,7 +20,6 @@ pub const query_operations = internal.query_operations;
 pub const production_vfs = internal.production_vfs;
 pub const ownership = internal.ownership;
 
-pub const zig_parser = internal.zig_parser;
 pub const assert = internal.assert;
 
 // Development utilities from internal API

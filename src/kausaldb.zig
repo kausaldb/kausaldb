@@ -43,17 +43,6 @@ pub const FilterExpression = query_engine.FilterExpression;
 pub const FilterOperator = query_engine.FilterOperator;
 pub const FilterTarget = query_engine.FilterTarget;
 
-// Pipeline abstractions removed - using direct file processing approach
-// See file_iterator.zig and parse_file_to_blocks.zig for simplified alternatives
-
-// Git source abstraction removed - using unified FileIterator approach
-
-pub const zig_parser = @import("ingestion/zig_parser.zig");
-pub const ZigParser = zig_parser.ZigParser;
-pub const ZigParserConfig = zig_parser.ZigParserConfig;
-
-// Semantic chunker removed - parse_file_to_blocks.zig provides direct transformation
-
 pub const handler = @import("server/handler.zig");
 pub const Server = handler.Server;
 

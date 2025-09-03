@@ -9,7 +9,7 @@ const std = @import("std");
 const harness_mod = @import("../harness.zig");
 const context_block = @import("../../core/types.zig");
 const ingest_directory = @import("../../ingestion/ingest_directory.zig");
-const parse_file_to_blocks = @import("../../ingestion/parse_file_to_blocks.zig");
+const parse_file_to_blocks = @import("../../ingestion/ingest_file.zig");
 const query = @import("../../query/engine.zig");
 
 const testing = std.testing;

@@ -13,7 +13,7 @@ const std = @import("std");
 const assert_mod = @import("../core/assert.zig");
 const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
-const parse_file_to_blocks = @import("parse_file_to_blocks.zig");
+const parse_file_to_blocks = @import("ingest_file.zig");
 const vfs = @import("../core/vfs.zig");
 
 const assert = assert_mod.assert;

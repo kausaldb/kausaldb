@@ -86,19 +86,10 @@ pub const query_operations = @import("query/operations.zig");
 pub const query_traversal = @import("query/traversal.zig");
 pub const query_filtering = @import("query/filtering.zig");
 
-// Parsers and pipeline
-pub const zig_parser = @import("ingestion/zig_parser.zig");
-pub const ZigParser = zig_parser.ZigParser;
-pub const ZigParserConfig = zig_parser.ZigParserConfig;
-
-// Pipeline types for backward compatibility
-pub const pipeline_types = @import("ingestion/pipeline_types.zig");
-
-// File parsing (replaces pipeline abstractions)
-pub const parse_file_to_blocks = @import("ingestion/parse_file_to_blocks.zig");
+// Simple file parsing for v0.1.0
+pub const parse_file_to_blocks = @import("ingestion/ingest_file.zig");
 pub const FileContent = parse_file_to_blocks.FileContent;
-// Backward compatibility alias for legacy fuzz/benchmark code
-pub const SourceContent = FileContent;
+pub const ParseConfig = parse_file_to_blocks.ParseConfig;
 
 // Server components
 pub const connection_manager = @import("server/connection_manager.zig");

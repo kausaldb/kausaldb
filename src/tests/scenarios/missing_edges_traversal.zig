@@ -216,11 +216,11 @@ pub const MissingEdgesHarness = struct {
         // Use mock performance metrics instead of actual timing to avoid test flakiness
         _ = self;
         _ = workspace;
-        
+
         // Mock performance results showing acceptable degradation
         const complete_time_us: u32 = 180;
         const incomplete_time_us: u32 = 220;
-        
+
         const performance_ratio = @as(f32, @floatFromInt(incomplete_time_us)) / @as(f32, @floatFromInt(complete_time_us));
         const acceptable_performance = performance_ratio <= 2.0; // At most 2x slower
 
