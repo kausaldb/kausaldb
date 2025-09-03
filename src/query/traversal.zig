@@ -162,7 +162,7 @@ pub const TraversalDirection = enum(u8) {
     bidirectional = 0x03,
 
     pub fn from_u8(value: u8) !TraversalDirection {
-        return std.meta.intToEnum(TraversalDirection, value) catch TraversalError.InvalidDirection;
+        return std.enums.fromInt(TraversalDirection, value) orelse TraversalError.InvalidDirection;
     }
 };
 
@@ -182,7 +182,7 @@ pub const TraversalAlgorithm = enum(u8) {
     topological_sort = 0x06,
 
     pub fn from_u8(value: u8) !TraversalAlgorithm {
-        return std.meta.intToEnum(TraversalAlgorithm, value) catch TraversalError.InvalidAlgorithm;
+        return std.enums.fromInt(TraversalAlgorithm, value) orelse TraversalError.InvalidAlgorithm;
     }
 };
 

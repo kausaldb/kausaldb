@@ -51,7 +51,7 @@ pub const FilterOperator = enum(u8) {
     ends_with = 0x09,
 
     pub fn from_u8(value: u8) !FilterOperator {
-        return std.meta.intToEnum(FilterOperator, value) catch FilterError.InvalidFilter;
+        return std.enums.fromInt(FilterOperator, value) orelse FilterError.InvalidFilter;
     }
 };
 
@@ -62,7 +62,7 @@ pub const LogicalOperator = enum(u8) {
     not_op = 0x03,
 
     pub fn from_u8(value: u8) !LogicalOperator {
-        return std.meta.intToEnum(LogicalOperator, value) catch FilterError.InvalidFilter;
+        return std.enums.fromInt(LogicalOperator, value) orelse FilterError.InvalidFilter;
     }
 };
 
@@ -75,7 +75,7 @@ pub const FilterTarget = enum(u8) {
     content_length = 0x05,
 
     pub fn from_u8(value: u8) !FilterTarget {
-        return std.meta.intToEnum(FilterTarget, value) catch FilterError.InvalidFilter;
+        return std.enums.fromInt(FilterTarget, value) orelse FilterError.InvalidFilter;
     }
 };
 

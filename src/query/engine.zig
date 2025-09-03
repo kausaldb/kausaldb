@@ -1011,7 +1011,7 @@ pub const QueryCommand = enum(u8) {
     semantic = 0x04,
 
     pub fn from_u8(value: u8) !QueryCommand {
-        return std.meta.intToEnum(QueryCommand, value) catch EngineError.NotInitialized;
+        return std.enums.fromInt(QueryCommand, value) orelse EngineError.NotInitialized;
     }
 };
 

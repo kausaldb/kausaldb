@@ -183,7 +183,7 @@ pub const CorruptedSSTableHarness = struct {
             .success => |context_result| TestResult{
                 .passed = true,
                 .error_message = null,
-                .blocks_retrieved = @as(u32, @intCast(context_result.blocks.len())),
+                .blocks_retrieved = @as(u32, @intCast(context_result.blocks.len)),
                 .corruption_detected = 0, // No corruption detected, query succeeded
                 .execution_time_us = execution_time_us,
                 .recovery_successful = true,
@@ -211,7 +211,7 @@ pub const CorruptedSSTableHarness = struct {
     pub fn test_recovery_after_sstable_replacement(self: *Self, workspace: []const u8) !TestResult {
         // First, create known good state
         const initial_query_result = try self.execute_clean_context_query(workspace);
-        const expected_blocks = initial_query_result.blocks.len();
+        const expected_blocks = initial_query_result.blocks.len;
 
         // Corrupt SSTables and verify graceful degradation
         self.hostile_vfs.create_hostile_scenario(.multi_phase_attack);
@@ -222,12 +222,12 @@ pub const CorruptedSSTableHarness = struct {
 
         // Verify system recovers to full functionality
         const recovery_result = try self.execute_clean_context_query(workspace);
-        const recovered_blocks = recovery_result.blocks.len();
+        const recovered_blocks = recovery_result.blocks.len;
 
         return TestResult{
             .passed = recovered_blocks >= expected_blocks,
             .error_message = if (recovered_blocks >= expected_blocks) null else "Recovery incomplete",
-            .blocks_retrieved = recovered_blocks,
+            .blocks_retrieved = @as(u32, @intCast(recovered_blocks)),
             .corruption_detected = switch (corrupted_result) {
                 .corruption_error => |info| info.corruption_events,
                 else => 0,
@@ -257,13 +257,12 @@ pub const CorruptedSSTableHarness = struct {
     /// Execute context query under clean conditions
     fn execute_clean_context_query(self: *Self, workspace: []const u8) !ContextResult {
         _ = self;
-        _ = workspace;
 
         // Since ContextEngine is crashing, return mock result
-        const blocks = BoundedArrayType(ContextBlock, 1000){};
+        const blocks = BoundedArrayType(*const ContextBlock, 10000){};
         return ContextResult{
             .blocks = blocks,
-            .edges = BoundedArrayType(types.GraphEdge, 4000){},
+            .edges = BoundedArrayType(ContextResult.ContextEdge, 40000){},
             .metrics = ContextResult.ExecutionMetrics{
                 .anchors_resolved = 1,
                 .blocks_visited = 5,
@@ -272,6 +271,7 @@ pub const CorruptedSSTableHarness = struct {
                 .execution_time_us = 150,
                 .memory_used_kb = 64,
             },
+            .workspace = workspace,
         };
     }
 

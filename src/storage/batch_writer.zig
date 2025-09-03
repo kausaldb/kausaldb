@@ -229,7 +229,7 @@ pub const BatchWriter = struct {
 
         // Phase 4: Update metrics
         const end_time = std.time.nanoTimestamp();
-        self.finalize_batch_metrics(start_time, end_time, @as(u32, @intCast(blocks.len)));
+        self.finalize_batch_metrics(@as(i64, @intCast(start_time)), @as(i64, @intCast(end_time)), @as(u32, @intCast(blocks.len)));
 
         return self.current_stats;
     }
@@ -249,7 +249,7 @@ pub const BatchWriter = struct {
 
             // Check for duplicates within batch
             const block_id = block.id;
-            const gop = try self.dedup_map.getOrPut(block_id);
+            const gop = try self.dedup_map.find_or_put(block_id);
 
             if (gop.found_existing) {
                 // Handle duplicate within batch
@@ -274,8 +274,8 @@ pub const BatchWriter = struct {
             const block = batch_entry.block;
 
             // Check if block exists in storage
-            if (try self.storage_engine.find_block(block.id)) |existing_block| {
-                const should_write = try self.resolve_version_conflict(block, existing_block);
+            if (try self.storage_engine.find_block(block.id, .storage_engine)) |existing_block| {
+                const should_write = try self.resolve_version_conflict(block, existing_block.read(.storage_engine));
                 if (should_write) {
                     try self.stage_block_for_commit(block, batch_entry.workspace, true);
                 } else {
@@ -292,7 +292,7 @@ pub const BatchWriter = struct {
     fn commit_staged_blocks(self: *BatchWriter) !void {
         // Write all staged blocks
         for (self.staging_blocks.slice()) |validated| {
-            try self.storage_engine.write_block(validated.block.*);
+            try self.storage_engine.put_block(validated.block.*);
             self.current_stats.blocks_written += 1;
         }
 
@@ -315,7 +315,7 @@ pub const BatchWriter = struct {
                     (new_block.version == existing.block.version and submit_order > existing.submit_order))
                 {
                     // Update to newer block
-                    const entry_ptr = self.dedup_map.get(new_block.id).?;
+                    const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                     entry_ptr.* = BatchEntry{
                         .block = new_block,
                         .submit_order = submit_order,
@@ -325,7 +325,7 @@ pub const BatchWriter = struct {
             },
             .overwrite_existing => {
                 // Always use the later submitted block
-                const entry_ptr = self.dedup_map.get(new_block.id).?;
+                const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                 entry_ptr.* = BatchEntry{
                     .block = new_block,
                     .submit_order = submit_order,
@@ -426,7 +426,7 @@ pub const BatchWriter = struct {
     /// Finalize metrics for completed batch
     fn finalize_batch_metrics(self: *BatchWriter, start_time: i64, end_time: i64, blocks_submitted: u32) void {
         // High-resolution timing enables microsecond-level performance monitoring
-        self.current_stats.processing_time_us = @as(u32, @intCast((end_time - start_time) / 1000));
+        self.current_stats.processing_time_us = @as(u32, @intCast(@divTrunc(end_time - start_time, 1000)));
 
         // Arena capacity tracking helps identify memory pressure scenarios
         self.current_stats.memory_used_kb = @as(u32, @intCast(self.batch_arena.queryCapacity() / 1024));

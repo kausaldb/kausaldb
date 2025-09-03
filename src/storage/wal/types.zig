@@ -67,7 +67,7 @@ pub const WALEntryType = enum(u8) {
     put_edge = 0x03,
 
     pub fn from_u8(value: u8) WALError!WALEntryType {
-        return std.meta.intToEnum(WALEntryType, value) catch WALError.InvalidEntryType;
+        return std.enums.fromInt(WALEntryType, value) orelse WALError.InvalidEntryType;
     }
 };
 

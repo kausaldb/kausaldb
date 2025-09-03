@@ -38,7 +38,7 @@ pub const MessageType = enum(u8) {
     error_response = 0xFF,
 
     pub fn from_u8(value: u8) !MessageType {
-        return std.meta.intToEnum(MessageType, value) catch return error.InvalidRequest;
+        return std.enums.fromInt(MessageType, value) orelse return error.InvalidRequest;
     }
 };
 

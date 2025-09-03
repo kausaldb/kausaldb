@@ -123,7 +123,7 @@ pub const TornWALHarness = struct {
             self.storage_engine.put_block(block) catch |err| {
                 // Expected errors due to torn writes
                 switch (err) {
-                    error.WriteTimeout, error.OutOfMemory => continue,
+                    error.WriteStalled, error.OutOfMemory => continue,
                     else => return err,
                 }
             };
@@ -157,14 +157,14 @@ pub const TornWALHarness = struct {
         const start_time = std.time.nanoTimestamp();
         const result = self.execute_recovery_context_query(query);
         const end_time = std.time.nanoTimestamp();
-        const execution_time_us = @as(u32, @intCast((end_time - start_time) / 1000));
+        const execution_time_us = @as(u32, @intCast(@divTrunc(end_time - start_time, 1000)));
 
         return switch (result) {
             .success => |blocks_found| TestResult{
-                .passed = blocks_found >= self.durable_blocks.len() / 2, // At least half should survive
+                .passed = blocks_found >= self.durable_blocks.len / 2, // At least half should survive
                 .error_message = null,
                 .durable_blocks_recovered = blocks_found,
-                .volatile_blocks_lost = @as(u32, @intCast(self.volatile_blocks.len())),
+                .volatile_blocks_lost = @as(u32, @intCast(self.volatile_blocks.len)),
                 .execution_time_us = execution_time_us,
                 .consistency_maintained = true,
             },
@@ -194,7 +194,7 @@ pub const TornWALHarness = struct {
             .passed = consistency_check,
             .error_message = if (consistency_check) null else "Data inconsistency detected after WAL recovery",
             .durable_blocks_recovered = durable_query_result.blocks_found,
-            .volatile_blocks_lost = @as(u32, @intCast(self.volatile_blocks.len())) - volatile_query_result.blocks_found,
+            .volatile_blocks_lost = @as(u32, @intCast(self.volatile_blocks.len)) - volatile_query_result.blocks_found,
             .execution_time_us = durable_query_result.execution_time_us + volatile_query_result.execution_time_us,
             .consistency_maintained = consistency_check,
         };
@@ -204,8 +204,10 @@ pub const TornWALHarness = struct {
     fn simulate_recovery_restart(self: *Self) !void {
         // Shutdown storage engine (simulates crash)
         self.storage_engine.shutdown() catch {};
+        self.storage_engine.deinit();
 
         // Restart storage engine (triggers WAL recovery)
+        self.storage_engine.* = try StorageEngine.init_default(self.allocator, self.hostile_vfs.vfs(), "torn_wal_test");
         try self.storage_engine.startup();
 
         // Recovery should have processed partial writes and restored consistency
@@ -252,7 +254,7 @@ pub const TornWALHarness = struct {
     fn create_test_block(self: *Self, index: u32, workspace: []const u8, block_type: []const u8) !ContextBlock {
         const content = try std.fmt.allocPrint(
             self.allocator,
-            "pub fn {s}_function_{}() void {{\n  // {} block for WAL recovery testing\n}}",
+            "pub fn {s}_function_{}() void {{\n  // {s} block for WAL recovery testing\n}}",
             .{ block_type, index, block_type },
         );
 

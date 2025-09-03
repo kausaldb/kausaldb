@@ -128,7 +128,7 @@ pub const EdgeType = enum(u16) {
 
     /// Create EdgeType from u16.
     pub fn from_u16(value: u16) !EdgeType {
-        return std.meta.intToEnum(EdgeType, value) catch error.InvalidEdgeType;
+        return std.enums.fromInt(EdgeType, value) orelse error.InvalidEdgeType;
     }
 };
 

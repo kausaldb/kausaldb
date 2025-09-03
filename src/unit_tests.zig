@@ -99,14 +99,6 @@ comptime {
     _ = @import("testing/defensive.zig");
     _ = @import("testing/property_testing.zig");
     _ = @import("testing/systematic_fuzzing.zig");
-
-    // Hostile scenario modules
-    // TODO: Fix compilation issues in scenario files
-    // _ = @import("tests/scenarios/batch_deduplication.zig");
-    // _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
-    // _ = @import("tests/scenarios/missing_edges_traversal.zig");
-    // _ = @import("tests/scenarios/torn_wal_recovery.zig");
-    // _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 
 test "unit test discovery - informational scan for new test files" {

@@ -243,7 +243,7 @@ pub const BatchDeduplicationHarness = struct {
             total_time_us += stats.processing_time_us;
 
             // Validate deduplication effectiveness
-            const expected_dedup_rate = (batch.expected_duplicates * 100) / batch.blocks.len();
+            const expected_dedup_rate = (batch.expected_duplicates * 100) / batch.blocks.len;
             const actual_dedup_rate = stats.deduplication_rate_percent;
 
             // Allow some tolerance due to hostile conditions
@@ -284,7 +284,7 @@ pub const BatchDeduplicationHarness = struct {
         _ = try self.batch_writer.ingest_batch(baseline_batch.blocks.slice(), baseline_batch.workspace);
 
         // Now test version conflicts with second batch
-        if (self.test_batches.len() > 1) {
+        if (self.test_batches.len > 1) {
             const conflict_batch = &self.test_batches.slice()[1];
             const stats = try self.batch_writer.ingest_batch(conflict_batch.blocks.slice(), conflict_batch.workspace);
 
@@ -330,7 +330,7 @@ pub const BatchDeduplicationHarness = struct {
             const stats = self.batch_writer.ingest_batch(batch.blocks.slice(), batch.workspace) catch |err| {
                 concurrent_errors += 1;
                 switch (err) {
-                    error.OutOfMemory, error.BatchTooLarge => continue, // Expected under hostile conditions
+                    error.OutOfMemory => continue, // Expected under hostile conditions
                     else => return err, // Unexpected errors should propagate
                 }
             };
@@ -341,7 +341,7 @@ pub const BatchDeduplicationHarness = struct {
         }
 
         return TestResult{
-            .passed = concurrent_errors < self.test_batches.len(), // Some success expected
+            .passed = concurrent_errors < self.test_batches.len, // Some success expected
             .error_message = null,
             .blocks_submitted = total_submitted,
             .blocks_written = total_written,

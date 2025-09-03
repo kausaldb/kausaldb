@@ -306,6 +306,30 @@ pub fn BoundedHashMapType(comptime K: type, comptime V: type, comptime max_size:
             return null;
         }
 
+        /// Get pointer to value for key, returns null if not found.
+        /// Allows in-place modification of values.
+        pub fn find_ptr(self: *BoundedHashMap, key: K) ?*V {
+            const hash = self.hash_key(key);
+            var index = hash % TABLE_SIZE;
+
+            // Linear probing
+            var probes: usize = 0;
+            while (probes < TABLE_SIZE) {
+                switch (self.entries[index]) {
+                    .empty => return null,
+                    .deleted => {},
+                    .occupied => |*occupied| {
+                        if (std.meta.eql(occupied.key, key)) {
+                            return &occupied.value;
+                        }
+                    },
+                }
+                index = (index + 1) % TABLE_SIZE;
+                probes += 1;
+            }
+            return null;
+        }
+
         /// Remove key from map.
         /// Returns true if key was found and removed.
         pub fn remove(self: *BoundedHashMap, key: K) bool {
@@ -346,6 +370,67 @@ pub fn BoundedHashMapType(comptime K: type, comptime V: type, comptime max_size:
         /// Check if map is empty.
         pub fn is_empty(self: *const BoundedHashMap) bool {
             return self.len == 0;
+        }
+
+        /// Result type for find_or_put operation
+        pub const GetOrPutResult = struct {
+            found_existing: bool,
+            value_ptr: *V,
+        };
+
+        /// Get or put key-value pair.
+        /// Returns GetOrPutResult with found_existing flag and value pointer.
+        /// Returns error.Overflow if map is full and key doesn't exist.
+        pub fn find_or_put(self: *BoundedHashMap, key: K) !GetOrPutResult {
+            const hash = self.hash_key(key);
+            var index = hash % TABLE_SIZE;
+
+            // Linear probing - first pass: look for existing key
+            var probes: usize = 0;
+            while (probes < TABLE_SIZE) {
+                switch (self.entries[index]) {
+                    .empty => break,
+                    .deleted => {},
+                    .occupied => |*occupied| {
+                        if (std.meta.eql(occupied.key, key)) {
+                            return GetOrPutResult{
+                                .found_existing = true,
+                                .value_ptr = &occupied.value,
+                            };
+                        }
+                    },
+                }
+                index = (index + 1) % TABLE_SIZE;
+                probes += 1;
+            }
+
+            // Key not found, need to insert
+            if (self.len >= MAX_SIZE) {
+                return error.Overflow;
+            }
+
+            // Find first empty or deleted slot
+            index = hash % TABLE_SIZE;
+            probes = 0;
+            while (probes < TABLE_SIZE) {
+                switch (self.entries[index]) {
+                    .empty, .deleted => {
+                        self.entries[index] = Entry{ .occupied = .{ .key = key, .value = undefined } };
+                        self.len += 1;
+                        return GetOrPutResult{
+                            .found_existing = false,
+                            .value_ptr = &self.entries[index].occupied.value,
+                        };
+                    },
+                    .occupied => {
+                        index = (index + 1) % TABLE_SIZE;
+                        probes += 1;
+                    },
+                }
+            }
+
+            // This should never happen if table size is correct
+            return error.Overflow;
         }
 
         /// Check if map is full.

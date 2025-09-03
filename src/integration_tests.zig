@@ -75,6 +75,7 @@ comptime {
     _ = @import("tests/storage/bloom_filter_validation.zig");
     _ = @import("tests/storage/defensive_integration.zig");
     _ = @import("tests/storage/enhanced_compaction_strategies.zig");
+    _ = @import("tests/storage/fuzz_tests.zig");
     _ = @import("tests/storage/memtable_simple_operations.zig");
     _ = @import("tests/storage/mock_vfs_helper.zig");
     _ = @import("tests/storage/property_tests.zig");
@@ -87,6 +88,11 @@ comptime {
     _ = @import("tests/stress/memory_pressure.zig");
     _ = @import("tests/stress/storage_load.zig");
     _ = @import("tests/vfs/vfs_integration.zig");
+    _ = @import("tests/scenarios/batch_deduplication.zig");
+    _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
+    _ = @import("tests/scenarios/missing_edges_traversal.zig");
+    _ = @import("tests/scenarios/torn_wal_recovery.zig");
+    _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 
 test "integration test discovery - informational scan for new test files" {
@@ -104,13 +110,7 @@ test "integration test discovery - informational scan for new test files" {
     }
 
     // Files that are intentionally excluded because they're covered by centralized frameworks
-    const excluded_files = &[_][]const u8{
-        // Individual scenario files covered by scenarios_test.zig framework (except missing_edges_traversal.zig which is now imported)
-        "tests/scenarios/batch_deduplication.zig",
-        "tests/scenarios/corrupted_sstable_recovery.zig",
-        "tests/scenarios/torn_wal_recovery.zig",
-        "tests/scenarios/workspace_isolation.zig",
-    };
+    const excluded_files = &[_][]const u8{};
 
     const is_valid = git_discovery.validate_imports_with_exclusions(std.testing.allocator, "src/integration_tests.zig", expected_files, excluded_files) catch |err| {
         std.debug.print("Import validation failed ({}), skipping\n", .{err});
