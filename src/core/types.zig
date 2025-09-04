@@ -455,6 +455,87 @@ pub const ContextBlock = struct {
     }
 };
 
+/// Zero-copy view of a ContextBlock backed by a raw buffer.
+/// Provides on-demand parsing without heap allocations for read-only access.
+/// Eliminates redundant memory copies during SSTable reads.
+pub const ParsedBlock = struct {
+    /// Raw buffer containing serialized block data
+    buffer: []const u8,
+    /// Parsed header for field offset calculations
+    header: ContextBlock.BlockHeader,
+
+    /// Parse a serialized block buffer into a zero-copy view.
+    /// Validates format and checksums without heap allocation.
+    pub fn parse(buffer: []const u8) !ParsedBlock {
+        if (buffer.len < ContextBlock.BlockHeader.SIZE) return error.BufferTooSmall;
+
+        const header = try ContextBlock.BlockHeader.deserialize(buffer);
+        if (header.source_uri_len > 1024 * 1024) return error.InvalidSourceUriLength;
+        if (header.metadata_json_len > 10 * 1024 * 1024) return error.InvalidMetadataLength;
+        if (header.content_len > 100 * 1024 * 1024) return error.InvalidContentLength;
+
+        const total_size = ContextBlock.BlockHeader.SIZE + header.source_uri_len + header.metadata_json_len + header.content_len;
+        if (buffer.len < total_size) return error.IncompleteData;
+
+        // Validate checksum to detect data corruption
+        const data_start = ContextBlock.BlockHeader.SIZE;
+        const data_end = data_start + header.source_uri_len + header.metadata_json_len + header.content_len;
+        const computed_checksum = std.hash.Crc32.hash(buffer[data_start..data_end]);
+        if (computed_checksum != header.checksum) {
+            return error.ChecksumMismatch;
+        }
+
+        return ParsedBlock{
+            .buffer = buffer,
+            .header = header,
+        };
+    }
+
+    /// Get block ID without allocation.
+    pub fn block_id(self: ParsedBlock) BlockId {
+        return BlockId{ .bytes = self.header.id };
+    }
+
+    /// Get block version without allocation.
+    pub fn version(self: ParsedBlock) u64 {
+        return self.header.block_version;
+    }
+
+    /// Get source URI as slice into buffer without allocation.
+    pub fn source_uri(self: ParsedBlock) []const u8 {
+        const offset = ContextBlock.BlockHeader.SIZE;
+        return self.buffer[offset .. offset + self.header.source_uri_len];
+    }
+
+    /// Get metadata JSON as slice into buffer without allocation.
+    pub fn metadata_json(self: ParsedBlock) []const u8 {
+        const offset = ContextBlock.BlockHeader.SIZE + self.header.source_uri_len;
+        return self.buffer[offset .. offset + self.header.metadata_json_len];
+    }
+
+    /// Get content as slice into buffer without allocation.
+    pub fn content(self: ParsedBlock) []const u8 {
+        const offset = ContextBlock.BlockHeader.SIZE + self.header.source_uri_len + self.header.metadata_json_len;
+        return self.buffer[offset .. offset + self.header.content_len];
+    }
+
+    /// Convert to owned ContextBlock with heap allocations.
+    /// Only use when caller needs mutable access or buffer lifetime is insufficient.
+    pub fn to_owned(self: ParsedBlock, allocator: std.mem.Allocator) !ContextBlock {
+        const owned_source_uri = try allocator.dupe(u8, self.source_uri());
+        const owned_metadata_json = try allocator.dupe(u8, self.metadata_json());
+        const owned_content = try allocator.dupe(u8, self.content());
+
+        return ContextBlock{
+            .id = self.block_id(),
+            .version = self.version(),
+            .source_uri = owned_source_uri,
+            .metadata_json = owned_metadata_json,
+            .content = owned_content,
+        };
+    }
+};
+
 /// Graph edge representing a typed relationship between two Context Blocks.
 pub const GraphEdge = struct {
     /// Source block ID
