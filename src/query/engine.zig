@@ -30,7 +30,7 @@ const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
-const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
+const typed_storage_coordinator_type = memory.typed_storage_coordinator_type;
 const Config = storage_config_mod.Config;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
@@ -196,6 +196,7 @@ pub const QueryContext = struct {
     pub fn create(query_id: u64, plan: QueryPlan) QueryContext {
         return QueryContext{
             .query_id = query_id,
+            // Safety: Timestamp always fits in i64 range
             .start_time_ns = @intCast(std.time.nanoTimestamp()),
             .plan = plan,
             .metrics = .{},
@@ -205,6 +206,7 @@ pub const QueryContext = struct {
     /// Calculate execution duration in nanoseconds
     pub fn execution_duration_ns(self: *const QueryContext) u64 {
         const current_time = std.time.nanoTimestamp();
+        // Safety: Time difference is always non-negative and fits in u64
         return @as(u64, @intCast(current_time - self.start_time_ns));
     }
 };
@@ -320,6 +322,7 @@ pub const QueryEngine = struct {
         if (self.planning_enabled) {
             const storage_metrics = self.storage_engine.metrics();
             plan.analyze_complexity(
+                // Safety: Storage metrics are bounded by system limits and fit in u32
                 @intCast(storage_metrics.blocks_written.load()),
                 @intCast(storage_metrics.edges_added.load()),
             );

@@ -48,6 +48,7 @@ fn put_block_with_backpressure(engine: *StorageEngine, block: ContextBlock) !voi
                 engine.flush_memtable_to_sstable() catch {};
 
                 // Exponential backoff: 1ms, 2ms, 4ms
+                // Safety: Retry count bounded by test limits, fits in shift range
                 const delay_ms = @as(u64, 1) << @intCast(retries);
                 std.Thread.sleep(delay_ms * 1000000);
 
@@ -377,6 +378,7 @@ test "property: concurrent-like access patterns" {
 
         // Property: Block count should equal number of stored blocks
         const current_count = engine.block_count();
+        // Safety: Block count bounded by test data size and fits in u32
         try expectEqual(@as(u32, @intCast(stored_blocks.items.len)), current_count);
     }
 }
@@ -406,10 +408,12 @@ test "property: large content handling" {
 
         // Fill with deterministic pattern
         for (large_content, 0..) |*byte, byte_idx| {
+            // Safety: Modulo 256 ensures result fits in u8 range
             byte.* = @as(u8, @intCast((byte_idx + idx) % 256));
         }
 
         const large_block = ContextBlock{
+            // Safety: Test index bounded and fits in u8 with offset
             .id = BlockId{ .bytes = [_]u8{@as(u8, @intCast(idx + 10))} ** 16 },
             .version = 1,
             .content = large_content,

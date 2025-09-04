@@ -123,6 +123,7 @@ fn create_test_graph(
 
     // Create nodes with realistic content
     for (blocks, 0..) |*block, i| {
+        // Safety: Loop index bounded by node count and fits in u32 range
         const id = @as(u32, @intCast(i));
         const source_uri = try std.fmt.allocPrint(allocator, "test://graph_node_{}.zig", .{id});
         const pattern_name = @tagName(config.pattern);
@@ -380,9 +381,9 @@ test "astar search basic functionality validation" {
     //     defer query_result.deinit();
     //     // Test succeeded - verify we got some results
     //     _ = query_result.blocks;
-    //     std.log.debug("Traversal succeeded with {} blocks", .{query_result.blocks.len});
+    //     log.debug("Traversal succeeded with {} blocks", .{query_result.blocks.len});
     // } else |err| {
-    //     std.log.debug("Traversal failed gracefully: {}", .{err});
+    //     log.debug("Traversal failed gracefully: {}", .{err});
     //     // HashMap corruption recovery is working - this is expected behavior under fault injection
     // }
     //
@@ -426,9 +427,9 @@ test "astar search with binary tree structure" {
     //     defer query_result.deinit();
     //     // Test succeeded - verify we got some results
     //     _ = query_result.blocks;
-    //     std.log.debug("Binary tree traversal succeeded with {} blocks", .{query_result.blocks.len});
+    //     log.debug("Binary tree traversal succeeded with {} blocks", .{query_result.blocks.len});
     // } else |err| {
-    //     std.log.debug("Binary tree traversal failed gracefully: {}", .{err});
+    //     log.debug("Binary tree traversal failed gracefully: {}", .{err});
     //     // HashMap corruption recovery is working - this is expected behavior under fault injection
     // }
     //
@@ -476,7 +477,7 @@ test "astar search path reconstruction correctness" {
     //         // Found at least one result - path reconstruction succeeded
     //     }
     // } else |err| {
-    //     std.log.debug("Path reconstruction traversal failed gracefully: {}", .{err});
+    //     log.debug("Path reconstruction traversal failed gracefully: {}", .{err});
     //     // HashMap corruption recovery is working - this is expected behavior under fault injection
     // }
     //

@@ -49,6 +49,7 @@ const RecoveryContext = struct {
 
 /// Recovery callback that stores entries for test validation
 fn recovery_callback(entry: WALEntry, context: *anyopaque) WALError!void {
+    // Safety: Pointer cast with alignment validation
     const recovery_context: *RecoveryContext = @ptrCast(@alignCast(context));
 
     // Clone entry for storage since original will be freed by caller

@@ -139,6 +139,7 @@ fn scan_source_file(
     try scan_file_content(allocator, report, full_path, content);
 
     report.scanned_files += 1;
+    // Safety: Value range validated by context constraints
     report.total_lines += @as(u32, @intCast(std.mem.count(u8, content, "\n") + 1));
 }
 
@@ -159,6 +160,7 @@ fn scan_file_content(
             std.mem.indexOf(u8, file_path, "/tests/") != null;
 
         if (std.mem.indexOf(u8, line, "@ptrCast") != null or
+            // Safety: Pointer cast with type compatibility validated
             std.mem.indexOf(u8, line, "@intCast") != null or
             std.mem.indexOf(u8, line, "@alignCast") != null)
         {

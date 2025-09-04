@@ -27,9 +27,9 @@ const query_engine_mod = @import("../engine.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const comptime_assert = assert_mod.comptime_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
-const BoundedHashMapType = bounded_mod.BoundedHashMapType;
-const BoundedGraphBuilderType = bounded_mod.BoundedGraphBuilderType;
+const bounded_array_type = bounded_mod.bounded_array_type;
+const bounded_hash_map_type = bounded_mod.bounded_hash_map_type;
+const bounded_graph_builder_type = bounded_mod.bounded_graph_builder_type;
 const ArenaCoordinator = memory_mod.ArenaCoordinator;
 
 const ContextQuery = context_query_mod.ContextQuery;
@@ -117,8 +117,8 @@ pub const ContextEngine = struct {
     coordinator: *ArenaCoordinator,
 
     /// Bounded resource pools for predictable memory usage
-    graph_builder: BoundedGraphBuilderType(10000, 40000),
-    resolved_anchors: BoundedArrayType(ResolvedAnchor, 4),
+    graph_builder: bounded_graph_builder_type(10000, 40000),
+    resolved_anchors: bounded_array_type(ResolvedAnchor, 4),
 
     /// Performance metrics tracking
     queries_executed: u64,
@@ -127,7 +127,7 @@ pub const ContextEngine = struct {
 
     const ResolvedAnchor = struct {
         original: QueryAnchor,
-        resolved_blocks: BoundedArrayType(BlockId, 16), // Multiple blocks can match one anchor
+        resolved_blocks: bounded_array_type(BlockId, 16), // Multiple blocks can match one anchor
         resolution_time_us: u32,
     };
 
@@ -151,12 +151,12 @@ pub const ContextEngine = struct {
             .query_engine = query_engine,
             .query_arena = query_arena,
             .coordinator = coordinator,
-            .graph_builder = BoundedGraphBuilderType(10000, 40000){
-                .nodes = BoundedHashMapType([16]u8, void, 10000){},
-                .edges = BoundedArrayType(BoundedGraphBuilderType(10000, 40000).GraphEdge, 40000){},
-                .working_set = BoundedArrayType([16]u8, 10000){},
+            .graph_builder = bounded_graph_builder_type(10000, 40000){
+                .nodes = bounded_hash_map_type([16]u8, void, 10000){},
+                .edges = bounded_array_type(bounded_graph_builder_type(10000, 40000).GraphEdge, 40000){},
+                .working_set = bounded_array_type([16]u8, 10000){},
             },
-            .resolved_anchors = BoundedArrayType(ResolvedAnchor, 4){},
+            .resolved_anchors = bounded_array_type(ResolvedAnchor, 4){},
             .queries_executed = 0,
             .total_execution_time_us = 0,
             .last_query_time_us = 0,
@@ -187,12 +187,12 @@ pub const ContextEngine = struct {
         self.query_arena.* = ArenaAllocator.init(self.allocator);
 
         // Clear bounded collections for reuse
-        self.graph_builder = BoundedGraphBuilderType(10000, 40000){
-            .nodes = BoundedHashMapType([16]u8, void, 10000){},
-            .edges = BoundedArrayType(BoundedGraphBuilderType(10000, 40000).GraphEdge, 40000){},
-            .working_set = BoundedArrayType([16]u8, 10000){},
+        self.graph_builder = bounded_graph_builder_type(10000, 40000){
+            .nodes = bounded_hash_map_type([16]u8, void, 10000){},
+            .edges = bounded_array_type(bounded_graph_builder_type(10000, 40000).GraphEdge, 40000){},
+            .working_set = bounded_array_type([16]u8, 10000){},
         };
-        self.resolved_anchors = BoundedArrayType(ResolvedAnchor, 4){};
+        self.resolved_anchors = bounded_array_type(ResolvedAnchor, 4){};
 
         // Phase 1: Resolve anchors to concrete block IDs
         try self.resolve_anchors(&context);
@@ -221,7 +221,7 @@ pub const ContextEngine = struct {
         for (context.query.anchors.slice()) |anchor| {
             var resolved_anchor = ResolvedAnchor{
                 .original = anchor,
-                .resolved_blocks = BoundedArrayType(BlockId, 16){},
+                .resolved_blocks = bounded_array_type(BlockId, 16){},
                 .resolution_time_us = 0,
             };
 
@@ -302,7 +302,7 @@ pub const ContextEngine = struct {
     /// Execute a single traversal rule across the current graph
     fn execute_traversal_rule(self: *ContextEngine, context: *QueryExecutionContext, rule: TraversalRule) !void {
         // Start from all currently known nodes
-        var current_frontier = BoundedArrayType(BlockId, 10000){};
+        var current_frontier = bounded_array_type(BlockId, 10000){};
 
         // Initialize frontier with resolved anchor blocks
         for (self.resolved_anchors.slice()) |resolved| {
@@ -316,7 +316,7 @@ pub const ContextEngine = struct {
         // Traverse up to max_depth levels
         var depth: u32 = 0;
         while (depth < rule.max_depth and !current_frontier.is_empty()) : (depth += 1) {
-            var next_frontier = BoundedArrayType(BlockId, 10000){};
+            var next_frontier = bounded_array_type(BlockId, 10000){};
 
             for (current_frontier.slice()) |current_block| {
                 try self.expand_node(context, current_block, &rule, &next_frontier);
@@ -336,7 +336,7 @@ pub const ContextEngine = struct {
         context: *QueryExecutionContext,
         node_id: BlockId,
         rule: *const TraversalRule,
-        next_frontier: *BoundedArrayType(BlockId, 10000),
+        next_frontier: *bounded_array_type(BlockId, 10000),
     ) !void {
         const traversal_result = switch (rule.direction) {
             .outgoing => try self.query_engine.traverse_outgoing(node_id, 1),
@@ -373,8 +373,8 @@ pub const ContextEngine = struct {
     /// Phase 3: Package results with comprehensive validation
     fn package_results(self: *ContextEngine, context: *QueryExecutionContext) !ContextResult {
         var result = ContextResult{
-            .blocks = BoundedArrayType(*const ContextBlock, 10000){},
-            .edges = BoundedArrayType(ContextResult.ContextEdge, 40000){},
+            .blocks = bounded_array_type(*const ContextBlock, 10000){},
+            .edges = bounded_array_type(ContextResult.ContextEdge, 40000){},
             .metrics = ContextResult.ExecutionMetrics.init(),
             .workspace = context.query.workspace,
         };
@@ -509,7 +509,7 @@ test "QueryExecutionContext timeout checking" {
 test "ResolvedAnchor bounded collections" {
     var resolved = ContextEngine.ResolvedAnchor{
         .original = QueryAnchor{ .block_id = BlockId.from_bytes([_]u8{0} ** 16) },
-        .resolved_blocks = BoundedArrayType(BlockId, 16){},
+        .resolved_blocks = bounded_array_type(BlockId, 16){},
         .resolution_time_us = 0,
     };
 

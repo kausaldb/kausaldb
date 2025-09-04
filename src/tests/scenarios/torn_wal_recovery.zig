@@ -26,7 +26,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
+const bounded_array_type = bounded_mod.bounded_array_type;
 
 const ContextQuery = context_query_mod.ContextQuery;
 const ContextResult = context_query_mod.ContextResult;
@@ -48,9 +48,9 @@ pub const TornWALHarness = struct {
     storage_engine: *StorageEngine,
 
     /// Blocks that should survive WAL recovery
-    durable_blocks: BoundedArrayType(ContextBlock, 50),
+    durable_blocks: bounded_array_type(ContextBlock, 50),
     /// Blocks that should be lost due to torn writes
-    volatile_blocks: BoundedArrayType(ContextBlock, 50),
+    volatile_blocks: bounded_array_type(ContextBlock, 50),
     recovery_seed: u64,
 
     const Self = @This();
@@ -73,8 +73,8 @@ pub const TornWALHarness = struct {
             .allocator = allocator,
             .hostile_vfs = hostile_vfs,
             .storage_engine = storage_engine,
-            .durable_blocks = BoundedArrayType(ContextBlock, 50){},
-            .volatile_blocks = BoundedArrayType(ContextBlock, 50){},
+            .durable_blocks = bounded_array_type(ContextBlock, 50){},
+            .volatile_blocks = bounded_array_type(ContextBlock, 50){},
             .recovery_seed = seed,
         };
     }
@@ -271,6 +271,7 @@ pub const TornWALHarness = struct {
         );
 
         var hash_input: [128]u8 = undefined;
+        // Safety: Operation guaranteed to succeed by preconditions
         _ = std.fmt.bufPrint(&hash_input, "torn_wal_{s}_{s}_{}", .{ workspace, block_type, index }) catch unreachable;
 
         var hasher = std.crypto.hash.blake2.Blake2b128.init(.{});

@@ -180,8 +180,8 @@ pub const StorageEngine = struct {
 
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
-    sstable_pool: pools.ObjectPoolType(SSTable),
-    iterator_pool: pools.ObjectPoolType(StorageEngine.BlockIterator),
+    sstable_pool: pools.object_pool_type(SSTable),
+    iterator_pool: pools.object_pool_type(StorageEngine.BlockIterator),
 
     /// Initialize storage engine with default configuration.
     /// Uses Arena Coordinator Pattern to eliminate arena corruption from struct copying.
@@ -211,6 +211,7 @@ pub const StorageEngine = struct {
         storage_config: Config,
     ) !StorageEngine {
         assert_mod.assert_not_empty(data_dir, "Storage data_dir cannot be empty", .{});
+        // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(data_dir.ptr) != 0, "Storage data_dir has null pointer", .{});
 
         storage_config.validate() catch |err| {
@@ -233,7 +234,7 @@ pub const StorageEngine = struct {
         // Pool sizes chosen based on typical usage patterns:
         // - SSTable pool: 16 objects (handles concurrent reads + compaction)
         // - Iterator pool: 32 objects (query parallelism + background operations)
-        const sstable_pool = pools.ObjectPoolType(SSTable).init(allocator, 16) catch |err| {
+        const sstable_pool = pools.object_pool_type(SSTable).init(allocator, 16) catch |err| {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
@@ -243,7 +244,7 @@ pub const StorageEngine = struct {
             return err;
         };
 
-        const iterator_pool = pools.ObjectPoolType(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
+        const iterator_pool = pools.object_pool_type(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
@@ -295,6 +296,7 @@ pub const StorageEngine = struct {
             self.arena_coordinator.validate_coordinator();
 
             // Ensure coordinator points to our heap-allocated storage arena
+            // Safety: Converting pointers to integers for arena reference validation
             fatal_assert(@intFromPtr(self.arena_coordinator.arena) == @intFromPtr(self.storage_arena), "ArenaCoordinator does not reference StorageEngine arena - coordinator corruption", .{});
 
             // Note: Direct arena reference validation would require more complex
@@ -349,6 +351,7 @@ pub const StorageEngine = struct {
     /// Must be called to prevent memory leaks and ensure proper cleanup.
     pub fn deinit(self: *StorageEngine) void {
         concurrency.assert_main_thread();
+        // Safety: Converting pointer to integer for memory corruption detection
         fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
 
         // Prevent double-free by checking if data_dir is already freed
@@ -391,6 +394,7 @@ pub const StorageEngine = struct {
     /// Coordinate memtable flush operation without containing business logic.
     /// Pure delegation to subsystems for flush orchestration.
     fn coordinate_memtable_flush(self: *StorageEngine) !void {
+        // Safety: Converting pointer to integer for subsystem corruption detection
         assert_mod.assert_fmt(@intFromPtr(&self.sstable_manager) != 0, "SSTableManager corrupted before flush", .{});
 
         const command = FlushMemtableCommand{ .storage_engine = self };
@@ -424,6 +428,7 @@ pub const StorageEngine = struct {
 
         // System clock can go backwards due to NTP adjustments or high-frequency operations.
         // In such cases, record a minimal duration (1ns) to maintain metric consistency.
+        // Safety: Time difference is always non-negative and fits in u64 range
         const write_duration: u64 = if (end_time >= start_time)
             @as(u64, @intCast(end_time - start_time))
         else
@@ -647,7 +652,7 @@ pub const StorageEngine = struct {
         self: *StorageEngine,
         block_id: BlockId,
         comptime owner: BlockOwnership,
-    ) !?ownership.ComptimeOwnedBlockType(owner) {
+    ) !?ownership.comptime_owned_block_type(owner) {
         concurrency.assert_main_thread();
         // Hot path optimizations: minimal validation, direct access
         if (comptime builtin.mode == .Debug) {
@@ -661,14 +666,14 @@ pub const StorageEngine = struct {
 
         // Fast path: check memtable first (most recent data)
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return ownership.ComptimeOwnedBlockType(owner).init(block_ptr.*);
+            return ownership.comptime_owned_block_type(owner).init(block_ptr.*);
         }
 
         // Slower path: check SSTables with zero-copy optimization
         if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
             // Convert to owned block only when ownership transfer is required
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return ownership.ComptimeOwnedBlockType(owner).init(owned_context_block);
+            return ownership.comptime_owned_block_type(owner).init(owned_context_block);
         }
 
         return null;

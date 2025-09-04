@@ -19,6 +19,8 @@ const fatal_assert = assert_mod.fatal_assert;
 
 const FileState = state_machines.FileState;
 
+const log = std.log.scoped(.file_handle);
+
 /// Unique identifier for file handles with type safety.
 /// Prevents mixing handles from different VFS implementations.
 pub const FileHandleId = struct {
@@ -125,7 +127,7 @@ pub const TypedFileHandle = struct {
         const to_read = @min(buffer.len, available);
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Reading {} bytes from {s} at position {} (available: {})", .{ to_read, self.path, self.position, available });
+            log.debug("Reading {} bytes from {s} at position {} (available: {})", .{ to_read, self.path, self.position, available });
         }
 
         self.position += to_read;
@@ -139,7 +141,7 @@ pub const TypedFileHandle = struct {
         if (data.len == 0) return error.EmptyData;
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Writing {} bytes to {s} at position {}", .{ data.len, self.path, self.position });
+            log.debug("Writing {} bytes to {s} at position {}", .{ data.len, self.path, self.position });
         }
 
         self.position += data.len;
@@ -159,7 +161,7 @@ pub const TypedFileHandle = struct {
         self.position = offset;
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Seeked to position {} in {s}", .{ offset, self.path });
+            log.debug("Seeked to position {} in {s}", .{ offset, self.path });
         }
     }
 
@@ -169,14 +171,14 @@ pub const TypedFileHandle = struct {
         if (!self.access_mode.can_write()) return error.ReadOnlyFile;
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Syncing file {s} (size: {})", .{ self.path, self.file_size });
+            log.debug("Syncing file {s} (size: {})", .{ self.path, self.file_size });
         }
     }
 
     /// Close file and transition to closed state.
     pub fn close(self: *TypedFileHandle) void {
         if (builtin.mode == .Debug) {
-            std.log.debug("Closing file {s} (final size: {})", .{ self.path, self.file_size });
+            log.debug("Closing file {s} (final size: {})", .{ self.path, self.file_size });
         }
 
         self.state.transition(.closed);
@@ -278,7 +280,7 @@ pub const FileHandleRegistry = struct {
         }
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Registered file handle {} for {s} (mode: {any})", .{ handle_id.id, path, access_mode });
+            log.debug("Registered file handle {} for {s} (mode: {any})", .{ handle_id.id, path, access_mode });
         }
 
         return handle_id;
@@ -304,7 +306,7 @@ pub const FileHandleRegistry = struct {
             _ = self.handles.remove(handle_id);
 
             if (builtin.mode == .Debug) {
-                std.log.debug("Closed and removed file handle {}", .{handle_id.id});
+                log.debug("Closed and removed file handle {}", .{handle_id.id});
             }
 
             return true;
@@ -322,7 +324,7 @@ pub const FileHandleRegistry = struct {
         self.handles.clearAndFree();
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Closed all file handles", .{});
+            log.debug("Closed all file handles", .{});
         }
     }
 
@@ -409,7 +411,7 @@ pub const FileOperations = struct {
         const handle_id = try self.registry.register_handle(path, access_mode);
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Opened file {s} with mode {any} (handle: {})", .{ path, access_mode, handle_id.id });
+            log.debug("Opened file {s} with mode {any} (handle: {})", .{ path, access_mode, handle_id.id });
         }
 
         return handle_id;

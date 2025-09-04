@@ -44,8 +44,8 @@ comptime {
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
     _ = @import("tests/query/algorithms_edge_cases.zig");
     _ = @import("tests/query/complex_workloads.zig");
-    // TODO: Query accuracy tests provide unique valuable coverage but have complex compilation issues
-    // due to API changes (parse_file_to_blocks signature, BlockId.from_u32 -> from_hex, etc.)
+    // Query accuracy tests disabled due to API compatibility issues
+    // (parse_file_to_blocks signature changes, BlockId.from_u32 -> from_hex, etc.)
     // Basic find_by_name functionality IS tested in workspace tests
     // _ = @import("tests/query/find_by_name_accuracy_test.zig");
     // _ = @import("tests/query/storage_iterator_deduplication_test.zig");

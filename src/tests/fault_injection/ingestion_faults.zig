@@ -11,8 +11,6 @@
 
 const std = @import("std");
 
-// TODO: Convert to relative imports
-
 const testing = std.testing;
 
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");

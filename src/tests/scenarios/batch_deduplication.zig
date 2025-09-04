@@ -26,7 +26,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
+const bounded_array_type = bounded_mod.bounded_array_type;
 
 const BatchWriter = batch_writer_mod.BatchWriter;
 const BatchConfig = batch_writer_mod.BatchConfig;
@@ -49,10 +49,10 @@ pub const BatchDeduplicationHarness = struct {
     batch_writer: *BatchWriter,
 
     /// Test batches with known duplicate patterns
-    test_batches: BoundedArrayType(TestBatch, 16),
+    test_batches: bounded_array_type(TestBatch, 16),
 
     const TestBatch = struct {
-        blocks: BoundedArrayType(ContextBlock, 1000),
+        blocks: bounded_array_type(ContextBlock, 1000),
         workspace: []const u8,
         expected_duplicates: u32,
         expected_written: u32,
@@ -92,7 +92,7 @@ pub const BatchDeduplicationHarness = struct {
             .hostile_vfs = hostile_vfs,
             .storage_engine = storage_engine,
             .batch_writer = batch_writer,
-            .test_batches = BoundedArrayType(TestBatch, 16){},
+            .test_batches = bounded_array_type(TestBatch, 16){},
         };
     }
 
@@ -127,7 +127,7 @@ pub const BatchDeduplicationHarness = struct {
         fatal_assert(duplicate_percentage <= 100, "Invalid duplicate percentage: {}", .{duplicate_percentage});
 
         var batch = TestBatch{
-            .blocks = BoundedArrayType(ContextBlock, 1000){},
+            .blocks = bounded_array_type(ContextBlock, 1000){},
             .workspace = workspace,
             .expected_duplicates = (total_blocks * duplicate_percentage) / 100,
             .expected_written = total_blocks - ((total_blocks * duplicate_percentage) / 100),
@@ -188,7 +188,7 @@ pub const BatchDeduplicationHarness = struct {
         fatal_assert(conflict_percentage <= 100, "Invalid conflict percentage: {}", .{conflict_percentage});
 
         var batch = TestBatch{
-            .blocks = BoundedArrayType(ContextBlock, 1000){},
+            .blocks = bounded_array_type(ContextBlock, 1000){},
             .workspace = workspace,
             .expected_duplicates = 0, // No exact duplicates, but version conflicts
             .expected_written = block_count, // All blocks should be processed
@@ -355,6 +355,7 @@ pub const BatchDeduplicationHarness = struct {
     fn generate_deterministic_block_id(self: *BatchDeduplicationHarness, index: u32, workspace: []const u8) BlockId {
         _ = self;
         var hash_input: [128]u8 = undefined;
+        // Safety: Operation guaranteed to succeed by preconditions
         _ = std.fmt.bufPrint(&hash_input, "batch_dedup_{s}_{}", .{ workspace, index }) catch unreachable;
 
         var hasher = std.crypto.hash.blake2.Blake2b128.init(.{});

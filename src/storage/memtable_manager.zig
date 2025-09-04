@@ -362,6 +362,7 @@ pub const MemtableManager = struct {
 
         const recovery_callback = struct {
             fn apply(entry: WALEntry, context: *anyopaque) wal.WALError!void {
+                // Safety: Pointer cast with alignment validation
                 const ctx: *RecoveryContext = @ptrCast(@alignCast(context));
                 ctx.memtable.apply_wal_entry(entry) catch |err| switch (err) {
                     error.OutOfMemory => return wal.WALError.OutOfMemory,

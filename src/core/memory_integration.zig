@@ -22,16 +22,17 @@ const pools = @import("pools.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
+const log = std.log.scoped(.memory_integration);
 
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
-const ObjectPoolType = pools.ObjectPoolType;
+const object_pool_type = pools.object_pool_type;
 const OwnedBlock = ownership.OwnedBlock;
-const PoolManagerType = pools.PoolManagerType;
-const StackPoolType = pools.StackPoolType;
-const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
+const pool_manager_type = pools.pool_manager_type;
+const stack_pool_type = pools.stack_pool_type;
+const typed_storage_coordinator_type = memory.typed_storage_coordinator_type;
 
 /// Integrated memory management system combining all architectural improvements.
 /// Demonstrates the complete memory model working together as designed.
@@ -44,14 +45,14 @@ pub const IntegratedMemorySystem = struct {
     arena_coordinator: ArenaCoordinator,
 
     /// Object pools for high-frequency allocations (Level 1: Object Pools)
-    sstable_pool: ObjectPoolType(MockSSTable),
-    iterator_pool: ObjectPoolType(MockIterator),
+    sstable_pool: object_pool_type(MockSSTable),
+    iterator_pool: object_pool_type(MockIterator),
 
     /// Stack pool for ultra-fast temporary objects (Level 1: Stack Pools)
-    temp_buffer_pool: StackPoolType(TempBuffer, 16),
+    temp_buffer_pool: stack_pool_type(TempBuffer, 16),
 
     /// Typed storage coordinator (Type Safety)
-    storage_coordinator: TypedStorageCoordinatorType(IntegratedMemorySystem),
+    storage_coordinator: typed_storage_coordinator_type(IntegratedMemorySystem),
 
     /// Data-oriented storage demo (Level 3: Cache Optimization)
     block_metadata: BlockMetadataSOA,
@@ -203,11 +204,11 @@ pub const IntegratedMemorySystem = struct {
         /// Report allocation metrics to standard logging.
         /// Provides overview of memory system performance and cache efficiency.
         pub fn report(self: *const AllocationMetrics) void {
-            std.log.info("=== Memory System Performance Metrics ===", .{});
-            std.log.info("Pool acquisitions: {}", .{self.pool_acquisitions});
-            std.log.info("Arena allocations: {}", .{self.arena_allocations});
-            std.log.info("Zero-copy accesses: {}", .{self.zero_copy_accesses});
-            std.log.info("Cache hit ratio: {d:.2}%", .{if (self.cache_hits + self.cache_misses > 0)
+            log.info("=== Memory System Performance Metrics ===", .{});
+            log.info("Pool acquisitions: {}", .{self.pool_acquisitions});
+            log.info("Arena allocations: {}", .{self.arena_allocations});
+            log.info("Zero-copy accesses: {}", .{self.zero_copy_accesses});
+            log.info("Cache hit ratio: {d:.2}%", .{if (self.cache_hits + self.cache_misses > 0)
                 @as(f64, @floatFromInt(self.cache_hits)) / @as(f64, @floatFromInt(self.cache_hits + self.cache_misses)) * 100.0
             else
                 0.0});
@@ -224,9 +225,9 @@ pub const IntegratedMemorySystem = struct {
             .backing_allocator = backing_allocator,
             .subsystem_arena = subsystem_arena,
             .arena_coordinator = ArenaCoordinator.init(subsystem_arena),
-            .sstable_pool = try ObjectPoolType(MockSSTable).init(backing_allocator, 32),
-            .iterator_pool = try ObjectPoolType(MockIterator).init(backing_allocator, 64),
-            .temp_buffer_pool = StackPoolType(TempBuffer, 16).init(),
+            .sstable_pool = try object_pool_type(MockSSTable).init(backing_allocator, 32),
+            .iterator_pool = try object_pool_type(MockIterator).init(backing_allocator, 64),
+            .temp_buffer_pool = stack_pool_type(TempBuffer, 16).init(),
             .storage_coordinator = undefined,
             .block_metadata = BlockMetadataSOA.init(backing_allocator),
             .query_session = QuerySession.init(),
@@ -234,56 +235,57 @@ pub const IntegratedMemorySystem = struct {
         };
 
         // Note: This creates a self-reference for demonstration purposes
-        self.storage_coordinator = TypedStorageCoordinatorType(IntegratedMemorySystem).init(@ptrCast(&self));
+        // Safety: Self-reference for storage coordinator initialization
+        self.storage_coordinator = typed_storage_coordinator_type(IntegratedMemorySystem).init(@ptrCast(&self));
 
         return self;
     }
 
     /// Demonstrate the complete memory lifecycle with all patterns.
     pub fn demonstrate_memory_lifecycle(self: *Self) !void {
-        std.log.info("=== Demonstrating Integrated Memory System ===", .{});
+        log.info("=== Demonstrating Integrated Memory System ===", .{});
 
         // Object pools provide O(1) allocation for high-frequency objects
-        std.log.info("1. Object Pool Demonstration", .{});
+        log.info("1. Object Pool Demonstration", .{});
         const sstable = self.sstable_pool.acquire() orelse return error.PoolExhausted;
         sstable.* = MockSSTable.init("demo.sst");
         self.allocation_metrics.pool_acquisitions += 1;
-        std.log.info("   - Acquired SSTable from pool: {s}", .{sstable.file_path});
+        log.info("   - Acquired SSTable from pool: {s}", .{sstable.file_path});
 
         // Arena allocation enables bulk deallocation for subsystem memory
-        std.log.info("2. Arena Allocation Demonstration", .{});
+        log.info("2. Arena Allocation Demonstration", .{});
         // Simulate arena allocation without actually allocating persistent memory
         self.allocation_metrics.arena_allocations += 1;
-        std.log.info("   - Simulated 1024 bytes arena allocation", .{});
+        log.info("   - Simulated 1024 bytes arena allocation", .{});
 
         // Stack pools provide ultra-fast allocation for temporary objects
-        std.log.info("3. Stack Pool Demonstration", .{});
+        log.info("3. Stack Pool Demonstration", .{});
         const temp_buffer = self.temp_buffer_pool.acquire() orelse return error.StackExhausted;
         temp_buffer.size = 512;
-        std.log.info("   - Acquired temporary buffer of {} bytes", .{temp_buffer.size});
+        log.info("   - Acquired temporary buffer of {} bytes", .{temp_buffer.size});
 
         // SOA layout optimizes cache performance for bulk operations
-        std.log.info("4. Data-Oriented Storage Demonstration", .{});
+        log.info("4. Data-Oriented Storage Demonstration", .{});
         // Safety: Hard-coded hex string is guaranteed to be valid BlockId format
         const demo_id = BlockId.from_hex("1234567890abcdef1234567890abcdef") catch unreachable;
         try self.block_metadata.ids.append(demo_id);
         try self.block_metadata.versions.append(42);
         try self.block_metadata.sizes.append(1024);
         try self.block_metadata.timestamps.append(@as(i64, @intCast(std.time.nanoTimestamp())));
-        std.log.info("   - Added block metadata in SOA layout", .{});
+        log.info("   - Added block metadata in SOA layout", .{});
 
         // Zero-copy eliminates allocation overhead on read paths
-        std.log.info("5. Zero-Copy Access Demonstration", .{});
+        log.info("5. Zero-Copy Access Demonstration", .{});
         self.query_session.validate();
         self.allocation_metrics.zero_copy_accesses += 1;
-        std.log.info("   - Validated zero-copy query session", .{});
+        log.info("   - Validated zero-copy query session", .{});
 
         // SOA scans demonstrate cache performance benefits over AOS layouts
-        std.log.info("6. Cache-Optimal Scan Demonstration", .{});
+        log.info("6. Cache-Optimal Scan Demonstration", .{});
         const recent_blocks = try self.block_metadata.find_recent_blocks(0, self.backing_allocator);
         defer self.backing_allocator.free(recent_blocks);
         self.allocation_metrics.cache_hits += recent_blocks.len;
-        std.log.info("   - Found {} recent blocks via SOA scan", .{recent_blocks.len});
+        log.info("   - Found {} recent blocks via SOA scan", .{recent_blocks.len});
 
         // 7. Performance Metrics
         self.allocation_metrics.report();
@@ -301,7 +303,7 @@ pub const IntegratedMemorySystem = struct {
         // Reset arena to clean up demonstration allocations
         self.arena_coordinator.reset();
 
-        std.log.info("=== Demonstration Complete ===", .{});
+        log.info("=== Demonstration Complete ===", .{});
     }
 
     /// Benchmark the performance benefits of the integrated system.
@@ -354,7 +356,7 @@ pub const IntegratedMemorySystem = struct {
 
     /// Reset all subsystem memory while preserving structure.
     pub fn reset_subsystems(self: *Self) void {
-        std.log.info("Resetting all subsystem memory...", .{});
+        log.info("Resetting all subsystem memory...", .{});
 
         // Reset arena through coordinator (O(1) bulk cleanup)
         self.arena_coordinator.reset();
@@ -373,7 +375,7 @@ pub const IntegratedMemorySystem = struct {
         // Reset metrics
         self.allocation_metrics = AllocationMetrics.init();
 
-        std.log.info("Subsystem reset complete - O(1) bulk cleanup", .{});
+        log.info("Subsystem reset complete - O(1) bulk cleanup", .{});
     }
 
     /// Deinitialize integrated memory system.
@@ -387,7 +389,7 @@ pub const IntegratedMemorySystem = struct {
         self.subsystem_arena.deinit();
         self.backing_allocator.destroy(self.subsystem_arena);
 
-        std.log.info("Integrated memory system deinitialized", .{});
+        log.info("Integrated memory system deinitialized", .{});
     }
 };
 
@@ -401,11 +403,11 @@ pub const PerformanceBenchmark = struct {
     /// Report benchmark results to standard logging.
     /// Displays performance metrics including throughput and latency measurements.
     pub fn report(self: *const PerformanceBenchmark) void {
-        std.log.info("=== Performance Benchmark Results ===", .{});
-        std.log.info("Operations per second: {d:.0}", .{self.operations_per_second});
-        std.log.info("Nanoseconds per operation: {}", .{self.ns_per_operation});
-        std.log.info("Memory efficiency: {d:.1}%", .{self.memory_efficiency * 100.0});
-        std.log.info("Total benchmark time: {d:.2}ms", .{@as(f64, @floatFromInt(self.total_time_ns)) / 1_000_000.0});
+        log.info("=== Performance Benchmark Results ===", .{});
+        log.info("Operations per second: {d:.0}", .{self.operations_per_second});
+        log.info("Nanoseconds per operation: {}", .{self.ns_per_operation});
+        log.info("Memory efficiency: {d:.1}%", .{self.memory_efficiency * 100.0});
+        log.info("Total benchmark time: {d:.2}ms", .{@as(f64, @floatFromInt(self.total_time_ns)) / 1_000_000.0});
     }
 };
 

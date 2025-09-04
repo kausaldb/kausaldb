@@ -25,8 +25,8 @@ const types = @import("../core/types.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const comptime_assert = assert_mod.comptime_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
-const BoundedHashMapType = bounded_mod.BoundedHashMapType;
+const bounded_array_type = bounded_mod.bounded_array_type;
+const bounded_hash_map_type = bounded_mod.bounded_hash_map_type;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -138,10 +138,10 @@ pub const BatchWriter = struct {
     batch_arena: ArenaAllocator,
 
     /// Deduplication map for current batch
-    dedup_map: BoundedHashMapType(BlockId, BatchEntry, 10000),
+    dedup_map: bounded_hash_map_type(BlockId, BatchEntry, 10000),
 
     /// Staging area for validated blocks ready for commit
-    staging_blocks: BoundedArrayType(ValidatedBlock, 10000),
+    staging_blocks: bounded_array_type(ValidatedBlock, 10000),
 
     /// Performance metrics for current batch
     current_stats: BatchStatistics,
@@ -193,8 +193,8 @@ pub const BatchWriter = struct {
             .storage_engine = storage_engine,
             .config = config,
             .batch_arena = ArenaAllocator.init(allocator),
-            .dedup_map = BoundedHashMapType(BlockId, BatchEntry, 10000){},
-            .staging_blocks = BoundedArrayType(ValidatedBlock, 10000){},
+            .dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 10000){},
+            .staging_blocks = bounded_array_type(ValidatedBlock, 10000){},
             .current_stats = BatchStatistics.init(),
             .lifetime_stats = LifetimeStatistics.init(),
         };
@@ -416,8 +416,8 @@ pub const BatchWriter = struct {
         self.batch_arena = ArenaAllocator.init(self.allocator);
 
         // Arena reset is insufficient - bounded collections need explicit reinitialization
-        self.dedup_map = BoundedHashMapType(BlockId, BatchEntry, 10000){};
-        self.staging_blocks = BoundedArrayType(ValidatedBlock, 10000){};
+        self.dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 10000){};
+        self.staging_blocks = bounded_array_type(ValidatedBlock, 10000){};
 
         // Fresh statistics prevent contamination from previous batch metrics
         self.current_stats = BatchStatistics.init();

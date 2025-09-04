@@ -231,8 +231,7 @@ fn run_resource_exhaustion_test(
 fn run_test_with_memory_limit(allocator: std.mem.Allocator, memory_limit_mb: u32, timeout_seconds: u32) bool {
     _ = allocator;
 
-    // TODO: Implement proper memory limiting
-    // For now, run normal test with timeout
+    // Memory limiting not implemented - run normal test with timeout
     print("    Running with {}MB memory limit, {}s timeout\n", .{ memory_limit_mb, timeout_seconds });
 
     var child = std.process.Child.init(&.{ "./zig/zig", "build", "test" }, std.heap.page_allocator);

@@ -121,6 +121,7 @@ pub const MemoryGuard = struct {
             var iter = self.allocations.iterator();
             while (iter.next()) |entry| {
                 const info = entry.value_ptr.*;
+                // Safety: Converting pointer to integer for debug display
                 std.debug.print("Leak #{}: {} bytes at 0x{x}\n", .{ info.id, info.size, @intFromPtr(info.ptr) });
                 print_stack_trace(&info.stack_trace);
             }
@@ -149,6 +150,7 @@ pub const MemoryGuard = struct {
     }
 
     fn alloc_debug(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        // Safety: Context guaranteed to be MemoryGuard by allocator interface
         const self: *MemoryGuard = @ptrCast(@alignCast(ctx));
 
         const alignment_bytes = alignment.toByteUnits();
@@ -165,6 +167,7 @@ pub const MemoryGuard = struct {
         // Canary values enable immediate detection of heap corruption.
         // Industry-standard values (DEADBEEF) are easily recognizable in crash dumps.
         // Header placed before user data to catch negative buffer overflows
+        // Safety: Raw pointer from allocator, aligned for AllocationHeader
         const header: *AllocationHeader = @ptrCast(@alignCast(raw_ptr));
         header.* = .{
             .canary_before = CANARY_BEFORE,
@@ -182,6 +185,7 @@ pub const MemoryGuard = struct {
         const user_ptr = raw_ptr + header_size;
         // Ensure footer is properly aligned for u64 field
         const footer_ptr = user_ptr + footer_offset;
+        // Safety: Footer positioned after user buffer with calculated alignment
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.* = .{
             .canary_after = CANARY_AFTER,
@@ -202,13 +206,17 @@ pub const MemoryGuard = struct {
         // Get header and validate
         const alignment_bytes = alignment.toByteUnits();
         const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment_bytes);
+        // Safety: Header positioned before user buffer with known offset and alignment
         const header_ptr = @as([*]u8, @ptrCast(buf.ptr)) - header_size;
+        // Safety: Header pointer validated and aligned for AllocationHeader
         const header: *AllocationHeader = @ptrCast(@alignCast(header_ptr));
         header.validate();
 
         // Validate footer at aligned position
         const footer_offset = std.mem.alignForward(usize, buf.len, @alignOf(AllocationFooter));
+        // Safety: Footer positioned after buffer with calculated offset and alignment
         const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + footer_offset;
+        // Safety: Footer pointer validated and aligned for AllocationFooter
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.validate();
 
@@ -231,6 +239,7 @@ pub const MemoryGuard = struct {
     }
 
     fn free_debug(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        // Safety: Context guaranteed to be MemoryGuard by allocator interface
         const self: *MemoryGuard = @ptrCast(@alignCast(ctx));
 
         if (buf.len == 0) return;
@@ -238,13 +247,17 @@ pub const MemoryGuard = struct {
         // Get header and validate
         const alignment_bytes = alignment.toByteUnits();
         const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment_bytes);
+        // Safety: Header positioned before user buffer with known offset and alignment
         const header_ptr = @as([*]u8, @ptrCast(buf.ptr)) - header_size;
+        // Safety: Header pointer validated and aligned for AllocationHeader
         const header: *AllocationHeader = @ptrCast(@alignCast(header_ptr));
         header.validate();
 
         // Validate footer at aligned position
         const footer_offset = std.mem.alignForward(usize, buf.len, @alignOf(AllocationFooter));
+        // Safety: Footer positioned after buffer with calculated offset and alignment
         const footer_ptr = @as([*]u8, @ptrCast(buf.ptr)) + footer_offset;
+        // Safety: Footer pointer validated and aligned for AllocationFooter
         const footer: *AllocationFooter = @ptrCast(@alignCast(footer_ptr));
         footer.validate();
 
@@ -339,6 +352,7 @@ pub const MemoryGuard = struct {
             const alignment = 8; // Assume default alignment for validation
             const header_size = std.mem.alignForward(usize, @sizeOf(AllocationHeader), alignment);
             const header_ptr = info.ptr - header_size;
+            // Safety: Header pointer calculated from tracked allocation info
             const header: *const AllocationHeader = @ptrCast(@alignCast(header_ptr));
 
             // Canary corruption indicates buffer underflow or heap metadata damage
@@ -350,6 +364,7 @@ pub const MemoryGuard = struct {
 
             // Check footer canary
             const footer_ptr = info.ptr + info.size;
+            // Safety: Footer pointer calculated from tracked allocation size
             const footer: *const AllocationFooter = @ptrCast(@alignCast(footer_ptr));
             if (footer.canary_after != CANARY_AFTER) {
                 std.debug.print("Corruption in allocation {}: buffer overflow\n", .{info.id});

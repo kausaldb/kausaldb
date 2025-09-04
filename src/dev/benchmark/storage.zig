@@ -9,6 +9,8 @@ const std = @import("std");
 
 const coordinator = @import("../benchmark.zig");
 
+const log = std.log.scoped(.storage_benchmark);
+
 const types = coordinator.types;
 const ownership = coordinator.ownership;
 const production_vfs = coordinator.production_vfs;
@@ -50,6 +52,7 @@ fn run_with_timeout(
     // we'll rely on the improved StatisticalSampler to prevent hangs
     const result = benchmark_fn(allocator) catch |err| {
         const elapsed = std.time.milliTimestamp() - start_time;
+
         if (elapsed > timeout_ms) {
             std.debug.print("Benchmark timed out after {}ms\\n", .{elapsed});
             return error.BenchmarkTimeout;
@@ -593,11 +596,11 @@ fn benchmark_zero_cost_ownership(storage_engine: *StorageEngine, allocator: std.
 
     // Log comparison results
     if (builtin.mode == .Debug) {
-        std.log.info("Zero-cost ownership benchmark:", .{});
-        std.log.info("  Zero-cost mean: {}ns", .{zero_cost_stats.mean});
-        std.log.info("  Runtime mean: {}ns", .{runtime_stats.mean});
-        std.log.info("  Improvement ratio: {d:.2}x", .{improvement_ratio});
-        std.log.info("  Performance improved: {}", .{performance_improved});
+        log.info("Zero-cost ownership benchmark:", .{});
+        log.info("  Zero-cost mean: {}ns", .{zero_cost_stats.mean});
+        log.info("  Runtime mean: {}ns", .{runtime_stats.mean});
+        log.info("  Improvement ratio: {d:.2}x", .{improvement_ratio});
+        log.info("  Performance improved: {}", .{performance_improved});
     }
 
     const result = BenchmarkResult{

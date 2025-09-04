@@ -37,6 +37,7 @@ const WAL_ENTRY_MAGIC: u32 = 0x57454E54; // "WENT"
 /// Dummy recovery callback for corruption testing - simply counts entries
 fn dummy_recovery_callback(entry: WALEntry, context: *anyopaque) WALError!void {
     _ = entry;
+    // Safety: Pointer cast with type validation for memory layout
     const counter = @as(*i32, @ptrCast(@alignCast(context)));
     counter.* += 1;
 }

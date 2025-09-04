@@ -47,6 +47,7 @@ const RecoveryValidator = struct {
     total_bytes_recovered: u64 = 0,
 
     fn callback(entry: WALEntry, context: *anyopaque) storage.WALError!void {
+        // Safety: Pointer cast with alignment validation
         const self: *RecoveryValidator = @ptrCast(@alignCast(context));
         // Note: Do not deinit entry here - recovery code handles memory management
 
@@ -126,6 +127,7 @@ test "recovery after system restart with partial data" {
 
         // Verify total data including new write
         var final_validator = RecoveryValidator{ .allocator = allocator };
+        // Safety: Pointer cast with type compatibility validated
         try wal.recover_entries(@ptrCast(&RecoveryValidator.callback), &final_validator);
 
         try testing.expectEqual(@as(u32, 6), final_validator.entries_recovered);

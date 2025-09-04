@@ -368,6 +368,7 @@ test "corruption detection overhead" {
     var tracker = CorruptionTracker.init_testing();
 
     const iterations = 10000;
+    // Safety: Operation guaranteed to succeed by preconditions
     var timer = std.time.Timer.start() catch unreachable;
 
     // Measure corruption tracking overhead

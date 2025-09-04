@@ -93,6 +93,7 @@ pub const BlockIndex = struct {
     /// Clones all string content through coordinator interface to ensure memory safety and
     /// eliminate dangling allocator references after arena resets.
     pub fn put_block(self: *BlockIndex, block: ContextBlock) !void {
+        // Safety: Converting pointer to integer for null pointer validation
         assert_fmt(@intFromPtr(self) != 0, "BlockIndex self pointer cannot be null", .{});
 
         // Skip per-operation validation to prevent performance regression
@@ -106,12 +107,15 @@ pub const BlockIndex = struct {
 
         // Catch null pointers masquerading as slices
         if (block.source_uri.len > 0) {
+            // Safety: Converting pointer to integer for null pointer validation
             assert_fmt(@intFromPtr(block.source_uri.ptr) != 0, "source_uri has null pointer with non-zero length", .{});
         }
         if (block.metadata_json.len > 0) {
+            // Safety: Converting pointer to integer for null pointer validation
             assert_fmt(@intFromPtr(block.metadata_json.ptr) != 0, "metadata_json has null pointer with non-zero length", .{});
         }
         if (block.content.len > 0) {
+            // Safety: Converting pointer to integer for null pointer validation
             assert_fmt(@intFromPtr(block.content.ptr) != 0, "content has null pointer with non-zero length", .{});
         }
 

@@ -16,6 +16,8 @@ const assert_mod = @import("assert.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 
+const log = std.log.scoped(.memory);
+
 /// Memory generation validation errors
 pub const GenerationError = error{
     /// Attempted to access memory after arena was reset
@@ -62,9 +64,9 @@ pub const ArenaCoordinator = struct {
 
     /// Allocate generation-tagged slice through coordinator for safe access validation.
     /// Returns GenerationSlice that validates generation before each access.
-    pub fn alloc_generation_slice(self: *const ArenaCoordinator, comptime T: type, n: usize) !GenerationSliceType(T) {
+    pub fn alloc_generation_slice(self: *const ArenaCoordinator, comptime T: type, n: usize) !generation_slice_type(T) {
         const memory = try self.alloc(T, n);
-        return GenerationSliceType(T){
+        return generation_slice_type(T){
             .ptr = memory.ptr,
             .len = memory.len,
             .generation = self.generation,
@@ -88,9 +90,9 @@ pub const ArenaCoordinator = struct {
         self: *const ArenaCoordinator,
         comptime T: type,
         slice: []const T,
-    ) !GenerationSliceType(T) {
+    ) !generation_slice_type(T) {
         const memory = try self.duplicate_slice(T, slice);
-        return GenerationSliceType(T){
+        return generation_slice_type(T){
             .ptr = memory.ptr,
             .len = memory.len,
             .generation = self.generation,
@@ -109,7 +111,7 @@ pub const ArenaCoordinator = struct {
     /// Prevents use-after-reset bugs by checking that the arena hasn't been reset
     /// since the slice was allocated. Provides safe access methods that fail
     /// gracefully if the underlying memory has been invalidated.
-    pub fn GenerationSliceType(comptime T: type) type {
+    pub fn generation_slice_type(comptime T: type) type {
         return struct {
             ptr: [*]T,
             len: usize,
@@ -165,6 +167,7 @@ pub const ArenaCoordinator = struct {
     /// Zero runtime overhead in release builds through comptime evaluation.
     pub fn validate_coordinator(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
+            // Safety: Converting pointer to integer for null pointer validation
             fatal_assert(@intFromPtr(self.arena) != 0, "ArenaCoordinator arena pointer is null - coordinator corruption", .{});
         }
     }
@@ -174,6 +177,7 @@ pub const ArenaCoordinator = struct {
     pub fn debug_info(self: *const ArenaCoordinator) ArenaCoordinatorDebugInfo {
         if (comptime builtin.mode == .Debug) {
             return ArenaCoordinatorDebugInfo{
+                // Safety: Converting pointers to integers for debug information display
                 .arena_address = @intFromPtr(self.arena),
                 .coordinator_address = @intFromPtr(self),
                 .is_valid = @intFromPtr(self.arena) != 0,
@@ -196,6 +200,7 @@ pub const ArenaCoordinator = struct {
     pub fn validate_arena_lifetime(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
             // Basic pointer validation
+            // Safety: Converting pointers to integers for null pointer validation
             fatal_assert(@intFromPtr(self) != 0, "ArenaCoordinator self pointer is null", .{});
             fatal_assert(@intFromPtr(self.arena) != 0, "ArenaCoordinator arena pointer is null", .{});
 
@@ -218,7 +223,7 @@ pub const ArenaCoordinator = struct {
         if (comptime builtin.mode == .Debug) {
             // Log allocation patterns for performance analysis
             if (size > 4096) {
-                std.log.debug("Large allocation via coordinator: {} bytes for {s}", .{ size, type_name });
+                log.debug("Large allocation via coordinator: {} bytes for {s}", .{ size, type_name });
             }
         }
     }
@@ -227,7 +232,7 @@ pub const ArenaCoordinator = struct {
 /// Type-safe storage coordinator interface template.
 /// Replaces *anyopaque patterns with compile-time validated subsystem interactions.
 /// Provides minimal interface for storage operations while maintaining clear dependencies.
-pub fn TypedStorageCoordinatorType(comptime StorageEngineType: type) type {
+pub fn typed_storage_coordinator_type(comptime StorageEngineType: type) type {
     return struct {
         const Self = @This();
 
@@ -266,7 +271,7 @@ pub fn TypedStorageCoordinatorType(comptime StorageEngineType: type) type {
 }
 
 /// Legacy StorageCoordinator for backward compatibility.
-/// Use TypedStorageCoordinatorType for new code to get full type safety.
+/// Use typed_storage_coordinator_type for new code to get full type safety.
 pub const StorageCoordinator = struct {
     storage_engine: *anyopaque, // StorageEngine type resolved at usage site
 
@@ -274,12 +279,13 @@ pub const StorageCoordinator = struct {
     /// Storage engine must outlive all coordinators.
     pub fn init(storage_engine: anytype) StorageCoordinator {
         return StorageCoordinator{
+            // Safety: Storage engine pointer cast for generic interface
             .storage_engine = @ptrCast(storage_engine),
         };
     }
 
     /// Duplicate storage content with runtime type resolution.
-    /// Less efficient than TypedStorageCoordinatorType but maintains compatibility.
+    /// Less efficient than typed_storage_coordinator_type but maintains compatibility.
     pub fn duplicate_storage_content(self: StorageCoordinator, comptime T: type, slice: []const T) ![]T {
         // This requires storage engine to have a standard allocator() method
         const storage_ptr: *anyopaque = self.storage_engine;
@@ -359,13 +365,13 @@ pub const ArenaAllocationTracker = struct {
     /// Logs total allocations, peak memory usage, and detects potential leaks.
     pub fn report_statistics(self: *const ArenaAllocationTracker) void {
         if (comptime builtin.mode == .Debug) {
-            std.log.info("Arena Allocation Statistics:", .{});
-            std.log.info("  Total allocations: {}", .{self.total_allocations});
-            std.log.info("  Peak memory: {} bytes", .{self.peak_memory});
-            std.log.info("  Current memory: {} bytes", .{self.current_memory});
+            log.info("Arena Allocation Statistics:", .{});
+            log.info("  Total allocations: {}", .{self.total_allocations});
+            log.info("  Peak memory: {} bytes", .{self.peak_memory});
+            log.info("  Current memory: {} bytes", .{self.current_memory});
 
             if (self.current_memory > 0) {
-                std.log.warn("Potential arena leaks: {} bytes still allocated", .{self.current_memory});
+                log.warn("Potential arena leaks: {} bytes still allocated", .{self.current_memory});
             }
         }
     }

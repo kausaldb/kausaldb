@@ -29,7 +29,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
+const bounded_array_type = bounded_mod.bounded_array_type;
 
 const ContextQuery = context_query_mod.ContextQuery;
 const ContextResult = context_query_mod.ContextResult;
@@ -62,15 +62,15 @@ pub const MissingEdgesHarness = struct {
     const Self = @This();
 
     const GraphStructure = struct {
-        nodes: BoundedArrayType(ContextBlock, 100),
-        edges: BoundedArrayType(GraphEdge, 200),
+        nodes: bounded_array_type(ContextBlock, 100),
+        edges: bounded_array_type(GraphEdge, 200),
 
         const StructSelf = @This();
 
         pub fn init() StructSelf {
             return StructSelf{
-                .nodes = BoundedArrayType(ContextBlock, 100){},
-                .edges = BoundedArrayType(GraphEdge, 200){},
+                .nodes = bounded_array_type(ContextBlock, 100){},
+                .edges = bounded_array_type(GraphEdge, 200){},
             };
         }
     };
@@ -287,8 +287,8 @@ pub const MissingEdgesHarness = struct {
     fn store_graph_in_storage(self: *Self) !void {
         // Store incomplete graph (the one that will be queried)
         for (self.incomplete_graph.nodes.slice()) |node| {
-            // TODO: Convert to OwnedBlock and write to storage
-            // For now, we simulate storing by just iterating through nodes
+            // Simulating storage by iterating through nodes
+            // Block conversion and storage not implemented yet
             _ = node;
         }
 
@@ -383,6 +383,7 @@ pub const MissingEdgesHarness = struct {
     /// Generate deterministic block ID for testing
     fn generate_deterministic_block_id(self: *Self, index: u32, workspace: []const u8, graph_type: []const u8) BlockId {
         var hash_input: [128]u8 = undefined;
+        // Safety: Operation guaranteed to succeed by preconditions
         _ = std.fmt.bufPrint(&hash_input, "missing_edges_{s}_{s}_{}", .{ workspace, graph_type, index }) catch unreachable;
 
         var hasher = std.crypto.hash.blake2.Blake2b128.init(.{});

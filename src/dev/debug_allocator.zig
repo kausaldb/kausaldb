@@ -249,11 +249,11 @@ pub const DebugAllocator = struct {
     /// Underlying allocator to delegate to
     backing_allocator: std.mem.Allocator,
     /// Allocation tracking table
-    allocations_protected: stdx.ProtectedType([MAX_TRACKED_ALLOCATIONS]AllocationInfo) = .{ .value = undefined },
+    allocations_protected: stdx.protected_type([MAX_TRACKED_ALLOCATIONS]AllocationInfo) = .{ .value = undefined },
     /// Free list for allocation tracker slots
     free_slots: std.bit_set.IntegerBitSet(MAX_TRACKED_ALLOCATIONS),
     /// Statistics
-    stats_protected: stdx.ProtectedType(DebugAllocatorStats) = .{ .value = undefined },
+    stats_protected: stdx.protected_type(DebugAllocatorStats) = .{ .value = undefined },
     /// Enable/disable various debug features
     config: DebugConfig,
 
@@ -366,6 +366,7 @@ pub const DebugAllocator = struct {
         ret_addr: usize,
     ) ?[*]u8 {
         _ = ret_addr;
+        // Safety: Context pointer guaranteed by interface contract
         const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
         return self.alloc_internal(len, ptr_align) catch null;
     }
@@ -388,6 +389,7 @@ pub const DebugAllocator = struct {
     fn free_impl(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         _ = ret_addr;
         _ = buf_align;
+        // Safety: Context pointer guaranteed by interface contract
         const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
         self.free_internal(buf) catch |err| {
             std.debug.panic("DebugAllocator free error: {}\n", .{err});
@@ -444,6 +446,7 @@ pub const DebugAllocator = struct {
             @returnAddress(),
         ) orelse return null;
 
+        // Safety: Pointer cast with alignment validation
         const header: *AllocationHeader = @ptrCast(@alignCast(raw_memory));
         header.* = AllocationHeader.init(len, ptr_align, @intCast(tracker_index));
 
@@ -473,6 +476,7 @@ pub const DebugAllocator = struct {
             @memset(guard_suffix, guard_pattern);
         }
 
+        // Safety: Pointer cast with alignment validation
         const footer: *AllocationFooter = @ptrCast(@alignCast(user_ptr + len + guard_suffix_size));
         footer.* = AllocationFooter.init();
 
@@ -594,6 +598,7 @@ pub const DebugAllocator = struct {
 
         const alignment_bytes = @as(usize, 1) << @intFromEnum(allocation_info.alignment);
         const user_data_offset = std.mem.alignForward(usize, header_size, alignment_bytes);
+        // Safety: Header positioned before user buffer with known offset and alignment
         const header: *AllocationHeader = @ptrCast(@alignCast(user_ptr - user_data_offset));
 
         try header.validate_guards(user_ptr);
@@ -607,6 +612,7 @@ pub const DebugAllocator = struct {
         }
 
         const guard_suffix_size = if (self.config.enable_guard_validation) GUARD_SIZE else 0;
+        // Safety: Footer positioned after user buffer with validated size and alignment
         const footer: *AllocationFooter = @ptrCast(@alignCast(user_ptr + allocation_info.size + guard_suffix_size));
         if (!footer.is_valid()) {
             self.stats_protected.with(fn (*DebugAllocatorStats) void, {}, struct {

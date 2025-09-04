@@ -15,9 +15,10 @@ const assert_mod = @import("assert.zig");
 const stdx = @import("stdx.zig");
 
 const fatal_assert = assert_mod.fatal_assert;
+const log = std.log.scoped(.pools);
 
 /// Debug tracker for object pools with allocation monitoring and leak detection.
-fn DebugTrackerType(comptime T: type) type {
+fn debug_tracker_type(comptime T: type) type {
     return struct {
         const Self = @This();
 
@@ -59,7 +60,7 @@ fn DebugTrackerType(comptime T: type) type {
                     return;
                 }
             }
-            std.log.warn("Released object not found in tracking: {*}", .{ptr});
+            log.warn("Released object not found in tracking: {*}", .{ptr});
         }
 
         fn update_peak_usage(self: *Self, current: u32) void {
@@ -69,20 +70,20 @@ fn DebugTrackerType(comptime T: type) type {
         }
 
         fn report_statistics(self: *const Self) void {
-            std.log.info("Pool[{s}] Statistics:", .{@typeName(T)});
-            std.log.info("  Peak usage: {}", .{self.peak_usage});
-            std.log.info("  Total acquisitions: {}", .{self.total_acquisitions});
-            std.log.info("  Total releases: {}", .{self.total_releases});
-            std.log.info("  Currently allocated: {}", .{self.current_allocations.items.len});
+            log.info("Pool[{s}] Statistics:", .{@typeName(T)});
+            log.info("  Peak usage: {}", .{self.peak_usage});
+            log.info("  Total acquisitions: {}", .{self.total_acquisitions});
+            log.info("  Total releases: {}", .{self.total_releases});
+            log.info("  Currently allocated: {}", .{self.current_allocations.items.len});
 
             if (self.current_allocations.items.len > 0) {
-                std.log.warn("Potential leaks in {s} pool: {} objects", .{ @typeName(T), self.current_allocations.items.len });
+                log.warn("Potential leaks in {s} pool: {} objects", .{ @typeName(T), self.current_allocations.items.len });
             }
         }
 
         fn report_leaks_only(self: *const Self) void {
             if (self.current_allocations.items.len > 0) {
-                std.log.warn("Pool[{s}] leak detected: {} objects still allocated", .{ @typeName(T), self.current_allocations.items.len });
+                log.warn("Pool[{s}] leak detected: {} objects still allocated", .{ @typeName(T), self.current_allocations.items.len });
             }
         }
 
@@ -96,7 +97,7 @@ fn DebugTrackerType(comptime T: type) type {
 /// Generic fixed-size object pool with debug tracking.
 /// Provides O(1) allocation/deallocation for frequently used objects.
 /// Template parameter T must be the exact type stored in the pool.
-pub fn ObjectPoolType(comptime T: type) type {
+pub fn object_pool_type(comptime T: type) type {
     return struct {
         const Self = @This();
         const PoolNode = struct {
@@ -108,7 +109,7 @@ pub fn ObjectPoolType(comptime T: type) type {
         free_list: ?*PoolNode,
         total_capacity: u32,
         used_count: u32,
-        debug_tracker: if (builtin.mode == .Debug) DebugTrackerType(T) else void,
+        debug_tracker: if (builtin.mode == .Debug) debug_tracker_type(T) else void,
 
         /// Initialize object pool with pre-allocated capacity.
         /// All objects are allocated upfront to eliminate runtime allocation.
@@ -120,7 +121,7 @@ pub fn ObjectPoolType(comptime T: type) type {
                 .free_list = null,
                 .total_capacity = pool_capacity,
                 .used_count = 0,
-                .debug_tracker = if (builtin.mode == .Debug) DebugTrackerType(T).init(backing_allocator) else {},
+                .debug_tracker = if (builtin.mode == .Debug) debug_tracker_type(T).init(backing_allocator) else {},
             };
 
             try self.preallocate_nodes();
@@ -240,7 +241,7 @@ pub fn ObjectPoolType(comptime T: type) type {
 
             if (comptime builtin.mode == .Debug) {
                 if (count != self.total_capacity) {
-                    std.log.warn("Pool reset found {} nodes, expected {}", .{ count, self.total_capacity });
+                    log.warn("Pool reset found {} nodes, expected {}", .{ count, self.total_capacity });
                 }
                 self.debug_tracker.current_allocations.clearRetainingCapacity();
             }
@@ -268,7 +269,7 @@ pub fn ObjectPoolType(comptime T: type) type {
                 self.debug_tracker.report_statistics();
             }
 
-            std.log.info("Pool[{s}] State: {}/{} active ({d:.1}% utilization)", .{
+            log.info("Pool[{s}] State: {}/{} active ({d:.1}% utilization)", .{
                 @typeName(T),
                 self.used_count,
                 self.total_capacity,
@@ -280,7 +281,7 @@ pub fn ObjectPoolType(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             if (comptime builtin.mode == .Debug) {
                 if (self.used_count > 0) {
-                    std.log.warn("Pool[{s}] deinit with {} active objects - potential leaks", .{ @typeName(T), self.used_count });
+                    log.warn("Pool[{s}] deinit with {} active objects - potential leaks", .{ @typeName(T), self.used_count });
                 }
                 self.debug_tracker.deinit();
             }
@@ -298,19 +299,19 @@ pub fn ObjectPoolType(comptime T: type) type {
 
 /// Generic pool manager template for creating type-specific pool managers.
 /// Avoids circular imports by deferring type resolution to usage sites.
-pub fn PoolManagerType(comptime PoolType1: type, comptime PoolType2: type) type {
+pub fn pool_manager_type(comptime PoolType1: type, comptime PoolType2: type) type {
     return struct {
         const Self = @This();
 
-        pool1: ObjectPoolType(PoolType1),
-        pool2: ObjectPoolType(PoolType2),
+        pool1: object_pool_type(PoolType1),
+        pool2: object_pool_type(PoolType2),
         backing_allocator: std.mem.Allocator,
 
         /// Initialize pools with specified capacities.
         pub fn init(backing_allocator: std.mem.Allocator, capacity1: u32, capacity2: u32) !Self {
             return Self{
-                .pool1 = try ObjectPoolType(PoolType1).init(backing_allocator, capacity1),
-                .pool2 = try ObjectPoolType(PoolType2).init(backing_allocator, capacity2),
+                .pool1 = try object_pool_type(PoolType1).init(backing_allocator, capacity1),
+                .pool2 = try object_pool_type(PoolType2).init(backing_allocator, capacity2),
                 .backing_allocator = backing_allocator,
             };
         }
@@ -351,7 +352,7 @@ pub fn PoolManagerType(comptime PoolType1: type, comptime PoolType2: type) type 
 
 /// Fast stack-based allocator for temporary objects.
 /// Uses pre-allocated stack memory for ultra-fast allocation of small, short-lived objects.
-pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
+pub fn stack_pool_type(comptime T: type, comptime capacity: u32) type {
     return struct {
         const Self = @This();
 
@@ -431,7 +432,7 @@ pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
 const testing = std.testing;
 
 test "ObjectPool basic allocation and release" {
-    var pool = try ObjectPoolType(u64).init(testing.allocator, 4);
+    var pool = try object_pool_type(u64).init(testing.allocator, 4);
     defer pool.deinit();
 
     const item1 = pool.acquire() orelse return error.PoolExhausted;
@@ -458,7 +459,7 @@ test "ObjectPool basic allocation and release" {
 }
 
 test "ObjectPool exhaustion handling" {
-    var pool = try ObjectPoolType(u32).init(testing.allocator, 2);
+    var pool = try object_pool_type(u32).init(testing.allocator, 2);
     defer pool.deinit();
 
     const item1 = pool.acquire();
@@ -485,7 +486,7 @@ test "ObjectPool exhaustion handling" {
 }
 
 test "ObjectPool with initialization function" {
-    var pool = try ObjectPoolType(std.array_list.Managed(u8)).init(testing.allocator, 2);
+    var pool = try object_pool_type(std.array_list.Managed(u8)).init(testing.allocator, 2);
     defer pool.deinit();
 
     const init_fn = struct {
@@ -504,7 +505,7 @@ test "ObjectPool with initialization function" {
 }
 
 test "StackPool basic operations" {
-    var pool = StackPoolType(u32, 8).init();
+    var pool = stack_pool_type(u32, 8).init();
 
     const item1 = pool.acquire() orelse return error.StackExhausted;
     const item2 = pool.acquire() orelse return error.StackExhausted;
@@ -526,7 +527,7 @@ test "StackPool basic operations" {
 }
 
 test "StackPool exhaustion and reset" {
-    var pool = StackPoolType(u32, 2).init();
+    var pool = stack_pool_type(u32, 2).init();
 
     // Fill the pool
     const item1 = pool.acquire();
@@ -552,7 +553,7 @@ test "StackPool exhaustion and reset" {
 
 test "PoolManager template functionality" {
     // Test the generic pool manager template with simple types
-    const TestPoolManager = PoolManagerType(u32, u64);
+    const TestPoolManager = pool_manager_type(u32, u64);
 
     var pool_manager = try TestPoolManager.init(testing.allocator, 4, 4);
     defer pool_manager.deinit();
@@ -576,7 +577,7 @@ test "PoolManager template functionality" {
 
 test "pool performance characteristics" {
     const iterations = 1000; // Reduced to prevent pool exhaustion
-    var pool = try ObjectPoolType(u64).init(testing.allocator, 16);
+    var pool = try object_pool_type(u64).init(testing.allocator, 16);
     defer pool.deinit();
 
     // Track items to ensure they're all released

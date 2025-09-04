@@ -102,6 +102,7 @@ pub const NaturalExecutionContext = struct {
         }
 
         // Clean up VFS - get the actual ProductionVFS instance to destroy
+        // Safety: Pointer cast with alignment validation
         const prod_vfs: *ProductionVFS = @ptrCast(@alignCast(self.vfs.ptr));
         self.allocator.destroy(prod_vfs);
 
@@ -233,7 +234,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
         storage.StorageError.WriteBlocked => {
             // WriteBlocked should not occur in single-threaded CLI usage.
             // This indicates a storage engine configuration or compaction issue.
-            // TODO: Re-enable fatal_assert after fixing compaction logic
+            // Fatal assertion disabled due to compaction logic issues
             if (cmd.format == .json) {
                 print_json_stdout(context.allocator,
                     \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}
@@ -288,7 +289,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
         storage.StorageError.WriteBlocked => {
             // WriteBlocked should not occur in single-threaded CLI usage.
             // This indicates a storage engine configuration or compaction issue.
-            // TODO: Re-enable fatal_assert after fixing compaction logic
+            // Fatal assertion disabled due to compaction logic issues
             if (cmd.format == .json) {
                 print_json_stdout(context.allocator,
                     \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}

@@ -43,6 +43,7 @@ const RecoveryContext = struct {
     }
 
     fn recovery_callback(context: *anyopaque, block: ContextBlock) !void {
+        // Safety: Pointer cast with alignment validation
         const recovery_context: *RecoveryContext = @ptrCast(@alignCast(context));
         recovery_context.blocks_recovered += 1;
         // Block will be cleaned up by caller
@@ -50,12 +51,14 @@ const RecoveryContext = struct {
     }
 
     fn edge_callback(context: *anyopaque, edge: GraphEdge) !void {
+        // Safety: Pointer cast with alignment validation
         const recovery_context: *RecoveryContext = @ptrCast(@alignCast(context));
         recovery_context.edges_recovered += 1;
         _ = edge;
     }
 
     fn delete_callback(context: *anyopaque, block_id: BlockId) !void {
+        // Safety: Context pointer guaranteed by interface contract
         const recovery_context: *RecoveryContext = @ptrCast(@alignCast(context));
         recovery_context.deletes_recovered += 1;
         _ = block_id;

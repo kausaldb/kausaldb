@@ -739,6 +739,7 @@ test "WAL recovery functionality" {
 
         fn callback(entry: WALEntry, context: *anyopaque) WALError!void {
             _ = entry;
+            // Safety: Pointer cast with alignment validation
             const ctx: *@This() = @ptrCast(@alignCast(context));
             ctx.entries_recovered += 1;
         }

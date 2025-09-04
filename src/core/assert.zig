@@ -280,6 +280,7 @@ pub fn safe_copy(dest: []u8, src: []const u8, comptime operation: []const u8) vo
     fatal_assert(dest.len >= src.len, operation ++ ": destination buffer too small: {} < {} bytes", .{ dest.len, src.len });
 
     // Detect overlapping memory regions that would cause corruption
+    // Safety: Converting pointers to integers for overlap detection
     const dest_start = @intFromPtr(dest.ptr);
     const dest_end = dest_start + dest.len;
     const src_start = @intFromPtr(src.ptr);
@@ -297,6 +298,7 @@ pub fn safe_copy(dest: []u8, src: []const u8, comptime operation: []const u8) vo
 /// assert_aligned(header_buffer, 64, "SSTable header must be cache-line aligned");
 /// ```
 pub fn assert_aligned(buffer: []const u8, alignment: usize, comptime operation: []const u8) void {
+    // Safety: Converting pointer to integer for alignment check
     const addr = @intFromPtr(buffer.ptr);
     fatal_assert(addr % alignment == 0, operation ++ ": buffer not aligned to {} bytes (address: 0x{x})", .{ alignment, addr });
 }

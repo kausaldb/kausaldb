@@ -46,6 +46,7 @@ comptime {
     // _ = @import("dev/fuzz/common.zig"); // Excluded to avoid module conflicts - fuzz tests run separately
     _ = @import("dev/git_test_discovery.zig");
     _ = @import("dev/shell.zig");
+    _ = @import("dev/tidy.zig");
 
     // Ingestion modules
     _ = @import("ingestion/ingest_directory.zig");
@@ -60,6 +61,7 @@ comptime {
     _ = @import("query/context/engine.zig");
     _ = @import("query/engine.zig");
     _ = @import("query/filtering.zig");
+    _ = @import("query/traversal_simple.zig");
 
     // Server modules
     _ = @import("server/connection_manager.zig");

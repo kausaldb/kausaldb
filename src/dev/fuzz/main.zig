@@ -22,9 +22,9 @@ const FUZZ_ITERATIONS_DEFAULT = 100_000;
 const FUZZ_ITERATIONS_CONTINUOUS = std.math.maxInt(u64);
 const FUZZ_SEED_DEFAULT = 42;
 
-var global_verbose_mode = stdx.ProtectedType(bool).init(false);
+var global_verbose_mode = stdx.protected_type(bool).init(false);
 var global_validation_errors = stdx.MetricsCounter.init(0);
-var global_shutdown_requested = stdx.ProtectedType(bool).init(false);
+var global_shutdown_requested = stdx.protected_type(bool).init(false);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};

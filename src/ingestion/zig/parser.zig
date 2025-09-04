@@ -71,6 +71,7 @@ pub const ZigParser = struct {
     }
 
     fn parse_impl(ptr: *anyopaque, allocator: std.mem.Allocator, content: SourceContent) IngestionError![]ParsedUnit {
+        // Safety: Pointer guaranteed to be *Self by parser interface
         const self: *Self = @ptrCast(@alignCast(ptr));
         return try self.parse_with_patterns(allocator, content);
     }

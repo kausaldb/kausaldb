@@ -260,6 +260,7 @@ const TestRecoveryContext = struct {
 };
 
 fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALError!void {
+    // Safety: Pointer cast with alignment validation
     const test_context: *TestRecoveryContext = @ptrCast(@alignCast(context));
 
     const cloned_payload = try test_context.entries_recovered.allocator.dupe(u8, entry.payload);
@@ -275,6 +276,7 @@ fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALErr
 
 fn error_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALError!void {
     _ = entry;
+    // Safety: Pointer cast with alignment validation
     const test_context: *TestRecoveryContext = @ptrCast(@alignCast(context));
     test_context.callback_errors += 1;
     return WALError.CallbackFailed;

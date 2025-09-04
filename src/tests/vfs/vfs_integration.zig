@@ -67,6 +67,7 @@ test "vfs multiple file handle stability" {
         defer allocator.free(filename);
 
         files[i] = try test_vfs.create(filename);
+        // Safety: File data buffer sized to accommodate the format string
         _ = std.fmt.bufPrint(&file_data[i], "File {} data", .{i}) catch unreachable;
         _ = try files[i].write(&file_data[i]);
     }

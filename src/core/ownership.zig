@@ -21,6 +21,8 @@ const fatal_assert = assert_mod.fatal_assert;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 
+const log = std.log.scoped(.ownership);
+
 /// Ownership categories for subsystem memory management.
 /// Each subsystem uses a distinct ownership type to prevent accidental
 /// cross-subsystem memory access through compile-time validation.
@@ -100,7 +102,7 @@ pub const OwnedBlock = struct {
     /// Create owned block from existing block with ownership transfer.
     pub fn take_ownership(block: ContextBlock, new_ownership: BlockOwnership) OwnedBlock {
         if (builtin.mode == .Debug) {
-            std.log.debug("Taking ownership of block {any} as {s}", .{ block.id, new_ownership.name() });
+            log.debug("Taking ownership of block {any} as {s}", .{ block.id, new_ownership.name() });
         }
         return OwnedBlock{
             .block = block,
@@ -180,7 +182,7 @@ pub const OwnedBlock = struct {
         };
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Cloned block {any} from {s} to {s}", .{ self.block.id, self.ownership.name(), new_ownership.name() });
+            log.debug("Cloned block {any} from {s} to {s}", .{ self.block.id, self.ownership.name(), new_ownership.name() });
         }
 
         _ = new_arena; // Arena tracking handled separately
@@ -202,7 +204,7 @@ pub const OwnedBlock = struct {
         fatal_assert(self.state == .valid, "Attempted to transfer already-moved block {any}", .{self.block.id});
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Ownership transfer: block {any} from {s} to {s} (source invalidated)", .{ self.block.id, self.ownership.name(), new_ownership.name() });
+            log.debug("Ownership transfer: block {any} from {s} to {s} (source invalidated)", .{ self.block.id, self.ownership.name(), new_ownership.name() });
         }
 
         _ = new_arena; // Arena tracking handled separately
@@ -261,7 +263,7 @@ pub const OwnedBlock = struct {
 /// Zero-cost ownership wrapper for hot paths where ownership is known at compile time.
 /// Provides identical safety guarantees as OwnedBlock but with zero runtime overhead.
 /// Use this for performance-critical operations where ownership is compile-time constant.
-pub fn ComptimeOwnedBlockType(comptime owner: BlockOwnership) type {
+pub fn comptime_owned_block_type(comptime owner: BlockOwnership) type {
     return struct {
         const Self = @This();
 
@@ -325,11 +327,11 @@ pub fn ComptimeOwnedBlockType(comptime owner: BlockOwnership) type {
 
 /// Type aliases for common compile-time ownership patterns.
 /// Use these for zero-cost ownership in performance-critical hot paths.
-pub const StorageEngineBlock = ComptimeOwnedBlockType(.storage_engine);
-pub const MemtableBlock = ComptimeOwnedBlockType(.memtable_manager);
-pub const SSTableBlock = ComptimeOwnedBlockType(.sstable_manager);
-pub const OwnedQueryEngineBlock = ComptimeOwnedBlockType(.query_engine);
-pub const TemporaryBlock = ComptimeOwnedBlockType(.temporary);
+pub const StorageEngineBlock = comptime_owned_block_type(.storage_engine);
+pub const MemtableBlock = comptime_owned_block_type(.memtable_manager);
+pub const SSTableBlock = comptime_owned_block_type(.sstable_manager);
+pub const OwnedQueryEngineBlock = comptime_owned_block_type(.query_engine);
+pub const TemporaryBlock = comptime_owned_block_type(.temporary);
 
 /// Collection of owned blocks with batch operations.
 /// Provides type-safe batch operations while maintaining ownership tracking.
@@ -354,7 +356,7 @@ pub const OwnedBlockCollection = struct {
         try self.blocks.append(transferred);
 
         if (builtin.mode == .Debug) {
-            std.log.debug("Added block {any} to {s} collection (total: {})", .{ transferred.block.id, self.ownership.name(), self.blocks.items.len });
+            log.debug("Added block {any} to {s} collection (total: {})", .{ transferred.block.id, self.ownership.name(), self.blocks.items.len });
         }
     }
 
@@ -395,7 +397,7 @@ pub const OwnedBlockCollection = struct {
     /// Clear all blocks and free memory.
     pub fn clear(self: *OwnedBlockCollection) void {
         if (builtin.mode == .Debug) {
-            std.log.debug("Clearing {s} collection with {} blocks", .{ self.ownership.name(), self.blocks.items.len });
+            log.debug("Clearing {s} collection with {} blocks", .{ self.ownership.name(), self.blocks.items.len });
         }
 
         for (self.blocks.items) |*owned_block| {
@@ -434,7 +436,7 @@ pub const OwnershipTransfer = struct {
     /// Record ownership transfer for debugging.
     pub fn record(source: BlockOwnership, destination: BlockOwnership, block_id: BlockId) OwnershipTransfer {
         if (builtin.mode == .Debug) {
-            std.log.debug("Ownership transfer: block {any} from {s} to {s}", .{ block_id, source.name(), destination.name() });
+            log.debug("Ownership transfer: block {any} from {s} to {s}", .{ block_id, source.name(), destination.name() });
         }
 
         return OwnershipTransfer{
@@ -482,10 +484,10 @@ pub const OwnershipTracker = struct {
     pub fn track_allocation(self: *OwnershipTracker, block_id: BlockId, ownership: BlockOwnership) void {
         if (builtin.mode == .Debug) {
             self.active_blocks.put(block_id, ownership) catch |err| {
-                std.log.warn("Failed to track block allocation: {any}", .{err});
+                log.warn("Failed to track block allocation: {any}", .{err});
                 return;
             };
-            std.log.debug("Tracking allocation: block {any} owned by {s}", .{ block_id, ownership.name() });
+            log.debug("Tracking allocation: block {any} owned by {s}", .{ block_id, ownership.name() });
         }
     }
 
@@ -494,13 +496,13 @@ pub const OwnershipTracker = struct {
         if (builtin.mode == .Debug) {
             const transfer = OwnershipTransfer.record(from, to, block_id);
             self.transfers.append(transfer) catch |err| {
-                std.log.warn("Failed to track ownership transfer: {any}", .{err});
+                log.warn("Failed to track ownership transfer: {any}", .{err});
                 return;
             };
 
             // Update active tracking
             self.active_blocks.put(block_id, to) catch |err| {
-                std.log.warn("Failed to update active block tracking: {any}", .{err});
+                log.warn("Failed to update active block tracking: {any}", .{err});
                 return;
             };
         }
@@ -510,9 +512,9 @@ pub const OwnershipTracker = struct {
     pub fn track_deallocation(self: *OwnershipTracker, block_id: BlockId) void {
         if (builtin.mode == .Debug) {
             if (self.active_blocks.remove(block_id)) {
-                std.log.debug("Tracked deallocation: block {any}", .{block_id});
+                log.debug("Tracked deallocation: block {any}", .{block_id});
             } else {
-                std.log.warn("Deallocating untracked block: {any}", .{block_id});
+                log.warn("Deallocating untracked block: {any}", .{block_id});
             }
         }
     }
@@ -525,7 +527,7 @@ pub const OwnershipTracker = struct {
                     fatal_assert(false, "Ownership validation failed", .{});
                 }
             } else {
-                std.log.warn("Accessing untracked block: {any} by {s}", .{ block_id, accessor.name() });
+                log.warn("Accessing untracked block: {any} by {s}", .{ block_id, accessor.name() });
             }
         }
     }
@@ -543,9 +545,9 @@ pub const OwnershipTracker = struct {
     /// Report ownership statistics for debugging.
     pub fn report_statistics(self: *const OwnershipTracker) void {
         if (builtin.mode == .Debug) {
-            std.log.info("Ownership Statistics:", .{});
-            std.log.info("  Active blocks: {}", .{self.active_blocks.count()});
-            std.log.info("  Total transfers: {}", .{self.transfers.items.len});
+            log.info("Ownership Statistics:", .{});
+            log.info("  Active blocks: {}", .{self.active_blocks.count()});
+            log.info("  Total transfers: {}", .{self.transfers.items.len});
 
             // Group statistics by ownership for debugging memory allocation patterns
             var owner_counts = std.EnumArray(BlockOwnership, usize).initFill(0);
@@ -561,14 +563,14 @@ pub const OwnershipTracker = struct {
                 const ownership: BlockOwnership = @enumFromInt(field.value);
                 const count = owner_counts.get(ownership);
                 if (count > 0) {
-                    std.log.info("  {s}: {} blocks", .{ ownership.name(), count });
+                    log.info("  {s}: {} blocks", .{ ownership.name(), count });
                 }
             }
         }
 
         // Detect blocks that weren't properly deallocated by subsystems
         if (self.active_blocks.count() > 0) {
-            std.log.warn("Potential memory leaks: {} blocks still tracked", .{self.active_blocks.count()});
+            log.warn("Potential memory leaks: {} blocks still tracked", .{self.active_blocks.count()});
         }
     }
 

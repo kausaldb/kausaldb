@@ -113,6 +113,7 @@ test "WAL basic write and recovery" {
     const callback = struct {
         fn recover(recovered_entry: WALEntry, ctx: *anyopaque) WALError!void {
             _ = recovered_entry; // Consumed by the callback, cleaned up by recovery system
+            // Safety: Context guaranteed to be *RecoveryContext by recovery system
             const context: *RecoveryContext = @ptrCast(@alignCast(ctx));
             context.entries_recovered += 1;
         }

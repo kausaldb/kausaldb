@@ -45,7 +45,8 @@ const PerformanceResult = struct {
         try sorted_samples.ensureTotalCapacity(samples.len);
         defer sorted_samples.deinit();
 
-        sorted_samples.appendSlice(samples) catch unreachable; // Testing allocator cannot fail
+        // Safety: Testing allocator cannot fail for bounded sample collection
+        sorted_samples.appendSlice(samples) catch unreachable;
         std.mem.sort(u64, sorted_samples.items, {}, std.sort.asc(u64));
 
         const min_val = sorted_samples.items[0];

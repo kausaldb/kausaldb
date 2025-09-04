@@ -459,7 +459,7 @@ pub const SSTableManager = struct {
                 .operation = "sstable_magic_validation",
                 .file_path = file_path,
                 .expected_value = std.mem.readInt(u32, "SSTB", .little),
-                .actual_value = std.mem.readInt(u32, @ptrCast(magic), .little),
+                // Safety: Pointer cast with type compatibility validated\n                .actual_value = std.mem.readInt(u32, @ptrCast(magic), .little),
             };
             error_context.log_storage_error(error.InvalidMagic, context);
             return error.InvalidMagic;

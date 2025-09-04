@@ -17,6 +17,8 @@ const stdx = @import("stdx.zig");
 const assert_fmt = assert_mod.assert_fmt;
 const fatal_assert = assert_mod.fatal_assert;
 
+const log = std.log.scoped(.state_machines);
+
 /// File state for VFS operations with transition validation.
 /// Prevents invalid file operations by encoding valid states in the type system.
 pub const FileState = enum {
@@ -57,7 +59,7 @@ pub const FileState = enum {
             if (!self.can_transition_to(next)) {
                 fatal_assert(false, "Invalid file state transition: {} -> {}", .{ self.*, next });
             }
-            std.log.debug("File state transition: {} -> {}", .{ self.*, next });
+            log.debug("File state transition: {} -> {}", .{ self.*, next });
         } else {
             // Release builds still validate critical transitions
             fatal_assert(self.* != .deleted, "File operation on deleted file", .{});
@@ -120,7 +122,7 @@ pub const ConnectionState = enum {
             if (!self.can_transition_to(next)) {
                 fatal_assert(false, "Invalid connection state transition: {} -> {}", .{ self.*, next });
             }
-            std.log.debug("Connection state transition: {} -> {}", .{ self.*, next });
+            log.debug("Connection state transition: {} -> {}", .{ self.*, next });
         }
         self.* = next;
     }
@@ -180,7 +182,7 @@ pub const StorageState = enum {
             if (!self.can_transition_to(next)) {
                 fatal_assert(false, "Invalid storage state transition: {} -> {}", .{ self.*, next });
             }
-            std.log.debug("Storage state transition: {} -> {}", .{ self.*, next });
+            log.debug("Storage state transition: {} -> {}", .{ self.*, next });
         }
         self.* = next;
     }
@@ -228,7 +230,7 @@ pub const QueryState = enum {
             if (!self.can_transition_to(next)) {
                 fatal_assert(false, "Invalid query state transition: {} -> {}", .{ self.*, next });
             }
-            std.log.debug("Query state transition: {} -> {}", .{ self.*, next });
+            log.debug("Query state transition: {} -> {}", .{ self.*, next });
         }
         self.* = next;
     }
@@ -278,9 +280,9 @@ pub fn validate_state_machine(comptime StateEnum: type) void {
 
 /// State machine debug tracer for development builds.
 /// Tracks state transition history for debugging invalid sequences.
-pub fn StateMachineTracerType(comptime StateEnum: type) type {
+pub fn state_machine_tracer_type(comptime StateEnum: type) type {
     return struct {
-        const Tracer = StateMachineTracerType(StateEnum);
+        const Tracer = state_machine_tracer_type(StateEnum);
         history: if (builtin.mode == .Debug) [32]StateEnum else void,
         history_len: if (builtin.mode == .Debug) usize else void,
         creation_time: if (builtin.mode == .Debug) i64 else void,
@@ -306,7 +308,7 @@ pub fn StateMachineTracerType(comptime StateEnum: type) type {
                     self.history[self.history.len - 1] = to;
                 }
 
-                std.log.debug("State transition recorded: {} -> {} (history: {})", .{
+                log.debug("State transition recorded: {} -> {} (history: {})", .{
                     from,
                     to,
                     self.history_len,
@@ -318,10 +320,10 @@ pub fn StateMachineTracerType(comptime StateEnum: type) type {
         /// Outputs chronological list of state changes with indices.
         pub fn dump_history(self: *const Tracer) void {
             if (builtin.mode == .Debug) {
-                std.log.debug("State machine history ({} transitions):", .{self.history_len});
+                log.debug("State machine history ({} transitions):", .{self.history_len});
                 const count = @min(self.history_len, self.history.len);
                 for (self.history[0..count], 0..) |state, i| {
-                    std.log.debug("  {}: {}", .{ i, state });
+                    log.debug("  {}: {}", .{ i, state });
                 }
             }
         }
@@ -462,7 +464,7 @@ test "StorageState operation coordination" {
 test "state machine tracer in debug mode" {
     if (builtin.mode != .Debug) return;
 
-    var tracer = StateMachineTracerType(FileState).init();
+    var tracer = state_machine_tracer_type(FileState).init();
     var state = FileState.closed;
 
     // Record some transitions

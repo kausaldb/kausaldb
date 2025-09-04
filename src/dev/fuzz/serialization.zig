@@ -20,7 +20,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     iterations: u64,
     seed: u64,
-    verbose_mode: *stdx.ProtectedType(bool),
+    verbose_mode: *stdx.protected_type(bool),
 ) !void {
     const is_continuous = (iterations == FUZZ_ITERATIONS_CONTINUOUS);
     if (is_continuous) {

@@ -248,6 +248,7 @@ pub const SSTable = struct {
     ) SSTable {
         assert_mod.assert_not_empty(file_path, "SSTable file_path cannot be empty", .{});
         assert_mod.assert_fmt(file_path.len < 4096, "SSTable file_path too long: {} bytes", .{file_path.len});
+        // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(file_path.ptr) != 0, "SSTable file_path has null pointer", .{});
 
         return SSTable{
@@ -274,8 +275,8 @@ pub const SSTable = struct {
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
             []ContextBlock => true,
-            []const ownership.ComptimeOwnedBlockType(.sstable_manager) => true,
-            []ownership.ComptimeOwnedBlockType(.sstable_manager) => true,
+            []const ownership.comptime_owned_block_type(.sstable_manager) => true,
+            []ownership.comptime_owned_block_type(.sstable_manager) => true,
             []const OwnedBlock => true,
             []OwnedBlock => true,
             else => false,
@@ -288,14 +289,15 @@ pub const SSTable = struct {
         assert_mod.assert_fmt(blocks.len <= 1000000, "Too many blocks for single SSTable: {}", .{blocks.len});
 
         self.index.clearAndFree();
+        // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(blocks.ptr) != 0, "Blocks array has null pointer", .{});
 
         for (blocks, 0..) |block_value, i| {
             const block_data = switch (BlocksType) {
                 []const ContextBlock => block_value,
                 []ContextBlock => block_value,
-                []const ownership.ComptimeOwnedBlockType(.sstable_manager) => block_value.read(.sstable_manager),
-                []ownership.ComptimeOwnedBlockType(.sstable_manager) => block_value.read(.sstable_manager),
+                []const ownership.comptime_owned_block_type(.sstable_manager) => block_value.read(.sstable_manager),
+                []ownership.comptime_owned_block_type(.sstable_manager) => block_value.read(.sstable_manager),
                 []const OwnedBlock => block_value.read(.sstable_manager),
                 []OwnedBlock => block_value.read(.sstable_manager),
                 else => unreachable,
@@ -314,8 +316,8 @@ pub const SSTable = struct {
             context_blocks[index] = switch (BlocksType) {
                 []const ContextBlock => block_value,
                 []ContextBlock => block_value,
-                []const ownership.ComptimeOwnedBlockType(.sstable_manager) => block_value.read(.sstable_manager).*,
-                []ownership.ComptimeOwnedBlockType(.sstable_manager) => block_value.read(.sstable_manager).*,
+                []const ownership.comptime_owned_block_type(.sstable_manager) => block_value.read(.sstable_manager).*,
+                []ownership.comptime_owned_block_type(.sstable_manager) => block_value.read(.sstable_manager).*,
                 []const OwnedBlock => block_value.read(.sstable_manager).*,
                 []OwnedBlock => block_value.read(.sstable_manager).*,
                 else => unreachable,
@@ -363,6 +365,7 @@ pub const SSTable = struct {
             try self.index.append(IndexEntry{
                 .block_id = block.id,
                 .offset = current_offset,
+                // Safety: Block size is bounded by SSTable format limits and fits in u32
                 .size = @intCast(block_size),
             });
 
@@ -405,6 +408,7 @@ pub const SSTable = struct {
             .format_version = VERSION,
             .flags = 0,
             .index_offset = index_offset,
+            // Safety: Block count bounded by storage limits, timestamp always fits in u32 range
             .block_count = @intCast(context_blocks.len),
             .file_checksum = file_checksum,
             .created_timestamp = @intCast(std.time.timestamp()),
@@ -417,6 +421,7 @@ pub const SSTable = struct {
         _ = try file.write(&header_buffer);
 
         try file.flush();
+        // Safety: Block count bounded by storage format limits and fits in u32
         self.block_count = @intCast(context_blocks.len);
 
         // SUCCESS: All fallible operations completed. Now transfer ownership.
@@ -475,6 +480,7 @@ pub const SSTable = struct {
             }
         }
 
+        // Safety: Index offset is validated during header parsing and fits in seek position
         _ = try file.seek(@intCast(header.index_offset), .start);
 
         try self.index.ensureTotalCapacity(header.block_count);
@@ -491,6 +497,7 @@ pub const SSTable = struct {
         // and should only run during specific tests or startup validation
 
         if (header.bloom_filter_size > 0) {
+            // Safety: Bloom filter offset validated during header parsing
             _ = try file.seek(@intCast(header.bloom_filter_offset), .start);
 
             const bloom_buffer = try self.backing_allocator.alloc(u8, header.bloom_filter_size);
@@ -542,6 +549,7 @@ pub const SSTable = struct {
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
+        // Safety: Entry offset comes from validated SSTable index
         _ = try file.seek(@intCast(found_entry.offset), .start);
 
         const buffer = try self.arena_coordinator.alloc(u8, found_entry.size);
@@ -591,6 +599,7 @@ pub const SSTable = struct {
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
+        // Safety: Entry offset comes from validated SSTable index
         _ = try file.seek(@intCast(found_entry.offset), .start);
 
         const buffer = try self.arena_coordinator.alloc(u8, found_entry.size);
@@ -627,6 +636,7 @@ pub const SSTableIterator = struct {
     /// Initialize a new iterator for the given SSTable.
     /// The SSTable must have a loaded index with at least one entry.
     pub fn init(sstable: *SSTable) SSTableIterator {
+        // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(sstable) != 0, "SSTable pointer cannot be null", .{});
         assert_mod.assert_fmt(sstable.index.items.len > 0, "Cannot iterate over SSTable with empty index", .{});
 
@@ -645,6 +655,7 @@ pub const SSTableIterator = struct {
 
     /// Get next block from iterator, opening file if needed
     pub fn next(self: *SSTableIterator) !?SSTableBlock {
+        // Safety: Converting pointer to integer for corruption detection
         assert_mod.assert_fmt(@intFromPtr(self.sstable) != 0, "Iterator sstable pointer corrupted", .{});
         assert_mod.assert_index_valid(self.current_index, self.sstable.index.items.len + 1, "Iterator index out of bounds: {} >= {}", .{ self.current_index, self.sstable.index.items.len + 1 });
 
@@ -659,6 +670,7 @@ pub const SSTableIterator = struct {
         const entry = self.sstable.index.items[self.current_index];
         self.current_index += 1;
 
+        // Safety: Entry offset validated by SSTable index structure
         _ = try self.file.?.seek(@intCast(entry.offset), .start);
 
         const buffer = try self.sstable.arena_coordinator.alloc(u8, entry.size);
@@ -754,6 +766,7 @@ pub const Compactor = struct {
 
     /// Remove duplicate blocks, keeping the one with highest version
     fn dedup_blocks(self: *Compactor, blocks: []SSTableBlock) ![]SSTableBlock {
+        // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(blocks.ptr) != 0 or blocks.len == 0, "Blocks array has null pointer with non-zero length", .{});
 
         if (blocks.len == 0) return try self.backing_allocator.alloc(SSTableBlock, 0);

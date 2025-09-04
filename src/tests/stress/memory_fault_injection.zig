@@ -64,6 +64,7 @@ const FailingAllocator = struct {
     }
 
     fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        // Safety: Context pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ctx));
         self.total_allocations += 1;
 
@@ -76,11 +77,13 @@ const FailingAllocator = struct {
     }
 
     fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        // Safety: Context pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ctx));
         return self.backing_allocator.rawResize(buf, buf_align, new_len, ret_addr);
     }
 
     fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
+        // Safety: Context pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ctx));
         self.backing_allocator.rawFree(buf, buf_align, ret_addr);
     }

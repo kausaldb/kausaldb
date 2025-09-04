@@ -287,7 +287,7 @@ test "complex filtering and search scenarios" {
         "struct DataProcessor { fn process(self: *Self) void {} }",
         "const CONFIG = struct { timeout: u32 = 5000, retries: u8 = 3 };",
         "test \"data processing\" { try testing.expect(true); }",
-        "pub fn handleRequest(req: Request) Response { return process(req); }",
+        "pub fn handle_request(req: Request) Response { return process(req); }",
     };
 
     for (content_patterns, 0..) |pattern, idx| {

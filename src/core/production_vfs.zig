@@ -135,6 +135,7 @@ pub const ProductionVFS = struct {
     };
 
     fn open(ptr: *anyopaque, path: []const u8, mode: VFS.OpenMode) VFSError!VFile {
+        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
@@ -164,6 +165,7 @@ pub const ProductionVFS = struct {
     }
 
     fn create(ptr: *anyopaque, path: []const u8) VFSError!VFile {
+        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
@@ -418,6 +420,7 @@ pub const ProductionVFS = struct {
         _ = allocator;
 
         // Clean up arena allocator - this handles all VFile instances automatically
+        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
         self.arena.deinit();
     }

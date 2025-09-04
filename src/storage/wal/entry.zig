@@ -174,6 +174,7 @@ pub const WALEntry = struct {
         const entry = WALEntry{
             .checksum = checksum,
             .entry_type = .put_block,
+            // Safety: Payload size bounded by WAL entry limits and fits in u32
             .payload_size = @intCast(payload_size),
             .payload = payload,
         };
@@ -204,6 +205,7 @@ pub const WALEntry = struct {
         const entry = WALEntry{
             .checksum = checksum,
             .entry_type = .delete_block,
+            // Safety: Payload length bounded by serialization limits and fits in u32
             .payload_size = @intCast(payload.len),
             .payload = payload,
         };
@@ -228,6 +230,7 @@ pub const WALEntry = struct {
         return WALEntry{
             .checksum = checksum,
             .entry_type = .put_edge,
+            // Safety: Payload length bounded by serialization limits and fits in u32
             .payload_size = @intCast(payload.len),
             .payload = payload,
         };

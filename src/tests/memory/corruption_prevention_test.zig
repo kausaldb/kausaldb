@@ -22,10 +22,10 @@ const testing = std.testing;
 const validate_no_raw_pointers = arena_mod.validate_no_raw_pointers;
 const validate_ownership_usage = ownership.validate_ownership_usage;
 
-const TypedArenaType = arena_mod.TypedArenaType;
+const typed_arena_type = arena_mod.typed_arena_type;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ArenaOwnership = arena_mod.ArenaOwnership;
-const OwnedPtrType = arena_mod.OwnedPtrType;
+const owned_ptr_type = arena_mod.owned_ptr_type;
 const BlockOwnership = ownership.BlockOwnership;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedBlockCollection = ownership.OwnedBlockCollection;
@@ -36,7 +36,7 @@ const StorageState = state_machines.StorageState;
 const TypedFileHandle = file_handle.TypedFileHandle;
 const FileHandleId = file_handle.FileHandleId;
 const FileAccessMode = file_handle.FileAccessMode;
-const BoundedArrayType = bounded.BoundedArrayType;
+const bounded_array_type = bounded.bounded_array_type;
 const ContextBlock = core_types.ContextBlock;
 const BlockId = core_types.BlockId;
 
@@ -49,14 +49,15 @@ test "CORRUPTION PREVENTION: Cross-arena pointer access caught at runtime" {
     // This test simulates the bug where pointers from one arena were
     // accidentally used after another arena was reset, causing use-after-free
 
-    var memtable_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var memtable_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer memtable_arena.deinit();
 
-    var sstable_arena = TypedArenaType(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
+    var sstable_arena = typed_arena_type(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
     defer sstable_arena.deinit();
 
     // Allocate block in memtable arena
     const block = ContextBlock{
+        // Safety: Operation guaranteed to succeed by preconditions
         .id = BlockId.from_hex("DEADBEEF12345678CAFEBABE87654321") catch unreachable,
         .version = 1,
         .source_uri = "test://corruption",
@@ -123,6 +124,7 @@ test "CORRUPTION PREVENTION: Ownership violation detection in debug mode" {
     var tracker = OwnershipTracker.init(testing.allocator);
     defer tracker.deinit();
 
+    // Safety: Operation guaranteed to succeed by preconditions
     const block_id = BlockId.from_hex("BAADF00D87654321FEEDFACE12345678") catch unreachable;
 
     // Track allocation
@@ -154,7 +156,7 @@ test "CORRUPTION PREVENTION: Bounds checking prevents buffer overflows" {
     // This test demonstrates compile-time bounds checking that prevents
     // runtime buffer overflows that were common with raw arrays
 
-    var bounded_list = BoundedArrayType(u32, 3){};
+    var bounded_list = bounded_array_type(u32, 3){};
 
     // Fill to capacity
     try bounded_list.append(100);
@@ -206,7 +208,7 @@ test "CORRUPTION PREVENTION: Arena reset safety with memory accounting" {
     // This test demonstrates memory accounting that prevents the accounting
     // underflow bugs that indicated heap corruption
 
-    var test_arena = TypedArenaType(u8, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = typed_arena_type(u8, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer test_arena.deinit();
 
     // Simulate memory accounting like in BlockIndex
@@ -252,6 +254,7 @@ test "CORRUPTION PREVENTION: Type-safe ownership prevents double-free" {
     // errors that were common with manual memory management
 
     const block = ContextBlock{
+        // Safety: Operation guaranteed to succeed by preconditions
         .id = BlockId.from_hex("CAFEBABE12345678DEADBEEF87654321") catch unreachable,
         .version = 1,
         .source_uri = "test://double_free",
@@ -369,6 +372,7 @@ test "CORRUPTION PREVENTION: Fuzzing targets for ownership violations" {
     const fuzz_data = [_]u8{ 0x42, 0xFF, 0x00, 0x13, 0x37 };
 
     for (fuzz_data, 0..) |byte, i| {
+        // Safety: Operation guaranteed to succeed by preconditions
         const block_id = BlockId.from_hex("FADE000000000000000000000000000F") catch unreachable;
 
         // Fuzz ownership assignment
@@ -402,19 +406,20 @@ test "CORRUPTION PREVENTION: Memory safety integration test" {
     // have been vulnerable to corruption in the old system
 
     // Set up multiple subsystems with type-safe arenas
-    var memtable_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var memtable_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer memtable_arena.deinit();
 
-    var sstable_arena = TypedArenaType(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
+    var sstable_arena = typed_arena_type(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
     defer sstable_arena.deinit();
 
-    var query_arena = TypedArenaType(u32, QuerySubsystem).init(testing.allocator, .query_engine);
+    var query_arena = typed_arena_type(u32, QuerySubsystem).init(testing.allocator, .query_engine);
     defer query_arena.deinit();
 
     // Create test blocks
     // Create test blocks that simulate different ownership scenarios
     const blocks = [_]ContextBlock{
         ContextBlock{
+            // Safety: Operation guaranteed to succeed by preconditions
             .id = BlockId.from_hex("1111111111111111AAAAAAAAAAAAAAAA") catch unreachable,
             .version = 1,
             .source_uri = "test://block1",
@@ -422,6 +427,7 @@ test "CORRUPTION PREVENTION: Memory safety integration test" {
             .content = "block 1 content",
         },
         ContextBlock{
+            // Safety: Operation guaranteed to succeed by preconditions
             .id = BlockId.from_hex("2222222222222222BBBBBBBBBBBBBBBB") catch unreachable,
             .version = 1,
             .source_uri = "test://block2",

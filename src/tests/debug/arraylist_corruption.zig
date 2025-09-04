@@ -18,6 +18,8 @@ const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
+const log = std.log.scoped(.debug_corruption);
+
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -29,32 +31,33 @@ const TestData = test_harness.TestData;
 fn validate_path_integrity(manager: *SSTableManager, context: []const u8) !void {
     for (manager.sstable_paths.items, 0..) |path, i| {
         // Check for null pointer corruption
+        // Safety: Converting pointer to integer for null pointer detection
         if (@intFromPtr(path.ptr) == 0 and path.len > 0) {
-            std.log.err("CORRUPTION in {s}: Path[{}] null pointer, len={}", .{ context, i, path.len });
+            log.err("CORRUPTION in {s}: Path[{}] null pointer, len={}", .{ context, i, path.len });
             return error.PathCorrupted;
         }
 
         // Check for suspicious length values
         if (path.len > 4096) {
-            std.log.err("CORRUPTION in {s}: Path[{}] suspicious length {}", .{ context, i, path.len });
+            log.err("CORRUPTION in {s}: Path[{}] suspicious length {}", .{ context, i, path.len });
             return error.PathCorrupted;
         }
 
         // Check for Unicode replacement characters (buffer overflow indicator)
         if (std.mem.indexOf(u8, path, "���") != null) {
-            std.log.err("CORRUPTION in {s}: Path[{}] has replacement chars: '{s}'", .{ context, i, path });
+            log.err("CORRUPTION in {s}: Path[{}] has replacement chars: '{s}'", .{ context, i, path });
             return error.PathCorrupted;
         }
 
         // Check for 0xAA poison bytes (memory corruption pattern)
         for (path) |byte| {
             if (byte == 0xAA or byte == 0xBB or byte == 0xCC) {
-                std.log.err("CORRUPTION in {s}: Path[{}] poison byte 0x{X}: '{s}'", .{ context, i, byte, path });
+                log.err("CORRUPTION in {s}: Path[{}] poison byte 0x{X}: '{s}'", .{ context, i, byte, path });
                 return error.PathCorrupted;
             }
         }
 
-        std.log.debug("Path[{}] OK: '{s}' (len={})", .{ i, path, path.len });
+        log.debug("Path[{}] OK: '{s}' (len={})", .{ i, path, path.len });
     }
 }
 
@@ -96,10 +99,10 @@ test "sstable discovery arraylist corruption detection" {
         const padding = [_]u8{0} ** (64 - header_data.len);
         _ = try file.write(padding[0..]);
 
-        std.log.debug("Created SSTable file: {s}", .{filename});
+        log.debug("Created SSTable file: {s}", .{filename});
     }
 
-    std.log.info("=== TESTING ARRAYLIST CORRUPTION DURING DISCOVERY ===", .{});
+    log.info("=== TESTING ARRAYLIST CORRUPTION DURING DISCOVERY ===", .{});
 
     var test_arena = std.heap.ArenaAllocator.init(allocator);
     defer test_arena.deinit();
@@ -111,25 +114,25 @@ test "sstable discovery arraylist corruption detection" {
     try validate_path_integrity(&manager, "initial state");
     try testing.expectEqual(@as(usize, 0), manager.sstable_paths.items.len);
 
-    std.log.info("Starting discovery process that will populate ArrayList...", .{});
+    log.info("Starting discovery process that will populate ArrayList...", .{});
 
     // This triggers discover_existing_sstables() which adds paths to ArrayList
     try manager.startup();
 
-    std.log.info("Discovery completed, validating path integrity...", .{});
+    log.info("Discovery completed, validating path integrity...", .{});
 
     // Validate that all discovered paths are uncorrupted
     try validate_path_integrity(&manager, "after discovery");
 
     // Log the results
-    std.log.info("Discovered {} SSTable paths", .{manager.sstable_paths.items.len});
+    log.info("Discovered {} SSTable paths", .{manager.sstable_paths.items.len});
     for (manager.sstable_paths.items, 0..) |path, idx| {
-        std.log.info("Path[{}]: '{s}'", .{ idx, path });
+        log.info("Path[{}]: '{s}'", .{ idx, path });
     }
 
     try testing.expectEqual(@as(usize, 10), manager.sstable_paths.items.len);
 
-    std.log.info("=== DISCOVERY ARRAYLIST CORRUPTION TEST PASSED ===", .{});
+    log.info("=== DISCOVERY ARRAYLIST CORRUPTION TEST PASSED ===", .{});
 }
 
 test "sstable discovery with large path names" {
@@ -173,10 +176,10 @@ test "sstable discovery with large path names" {
         const padding = [_]u8{0} ** (64 - header_data.len);
         _ = try file.write(padding[0..]);
 
-        std.log.debug("Created long-named SSTable: {s} (len={})", .{ filename, filename.len });
+        log.debug("Created long-named SSTable: {s} (len={})", .{ filename, filename.len });
     }
 
-    std.log.info("=== TESTING LARGE PATH ALLOCATION CORRUPTION ===", .{});
+    log.info("=== TESTING LARGE PATH ALLOCATION CORRUPTION ===", .{});
 
     var test_arena = std.heap.ArenaAllocator.init(allocator);
     defer test_arena.deinit();
@@ -185,25 +188,25 @@ test "sstable discovery with large path names" {
     defer manager.deinit();
 
     // Monitor memory state before discovery
-    std.log.info("Pre-discovery ArrayList: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
+    log.info("Pre-discovery ArrayList: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
 
     try manager.startup();
 
     // Validate all paths after discovery with large names
     try validate_path_integrity(&manager, "after large path discovery");
 
-    std.log.info("Post-discovery ArrayList: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
+    log.info("Post-discovery ArrayList: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
 
     // Verify all paths are correctly stored
     for (manager.sstable_paths.items, 0..) |path, idx| {
         try testing.expect(path.len > 0);
         try testing.expect(std.mem.endsWith(u8, path, ".sst"));
-        std.log.debug("Large path[{}]: '{s}' (len={})", .{ idx, path, path.len });
+        log.debug("Large path[{}]: '{s}' (len={})", .{ idx, path, path.len });
     }
 
     try testing.expectEqual(@as(usize, 8), manager.sstable_paths.items.len);
 
-    std.log.info("=== LARGE PATH ALLOCATION TEST PASSED ===", .{});
+    log.info("=== LARGE PATH ALLOCATION TEST PASSED ===", .{});
 }
 
 test "sstable discovery stress test with many files" {
@@ -244,7 +247,7 @@ test "sstable discovery stress test with many files" {
         _ = try file.write(padding[0..]);
     }
 
-    std.log.info("=== STRESS TESTING ARRAYLIST WITH {} FILES ===", .{file_count});
+    log.info("=== STRESS TESTING ARRAYLIST WITH {} FILES ===", .{file_count});
 
     var test_arena = std.heap.ArenaAllocator.init(allocator);
     defer test_arena.deinit();
@@ -253,7 +256,7 @@ test "sstable discovery stress test with many files" {
     defer manager.deinit();
 
     // Monitor initial state
-    std.log.info("Pre-startup: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
+    log.info("Pre-startup: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
 
     // This should trigger multiple ArrayList reallocations
     try manager.startup();
@@ -261,7 +264,7 @@ test "sstable discovery stress test with many files" {
     // Validate integrity after potential reallocation stress
     try validate_path_integrity(&manager, "after stress discovery");
 
-    std.log.info("Post-startup: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
+    log.info("Post-startup: capacity={}, len={}", .{ manager.sstable_paths.capacity, manager.sstable_paths.items.len });
 
     // Verify we found all files
     try testing.expectEqual(@as(usize, file_count), manager.sstable_paths.items.len);
@@ -271,18 +274,19 @@ test "sstable discovery stress test with many files" {
     for (sample_indices) |idx| {
         if (idx < manager.sstable_paths.items.len) {
             const path = manager.sstable_paths.items[idx];
+
             try testing.expect(path.len > 0);
             try testing.expect(std.mem.endsWith(u8, path, ".sst"));
 
             // Check that path can be read as valid UTF-8
             if (!std.unicode.utf8ValidateSlice(path)) {
-                std.log.err("CORRUPTION: Path[{}] invalid UTF-8: '{s}'", .{ idx, path });
+                log.err("CORRUPTION: Path[{}] invalid UTF-8: '{s}'", .{ idx, path });
                 return error.InvalidUTF8;
             }
 
-            std.log.debug("Sample path[{}]: '{s}' ✓", .{ idx, path });
+            log.debug("Sample path[{}]: '{s}' ✓", .{ idx, path });
         }
     }
 
-    std.log.info("=== STRESS TEST COMPLETED - {} PATHS VALIDATED ===", .{file_count});
+    log.info("=== STRESS TEST COMPLETED - {} PATHS VALIDATED ===", .{file_count});
 }

@@ -79,6 +79,7 @@ const RecoveryValidator = struct {
     total_bytes: u64 = 0,
 
     fn callback(entry: WALEntry, context: *anyopaque) WALError!void {
+        // Safety: Pointer cast with type validation for memory layout
         const self = @as(*RecoveryValidator, @ptrCast(@alignCast(context)));
         self.entries_recovered += 1;
         self.total_bytes += entry.payload.len;

@@ -29,6 +29,8 @@ const IngestionStats = ingest_directory.IngestionStats;
 const StorageEngine = storage.StorageEngine;
 const VFS = vfs.VFS;
 
+const log = std.log.scoped(.manager);
+
 pub const WorkspaceError = error{
     CodebaseAlreadyLinked,
     CodebaseNotFound,
@@ -392,7 +394,7 @@ pub const WorkspaceManager = struct {
             try self.storage_engine.put_block(block);
         }
 
-        std.log.info("Ingested codebase '{s}': {} files processed, {} blocks generated", .{
+        log.info("Ingested codebase '{s}': {} files processed, {} blocks generated", .{
             codebase_name,
             result.stats.files_processed,
             result.stats.blocks_generated,

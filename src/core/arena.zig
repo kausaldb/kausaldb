@@ -17,6 +17,8 @@ const assert_mod = @import("assert.zig");
 const assert_fmt = assert_mod.assert_fmt;
 const fatal_assert = assert_mod.fatal_assert;
 
+const log = std.log.scoped(.arena);
+
 /// Ownership categories for type-safe memory management.
 /// Each subsystem uses a distinct ownership type to prevent accidental
 /// cross-subsystem memory access through the type system.
@@ -55,9 +57,9 @@ pub const ArenaOwnership = enum {
 /// - Compile-time prevention of cross-arena access
 /// - O(1) bulk deallocation through arena reset
 /// - Debug-mode allocation tracking and validation
-pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
+pub fn typed_arena_type(comptime T: type, comptime Owner: type) type {
     return struct {
-        const Arena = TypedArenaType(T, Owner);
+        const Arena = typed_arena_type(T, Owner);
         arena: std.heap.ArenaAllocator,
         ownership: ArenaOwnership,
         debug_allocation_count: if (builtin.mode == .Debug) usize else void,
@@ -82,7 +84,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
             if (builtin.mode == .Debug) {
                 self.debug_allocation_count += 1;
                 self.debug_total_bytes += @sizeOf(T);
-                std.log.debug("{s} arena allocated {s} (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+                log.debug("{s} arena allocated {s} (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
             }
 
             return ptr;
@@ -99,7 +101,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
             if (builtin.mode == .Debug) {
                 self.debug_allocation_count += n;
                 self.debug_total_bytes += n * @sizeOf(T);
-                std.log.debug("{s} arena allocated {s}[{}] (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), n, n * @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+                log.debug("{s} arena allocated {s}[{}] (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), n, n * @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
             }
 
             return slice;
@@ -126,7 +128,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// This is the primary cleanup mechanism for bulk deallocation.
         pub fn reset(self: *Arena) void {
             if (builtin.mode == .Debug) {
-                std.log.debug("{s} arena reset: freed {} objects, {} bytes", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
+                log.debug("{s} arena reset: freed {} objects, {} bytes", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
                 self.debug_allocation_count = 0;
                 self.debug_total_bytes = 0;
             }
@@ -139,7 +141,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         pub fn deinit(self: *Arena) void {
             if (builtin.mode == .Debug) {
                 if (self.debug_allocation_count > 0) {
-                    std.log.debug("{s} arena deinit with {} unfreed objects ({} bytes)", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
+                    log.debug("{s} arena deinit with {} unfreed objects ({} bytes)", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
                 }
             }
             self.arena.deinit();
@@ -202,15 +204,15 @@ pub fn validate_arena_naming(comptime T: type) void {
                     }
                 }
 
-                // Validate TypedArenaType fields have proper naming
+                // Validate typed_arena_type fields have proper naming
                 const field_type_name = @typeName(field.type);
-                if (std.mem.startsWith(u8, field_type_name, "arena.TypedArenaType") or
-                    std.mem.startsWith(u8, field_type_name, "core.arena.TypedArenaType") or
-                    std.mem.startsWith(u8, field_type_name, "kausaldb.arena.TypedArenaType") or
-                    std.mem.indexOf(u8, field_type_name, "TypedArenaType") != null)
+                if (std.mem.startsWith(u8, field_type_name, "arena.typed_arena_type") or
+                    std.mem.startsWith(u8, field_type_name, "core.arena.typed_arena_type") or
+                    std.mem.startsWith(u8, field_type_name, "kausaldb.arena.typed_arena_type") or
+                    std.mem.indexOf(u8, field_type_name, "typed_arena_type") != null)
                 {
                     if (!std.mem.endsWith(u8, field.name, "_arena")) {
-                        @compileError("TypedArenaType field '" ++ field.name ++ "' in " ++ @typeName(T) ++
+                        @compileError("typed_arena_type field '" ++ field.name ++ "' in " ++ @typeName(T) ++
                             " must end with '_arena' suffix");
                     }
                 }
@@ -276,9 +278,9 @@ pub fn check_field_for_raw_pointers(
 
 /// Owned pointer wrapper that tracks allocation arena.
 /// Used when a single pointer needs to cross subsystem boundaries safely.
-pub fn OwnedPtrType(comptime T: type) type {
+pub fn owned_ptr_type(comptime T: type) type {
     return struct {
-        const Ptr = OwnedPtrType(T);
+        const Ptr = owned_ptr_type(T);
         ptr: *T,
         ownership: ArenaOwnership,
 
@@ -307,7 +309,7 @@ pub fn OwnedPtrType(comptime T: type) type {
         /// The original owner must not access this pointer after transfer.
         pub fn transfer_ownership(self: *Ptr, new_ownership: ArenaOwnership) void {
             if (builtin.mode == .Debug) {
-                std.log.debug("Ownership transfer: {any} -> {any} for {s}", .{ self.ownership, new_ownership, @typeName(T) });
+                log.debug("Ownership transfer: {any} -> {any} for {s}", .{ self.ownership, new_ownership, @typeName(T) });
             }
             self.ownership = new_ownership;
         }
@@ -328,7 +330,7 @@ comptime {
 
 test "TypedArena basic allocation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
@@ -338,7 +340,7 @@ test "TypedArena basic allocation" {
 
 test "TypedArena slice allocation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u8, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u8, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const slice = try arena.alloc_slice(10);
@@ -355,7 +357,7 @@ test "TypedArena slice allocation" {
 
 test "TypedArena create convenience method" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u64, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u64, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.create(100);
@@ -364,7 +366,7 @@ test "TypedArena create convenience method" {
 
 test "TypedArena clone method" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const original = @as(u32, 42);
@@ -375,7 +377,7 @@ test "TypedArena clone method" {
 
 test "TypedArena reset clears all allocations" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     // Allocate some data
@@ -395,13 +397,13 @@ test "TypedArena reset clears all allocations" {
 
 test "OwnedPtr ownership validation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
     ptr.* = 42;
 
-    const owned = OwnedPtrType(u32).init(ptr, .simulation_test);
+    const owned = owned_ptr_type(u32).init(ptr, .simulation_test);
 
     // Valid access
     const accessed = owned.access(.simulation_test);
@@ -414,13 +416,13 @@ test "OwnedPtr ownership validation" {
 
 test "OwnedPtr ownership transfer" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
     ptr.* = 42;
 
-    var owned = OwnedPtrType(u32).init(ptr, .simulation_test);
+    var owned = owned_ptr_type(u32).init(ptr, .simulation_test);
 
     // Transfer ownership
     owned.transfer_ownership(.temporary);
@@ -475,7 +477,7 @@ test "TypedArena debug info in debug mode" {
     if (builtin.mode != .Debug) return;
 
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     // Allocate some items

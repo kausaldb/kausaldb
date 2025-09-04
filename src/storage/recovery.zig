@@ -102,6 +102,7 @@ pub const RecoveryContext = struct {
     /// Finalize recovery statistics with total elapsed time.
     pub fn finalize(self: *RecoveryContext) void {
         const end_time = std.time.nanoTimestamp();
+        // Safety: Recovery time difference is always positive and within u64 range
         self.stats.recovery_time_ns = @intCast(end_time - self.start_time);
     }
 
@@ -128,7 +129,7 @@ pub const RecoveryContext = struct {
         }
 
         if (source_count > edge_count or target_count > edge_count) {
-            std.log.warn("GraphIndex validation failed: edge_count={}, source_count={}, target_count={}", .{ edge_count, source_count, target_count });
+            log.warn("GraphIndex validation failed: edge_count={}, source_count={}, target_count={}", .{ edge_count, source_count, target_count });
             return RecoveryError.GraphIndexCorruption;
         }
     }
@@ -139,6 +140,7 @@ pub const RecoveryContext = struct {
 /// Tracks statistics and handles error conditions gracefully to maximize
 /// data recovery even with partial corruption.
 pub fn apply_wal_entry_to_storage(entry: WALEntry, context: *anyopaque) wal.WALError!void {
+    // Safety: Context is guaranteed to be *RecoveryContext by the recovery system
     const recovery_ctx: *RecoveryContext = @ptrCast(@alignCast(context));
 
     recovery_ctx.stats.total_entries_processed += 1;

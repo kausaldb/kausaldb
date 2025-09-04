@@ -32,6 +32,8 @@ const BlockId = types.BlockId;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 
+const log = std.log.scoped(.harness);
+
 /// Test data utilities following deterministic patterns for reproducible testing
 pub const TestData = struct {
     /// Generate deterministic BlockId from seed ensuring non-zero result
@@ -332,7 +334,7 @@ pub const ProductionStorageHarness = struct {
         // Clean up database directory to prevent filesystem pollution
         std.fs.cwd().deleteTree(self.db_path) catch |err| {
             // Don't fail the test if directory cleanup fails, just log warning
-            std.log.warn("Failed to clean up test database directory '{s}': {}", .{ self.db_path, err });
+            log.warn("Failed to clean up test database directory '{s}': {}", .{ self.db_path, err });
         };
 
         // Free the database path string

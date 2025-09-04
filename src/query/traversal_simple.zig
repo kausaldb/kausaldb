@@ -1,6 +1,6 @@
 //! Simplified graph traversal for KausalDB knowledge graph.
 //!
-//! Focused on the core v0.1.0 use case: finding direct callers/callees and 
+//! Focused on the core v0.1.0 use case: finding direct callers/callees and
 //! tracing simple dependency chains using bounded breadth-first search.
 //!
 //! Philosophy: One algorithm, well-implemented, covers 95% of user needs.
@@ -37,8 +37,8 @@ pub const TraversalQuery = struct {
     direction: TraversalDirection = .forward,
 
     pub const TraversalDirection = enum {
-        forward,   // Follow edges from source to target
-        backward,  // Follow edges from target to source (find callers)
+        forward, // Follow edges from source to target
+        backward, // Follow edges from target to source (find callers)
     };
 };
 
@@ -85,16 +85,16 @@ pub const TraversalEngine = struct {
         result_arena: std.mem.Allocator,
     ) !TraversalResult {
         const start_time = std.time.nanoTimestamp();
-        
+
         // Initialize BFS data structures
         var visited = std.AutoHashMap(BlockId, void).init(self.allocator);
         defer visited.deinit();
-        
+
         var queue = std.array_list.Managed(QueueItem).init(self.allocator);
         defer queue.deinit();
-        
+
         var result_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(result_arena);
-        
+
         // Statistics tracking
         var stats = TraversalResult.TraversalStats{
             .blocks_visited = 0,
@@ -111,12 +111,12 @@ pub const TraversalEngine = struct {
         // BFS main loop
         while (queue.items.len > 0 and result_blocks.items.len < query.max_results) {
             const current_item = queue.orderedRemove(0); // Remove from front (BFS)
-            
+
             // Check depth limit
             if (current_item.depth > query.max_depth) {
                 continue;
             }
-            
+
             stats.max_depth_reached = @max(stats.max_depth_reached, current_item.depth);
             stats.blocks_visited += 1;
 
@@ -140,9 +140,9 @@ pub const TraversalEngine = struct {
         }
 
         const end_time = std.time.nanoTimestamp();
-        stats.traversal_time_ns = if (end_time >= start_time) 
-            @as(u64, @intCast(end_time - start_time)) 
-        else 
+        stats.traversal_time_ns = if (end_time >= start_time)
+            @as(u64, @intCast(end_time - start_time))
+        else
             0;
 
         return TraversalResult{
@@ -163,7 +163,7 @@ pub const TraversalEngine = struct {
         direction: TraversalQuery.TraversalDirection,
     ) !u32 {
         var neighbors_added: u32 = 0;
-        
+
         // Get edges for the current block
         const edges = try self.storage_engine.get_edges_for_block(current_block_id);
         defer {
@@ -184,13 +184,13 @@ pub const TraversalEngine = struct {
                     break;
                 }
             }
-            
+
             if (!should_follow) continue;
 
             // Determine the target block based on direction
             const target_block_id = switch (direction) {
-                .forward => edge.target_id,   // Follow edge normally
-                .backward => edge.source_id,  // Follow edge in reverse
+                .forward => edge.target_id, // Follow edge normally
+                .backward => edge.source_id, // Follow edge in reverse
             };
 
             // Skip if already visited
@@ -219,11 +219,7 @@ const QueueItem = struct {
 test "TraversalEngine basic BFS functionality" {
     // This would normally use a real storage engine
     // For now, just test that the structures compile and can be initialized
-    const allocator = testing.allocator;
-    
-    // Mock storage engine would go here
-    // var engine = TraversalEngine.init(&mock_storage, allocator);
-    
+
     const query = TraversalQuery{
         .start_block_id = BlockId.generate(),
         .edge_types = &[_]EdgeType{.calls},
@@ -231,7 +227,7 @@ test "TraversalEngine basic BFS functionality" {
         .max_results = 100,
         .direction = .forward,
     };
-    
+
     // Verify query structure
     try testing.expectEqual(@as(u32, 5), query.max_depth);
     try testing.expectEqual(@as(u32, 100), query.max_results);
@@ -241,7 +237,7 @@ test "TraversalEngine basic BFS functionality" {
 test "QueueItem creation" {
     const block_id = BlockId.generate();
     const item = QueueItem{ .block_id = block_id, .depth = 3 };
-    
+
     try testing.expect(item.block_id.eql(block_id));
     try testing.expectEqual(@as(u32, 3), item.depth);
 }

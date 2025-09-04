@@ -15,6 +15,8 @@ const simulation_mod = @import("simulation.zig");
 
 const Simulation = simulation_mod.Simulation;
 
+const log = std.log.scoped(.deterministic_logger);
+
 pub const DeterministicLogger = struct {
     sim: *const Simulation,
 

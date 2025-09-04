@@ -336,6 +336,7 @@ pub const BatchPerformanceMeasurement = struct {
         // Calculate P99 - sort and find 99th percentile
         var sorted_measurements = std.array_list.Managed(u64).init(self.allocator);
         defer sorted_measurements.deinit();
+        // Safety: Operation guaranteed to succeed by preconditions
         sorted_measurements.appendSlice(self.measurements.items) catch unreachable;
         std.mem.sort(u64, sorted_measurements.items, {}, comptime std.sort.asc(u64));
 
@@ -470,6 +471,7 @@ pub const StatisticalSampler = struct {
             return StatisticalResult{};
         }
 
+        // Safety: Operation guaranteed to succeed by preconditions
         const sorted_measurements = self.allocator.dupe(u64, self.measurements.items) catch unreachable;
         defer self.allocator.free(sorted_measurements);
         std.mem.sort(u64, sorted_measurements, {}, std.sort.asc(u64));

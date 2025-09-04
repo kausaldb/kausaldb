@@ -28,7 +28,7 @@ pub const PropertyTestConfig = struct {
 };
 
 /// Property test harness with Arena Coordinator Pattern
-pub fn PropertyHarnessType(comptime SystemUnderTest: type, comptime Model: type) type {
+pub fn property_harness_type(comptime SystemUnderTest: type, comptime Model: type) type {
     return struct {
         const Self = @This();
 
@@ -255,7 +255,7 @@ pub fn swarm_test_data_structure(
     allocator: std.mem.Allocator,
     config: PropertyTestConfig,
 ) !void {
-    var harness = try PropertyHarnessType(DataStructure, Model).init(allocator, config);
+    var harness = try property_harness_type(DataStructure, Model).init(allocator, config);
     defer harness.deinit();
 
     try harness.run_exhaustive_test();
