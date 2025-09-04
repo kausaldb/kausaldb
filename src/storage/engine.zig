@@ -47,6 +47,7 @@ const BlockOwnership = ownership.BlockOwnership;
 const ComptimeOwnedBlock = ownership.ComptimeOwnedBlock;
 const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
+const ParsedBlock = context_block.ParsedBlock;
 const MemtableBlock = ownership.MemtableBlock;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
@@ -87,6 +88,75 @@ pub const StorageError = error{
     WriteBlocked,
 } || config_mod.ConfigError || wal.WALError || vfs.VFSError || vfs.VFileError;
 
+/// Command to flush memtable to SSTable with coordinated subsystem management.
+/// Encapsulates the complete flush-to-compaction sequence with proper state transitions.
+/// Decouples StorageEngine from direct orchestration of subsystem interactions.
+const FlushMemtableCommand = struct {
+    storage_engine: *StorageEngine,
+
+    /// Execute complete memtable flush sequence including optional compaction.
+    /// Handles state transitions, subsystem coordination, and error recovery.
+    fn execute(self: FlushMemtableCommand) !void {
+        concurrency.assert_main_thread();
+
+        // Transition to flushing state during operation
+        self.storage_engine.state.transition(.flushing);
+        defer {
+            // Only transition back to running if we're not already there
+            if (self.storage_engine.state != .running) {
+                self.storage_engine.state.transition(.running);
+            }
+        }
+
+        self.storage_engine.memtable_manager.flush_to_sstable(&self.storage_engine.sstable_manager) catch |err| {
+            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_to_sstable" });
+            return err;
+        };
+
+        // Execute compaction if needed using command pattern
+        const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
+        try compaction_command.execute();
+
+        self.storage_engine.storage_metrics.sstable_writes.incr();
+    }
+};
+
+/// Command to execute SSTable compaction with proper state transitions.
+/// Encapsulates compaction logic with state machine coordination.
+/// Decouples compaction callers from direct SSTableManager interaction.
+const CompactionCommand = struct {
+    storage_engine: *StorageEngine,
+
+    /// Execute compaction if needed with proper state transitions.
+    /// Handles state machine transitions and error context logging.
+    fn execute(self: CompactionCommand) !void {
+        concurrency.assert_main_thread();
+
+        if (!self.storage_engine.sstable_manager.should_compact()) {
+            return; // No compaction needed
+        }
+
+        // Ensure we're in running state before transitioning to compacting
+        if (self.storage_engine.state != .running) {
+            self.storage_engine.state.transition(.running);
+        }
+        self.storage_engine.state.transition(.compacting);
+        defer {
+            // Only transition back to running if we're not already there
+            if (self.storage_engine.state != .running) {
+                self.storage_engine.state.transition(.running);
+            }
+        }
+
+        self.storage_engine.sstable_manager.execute_compaction() catch |err| {
+            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "compaction_command" });
+            return err;
+        };
+
+        self.storage_engine.storage_metrics.compactions.incr();
+    }
+};
+
 /// Main storage engine coordinating all storage subsystems with state machine validation.
 /// Implements LSM-tree architecture with WAL durability, in-memory
 /// memtable management, immutable SSTables, and background compaction.
@@ -107,7 +177,7 @@ pub const StorageEngine = struct {
     /// eliminating corruption from struct copying while maintaining O(1) cleanup.
     storage_arena: *std.heap.ArenaAllocator,
     arena_coordinator: *ArenaCoordinator,
-    query_cache_arena: std.heap.ArenaAllocator,
+
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
     sstable_pool: pools.ObjectPoolType(SSTable),
@@ -156,7 +226,7 @@ pub const StorageEngine = struct {
         // Arena Coordinator Pattern: Allocate arena on heap for stable pointer
         const storage_arena = try allocator.create(std.heap.ArenaAllocator);
         storage_arena.* = std.heap.ArenaAllocator.init(allocator);
-        const query_cache_arena = std.heap.ArenaAllocator.init(allocator);
+
         const arena_coordinator = try allocator.create(ArenaCoordinator);
         arena_coordinator.* = ArenaCoordinator.init(storage_arena);
 
@@ -167,7 +237,7 @@ pub const StorageEngine = struct {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
-            query_cache_arena.deinit();
+
             allocator.free(owned_data_dir);
             error_context.log_storage_error(err, error_context.StorageContext{ .operation = "sstable_pool_init" });
             return err;
@@ -177,7 +247,7 @@ pub const StorageEngine = struct {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
-            query_cache_arena.deinit();
+
             allocator.free(owned_data_dir);
             error_context.log_storage_error(err, error_context.StorageContext{ .operation = "iterator_pool_init" });
             return err;
@@ -194,7 +264,7 @@ pub const StorageEngine = struct {
             .storage_metrics = StorageMetrics.init(),
             .storage_arena = storage_arena,
             .arena_coordinator = arena_coordinator,
-            .query_cache_arena = query_cache_arena,
+
             .sstable_pool = sstable_pool,
             .iterator_pool = iterator_pool,
         };
@@ -204,7 +274,7 @@ pub const StorageEngine = struct {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
-            engine.query_cache_arena.deinit();
+
             allocator.free(owned_data_dir);
             error_context.log_storage_error(err, error_context.file_context("memtable_manager_init", owned_data_dir));
             return err;
@@ -312,7 +382,7 @@ pub const StorageEngine = struct {
         self.backing_allocator.destroy(self.storage_arena);
         // Clean up heap-allocated coordinator
         self.backing_allocator.destroy(self.arena_coordinator);
-        self.query_cache_arena.deinit();
+
         self.backing_allocator.free(self.data_dir);
         // Mark as deinitialized to prevent double-free
         self.data_dir = "";
@@ -322,45 +392,26 @@ pub const StorageEngine = struct {
     /// Pure delegation to subsystems for flush orchestration.
     fn coordinate_memtable_flush(self: *StorageEngine) !void {
         assert_mod.assert_fmt(@intFromPtr(&self.sstable_manager) != 0, "SSTableManager corrupted before flush", .{});
-        self.flush_memtable() catch |err| {
+
+        const command = FlushMemtableCommand{ .storage_engine = self };
+        command.execute() catch |err| {
             error_context.log_storage_error(err, error_context.StorageContext{ .operation = "coordinate_memtable_flush" });
             return err;
         };
     }
 
-    /// Flush current memtable to SSTable with coordinated subsystem management.
-    /// Core LSM-tree operation that delegates to SSTableManager for SSTable creation
-    /// and coordinates cleanup with MemtableManager. Follows the coordinator pattern.
+    /// Flush current memtable to SSTable using command pattern.
+    /// Delegates to FlushMemtableCommand for decoupled subsystem coordination.
     fn flush_memtable(self: *StorageEngine) !void {
-        concurrency.assert_main_thread();
-
-        // Transition to flushing state during operation
-        self.state.transition(.flushing);
-        defer self.state.transition(.running); // Always return to running
-
-        self.memtable_manager.flush_to_sstable(&self.sstable_manager) catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_to_sstable" });
-            return err;
-        };
-
-        if (self.sstable_manager.should_compact()) {
-            // First transition back to running, then to compacting (required by state machine)
-            self.state.transition(.running);
-            self.state.transition(.compacting);
-            self.sstable_manager.execute_compaction() catch |err| {
-                error_context.log_storage_error(err, error_context.StorageContext{ .operation = "post_flush_compaction" });
-                return err;
-            };
-            // State will be transitioned back to running by defer
-        }
-
-        self.storage_metrics.sstable_writes.incr();
+        const command = FlushMemtableCommand{ .storage_engine = self };
+        try command.execute();
     }
 
     /// Public wrapper for memtable flush - backward compatibility.
-    /// Delegates to internal flush_memtable method for coordinated subsystem management.
+    /// Delegates to command pattern for coordinated subsystem management.
     pub fn flush_memtable_to_sstable(self: *StorageEngine) !void {
-        self.flush_memtable() catch |err| {
+        const command = FlushMemtableCommand{ .storage_engine = self };
+        command.execute() catch |err| {
             error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_memtable_to_sstable" });
             return err;
         };
@@ -560,14 +611,18 @@ pub const StorageEngine = struct {
             return owned_block;
         }
 
-        // SSTable fallback: older data migrated to disk during compaction,
-        // maintaining durability while keeping recent writes in fast memtable
-        const sstable_result = self.sstable_manager.find_block_in_sstables(block_id, block_ownership, self.query_cache_arena.allocator()) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("find_block_in_sstables", block_id));
+        // SSTable fallback with zero-copy optimization: eliminates redundant allocations
+        // by using ParsedBlock view until ownership transfer is required
+        const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| {
+            error_context.log_storage_error(err, error_context.block_context("find_block_view_in_sstables", block_id));
             return err;
         };
 
-        if (sstable_result) |owned_block| {
+        if (parsed_block_result) |parsed_block| {
+            // Convert to owned block only at the final moment for ownership transfer
+            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+            const owned_block = OwnedBlock.init(owned_context_block, block_ownership, null);
+
             const end_time = std.time.nanoTimestamp();
             const read_duration: u64 = if (end_time >= start_time)
                 @as(u64, @intCast(end_time - start_time))
@@ -577,9 +632,8 @@ pub const StorageEngine = struct {
             self.storage_metrics.blocks_read.incr();
             self.storage_metrics.sstable_reads.incr();
             self.storage_metrics.total_read_time_ns.add(read_duration);
-            self.storage_metrics.total_bytes_read.add(owned_block.block.content.len);
+            self.storage_metrics.total_bytes_read.add(parsed_block.content().len);
 
-            self.maybe_clear_query_cache();
             return owned_block;
         }
 
@@ -610,10 +664,11 @@ pub const StorageEngine = struct {
             return ownership.ComptimeOwnedBlockType(owner).init(block_ptr.*);
         }
 
-        // Slower path: check SSTables - use existing API and convert result
-        if (try self.sstable_manager.find_block_in_sstables(block_id, owner, self.query_cache_arena.allocator())) |owned_block| {
-            // Convert runtime ownership to compile-time ownership for zero-cost access
-            return ownership.ComptimeOwnedBlockType(owner).init(owned_block.block);
+        // Slower path: check SSTables with zero-copy optimization
+        if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
+            // Convert to owned block only when ownership transfer is required
+            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+            return ownership.ComptimeOwnedBlockType(owner).init(owned_context_block);
         }
 
         return null;
@@ -633,8 +688,9 @@ pub const StorageEngine = struct {
             return StorageEngineBlock.init(block_ptr.*);
         }
 
-        if (try self.sstable_manager.find_block_in_sstables(block_id, .storage_engine, self.query_cache_arena.allocator())) |owned_block| {
-            return StorageEngineBlock.init(owned_block.block);
+        if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
+            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+            return StorageEngineBlock.init(owned_context_block);
         }
 
         return null;
@@ -661,7 +717,7 @@ pub const StorageEngine = struct {
             return OwnedQueryEngineBlock.init(block_ptr.*);
         }
 
-        const sstable_result = self.sstable_manager.find_block_in_sstables(block_id, .query_engine, self.query_cache_arena.allocator()) catch |err| switch (err) {
+        const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| switch (err) {
             error.CorruptedSSTablePaths => {
                 // SSTable corruption detected - continue gracefully without SSTable lookup
                 return null;
@@ -669,8 +725,9 @@ pub const StorageEngine = struct {
             else => return err,
         };
 
-        if (sstable_result) |owned_block| {
-            return OwnedQueryEngineBlock.init(owned_block.block);
+        if (parsed_block_result) |parsed_block| {
+            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+            return OwnedQueryEngineBlock.init(owned_context_block);
         }
 
         return null;
@@ -963,16 +1020,6 @@ pub const StorageEngine = struct {
         };
     }
 
-    /// Clear query cache arena if it exceeds memory threshold to prevent unbounded growth.
-    /// Called after SSTable reads to maintain bounded memory usage for query operations.
-    fn maybe_clear_query_cache(self: *StorageEngine) void {
-        const QUERY_CACHE_THRESHOLD = 50 * 1024 * 1024; // 50MB threshold
-
-        if (self.query_cache_arena.queryCapacity() > QUERY_CACHE_THRESHOLD) {
-            _ = self.query_cache_arena.reset(.retain_capacity);
-        }
-    }
-
     /// P0.5, P0.6, P0.7: Comprehensive invariant validation for StorageEngine.
     /// Validates WAL ordering, arena coordinator stability, memory accounting consistency,
     /// and subsystem state coherence. Critical for detecting programming errors.
@@ -1025,7 +1072,6 @@ pub const StorageEngine = struct {
         assert_fmt(builtin.mode == .Debug, "Arena memory validation should only run in debug builds", .{});
 
         fatal_assert(@intFromPtr(&self.storage_arena) != 0, "Storage arena pointer corruption", .{});
-        fatal_assert(@intFromPtr(&self.query_cache_arena) != 0, "Query cache arena pointer corruption", .{});
 
         // Arena validation requires mutable access, but this method is const
         // Skip allocation test in const validation - arena corruption would be caught elsewhere
@@ -1059,10 +1105,6 @@ pub const TypedStorageCoordinator = struct {
 
     /// Get query cache allocator for temporary query data.
     /// Memory allocated from this arena is freed when query cache is cleared.
-    pub fn query_cache_allocator(self: TypedStorageCoordinator) std.mem.Allocator {
-        return self.storage_engine.query_cache_arena.allocator();
-    }
-
     /// Validate storage engine is ready for read operations.
     /// Zero-cost in release builds through comptime evaluation.
     pub fn validate_read_state(self: TypedStorageCoordinator) bool {
@@ -1089,14 +1131,9 @@ pub const TypedStorageCoordinator = struct {
 
     /// Check for compaction opportunities and execute if beneficial.
     /// Pure coordinator that delegates decision and execution to SSTableManager.
-    fn check_and_run_compaction(self: *StorageEngine) !void {
-        if (self.sstable_manager.should_compact()) {
-            self.sstable_manager.execute_compaction() catch |err| {
-                error_context.log_storage_error(err, error_context.StorageContext{ .operation = "check_and_run_compaction" });
-                return err;
-            };
-            _ = self.storage_metrics.compactions.add(1);
-        }
+    fn check_and_run_compaction(self: TypedStorageCoordinator) !void {
+        const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
+        try compaction_command.execute();
     }
 
     /// Get file size for SSTable registration with compaction manager.
