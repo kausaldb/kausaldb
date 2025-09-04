@@ -287,13 +287,13 @@ pub const MissingEdgesHarness = struct {
     fn store_graph_in_storage(self: *Self) !void {
         // Store incomplete graph (the one that will be queried)
         for (self.incomplete_graph.nodes.slice()) |node| {
-            // Simulating storage by iterating through nodes
-            // Block conversion and storage not implemented yet
-            _ = node;
+            // Convert ContextBlock to storage using proper ownership
+            try self.storage_engine.put_block(node);
         }
 
-        // Note: Edge storage would typically be handled by the storage engine
-        // For now, we simulate this by storing edge information in block metadata
+        // Store edges - edges are typically stored as metadata or separate entries
+        // For now, we rely on the blocks containing their edge information
+        // Full edge storage implementation would require edge-specific storage format
     }
 
     /// Execute traversal expecting missing edges

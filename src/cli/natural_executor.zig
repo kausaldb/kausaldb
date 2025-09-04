@@ -232,18 +232,19 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             return error.InvalidCodebasePath;
         },
         storage.StorageError.WriteBlocked => {
-            // WriteBlocked should not occur in single-threaded CLI usage.
-            // This indicates a storage engine configuration or compaction issue.
-            // Fatal assertion disabled due to compaction logic issues
-            if (cmd.format == .json) {
-                print_json_stdout(context.allocator,
-                    \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}
-                , .{});
-            } else {
-                print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
-                print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
-            }
-            return error.WriteBlocked;
+            // Trigger compaction to free up L0 SSTable slots and retry operation
+            context.engine.flush_memtable_to_sstable() catch |compact_err| {
+                if (cmd.format == .json) {
+                    print_json_stdout(context.allocator,
+                        \\{{"error": "Storage write blocked and compaction failed"}}
+                    , .{});
+                } else {
+                    print_stderr("Error: Storage write blocked and compaction failed: {}\n", .{compact_err});
+                }
+                return compact_err;
+            };
+            // Retry the link operation after compaction
+            return execute_link_command(context, cmd);
         },
         else => {
             if (cmd.format == .json) {
@@ -287,18 +288,19 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
             return error.CodebaseNotFound;
         },
         storage.StorageError.WriteBlocked => {
-            // WriteBlocked should not occur in single-threaded CLI usage.
-            // This indicates a storage engine configuration or compaction issue.
-            // Fatal assertion disabled due to compaction logic issues
-            if (cmd.format == .json) {
-                print_json_stdout(context.allocator,
-                    \\{{"error": "Storage compaction issue - WriteBlocked in single-threaded context"}}
-                , .{});
-            } else {
-                print_stderr("Error: Storage engine misconfiguration - WriteBlocked in single-threaded context\n", .{});
-                print_stderr("This indicates a compaction logic issue that needs fixing.\n", .{});
-            }
-            return error.WriteBlocked;
+            // Trigger compaction to free up L0 SSTable slots and retry operation
+            context.engine.flush_memtable_to_sstable() catch |compact_err| {
+                if (cmd.format == .json) {
+                    print_json_stdout(context.allocator,
+                        \\{{"error": "Storage write blocked and compaction failed"}}
+                    , .{});
+                } else {
+                    print_stderr("Error: Storage write blocked and compaction failed: {}\n", .{compact_err});
+                }
+                return compact_err;
+            };
+            // Retry the unlink operation after compaction
+            return execute_unlink_command(context, cmd);
         },
         else => {
             if (cmd.format == .json) {

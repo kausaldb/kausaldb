@@ -547,20 +547,22 @@ pub const SimulationVFS = struct {
     }
 
     pub fn deinit(self: *SimulationVFS) void {
+        // NOTE: File content ArrayLists use file_arena allocator, so they don't need explicit deinit()
+        // The arena cleanup will handle all their memory automatically
+        self.file_storage.clearRetainingCapacity();
+
+        // Clean up non-arena resources
+        self.handle_to_storage.deinit();
+        self.handle_registry.deinit();
+        self.file_storage.deinit();
+
         var file_iter = self.files.iterator();
         while (file_iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
         }
         self.files.deinit();
 
-        // Arena-managed file storage requires explicit content cleanup to prevent leaks
-        for (self.file_storage.items) |*storage| {
-            storage.data.content.deinit();
-        }
-
-        self.file_storage.deinit();
-        self.handle_to_storage.deinit();
-        self.handle_registry.deinit();
+        // Arena cleanup handles all file content automatically
         self.file_arena.deinit();
     }
 

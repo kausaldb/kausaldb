@@ -59,6 +59,7 @@ comptime {
     _ = @import("tests/recovery/wal_corruption_fatal.zig");
     _ = @import("tests/recovery/wal_entry_stream_recovery.zig");
     _ = @import("tests/recovery/wal_memory_safety.zig");
+    _ = @import("tests/recovery/wal_operations_recovery.zig");
     _ = @import("tests/recovery/wal_segment_corruption.zig");
     _ = @import("tests/recovery/wal_segmentation.zig");
     _ = @import("tests/recovery/wal_streaming_recovery.zig");

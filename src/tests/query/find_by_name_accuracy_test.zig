@@ -85,7 +85,7 @@ test "find_by_name returns exact function matches only" {
     }
 
     // Query for "init" functions - should find exactly 2 (public init and private_init)
-    const init_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "init");
+    const init_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "init");
     defer init_results.deinit();
 
     // Verify exactly 2 results and no duplicates

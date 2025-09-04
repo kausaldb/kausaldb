@@ -526,7 +526,17 @@ pub const StorageEngine = struct {
 
         // Check compaction throttling - prevent runaway L0 growth
         if (self.sstable_manager.compaction_manager.should_block_writes()) {
-            return error.WriteBlocked;
+            // Try to trigger compaction before blocking in single-threaded CLI context
+            self.sstable_manager.check_and_run_compaction() catch |err| {
+                error_context.log_storage_error(err, error_context.block_context("emergency_compaction", block_data.id));
+                // If compaction fails, still block writes to prevent L0 explosion
+                return error.WriteBlocked;
+            };
+
+            // Check again after compaction - if still blocked, fail
+            if (self.sstable_manager.compaction_manager.should_block_writes()) {
+                return error.WriteBlocked;
+            }
         }
         if (self.sstable_manager.compaction_manager.should_stall_writes()) {
             // Record stall metrics for monitoring and backpressure feedback loop
