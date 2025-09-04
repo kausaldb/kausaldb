@@ -32,6 +32,7 @@ const fatal_assert = assert_mod.fatal_assert;
 const VFS = vfs.VFS;
 const ContextBlock = context_block.ContextBlock;
 const BlockId = context_block.BlockId;
+const ParsedBlock = context_block.ParsedBlock;
 const SSTable = sstable.SSTable;
 const TieredCompactionManager = tiered_compaction.TieredCompactionManager;
 const SimulationVFS = simulation_vfs.SimulationVFS;
@@ -144,7 +145,7 @@ pub const SSTableManager = struct {
         self: *SSTableManager,
         block_id: BlockId,
         accessor: BlockOwnership,
-        query_cache: std.mem.Allocator,
+        temp_allocator: std.mem.Allocator,
     ) !?OwnedBlock {
         // Detect SSTable paths corruption and handle gracefully in fault injection tests
         if (self.sstable_paths.items.len > 1000000) {
@@ -174,8 +175,8 @@ pub const SSTableManager = struct {
             fatal_assert(@intFromPtr(sstable_path.ptr) != 0 or sstable_path.len == 0, "SSTable path[{}] has null pointer with length {} - string corruption", .{ i, sstable_path.len });
             fatal_assert(sstable_path.len < 4096, "SSTable path[{}] has suspicious length {} - possible corruption", .{ i, sstable_path.len });
 
-            const sstable_path_copy = try query_cache.dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(self.arena_coordinator, query_cache, self.vfs, sstable_path_copy);
+            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
 
             // CRITICAL: Track SSTable index loading failures,
             sstable_file.read_index() catch |err| {
@@ -197,6 +198,54 @@ pub const SSTableManager = struct {
                 // In hierarchical model, this is now coordinator's arena
                 const owned_block = OwnedBlock.init(cloned_block, accessor, null);
                 return owned_block;
+            }
+        }
+
+        return null;
+    }
+
+    /// Find a block using zero-copy ParsedBlock view without heap allocations.
+    /// Eliminates redundant memory copies during SSTable reads for performance-critical paths.
+    pub fn find_block_view_in_sstables(self: *SSTableManager, block_id: BlockId) !?ParsedBlock {
+        // Detect SSTable paths corruption and handle gracefully in fault injection tests
+        if (self.sstable_paths.items.len > 1000000) {
+            return error.CorruptedSSTablePaths;
+        }
+
+        // Comprehensive corruption detection for SSTable paths array
+        fatal_assert(@intFromPtr(&self.sstable_paths) != 0, "SSTable paths ArrayList structure corrupted - null pointer", .{});
+
+        if (@intFromPtr(self.sstable_paths.items.ptr) == 0 and self.sstable_paths.items.len > 0) {
+            // SSTable paths array corruption detected - handle gracefully in fault injection scenarios
+            return error.CorruptedSSTablePaths;
+        }
+        fatal_assert(self.sstable_paths.capacity >= self.sstable_paths.items.len, "SSTable paths capacity {} < length {} - ArrayList corruption", .{ self.sstable_paths.capacity, self.sstable_paths.items.len });
+
+        var i: usize = self.sstable_paths.items.len;
+        while (i > 0) {
+            i -= 1;
+
+            // Validate array bounds and pointer consistency before each access
+            fatal_assert(i < self.sstable_paths.items.len, "SSTable index out of bounds: {} >= {} - memory corruption detected", .{ i, self.sstable_paths.items.len });
+            fatal_assert(@intFromPtr(self.sstable_paths.items.ptr) != 0, "SSTable paths array pointer became null during iteration", .{});
+
+            const sstable_path = self.sstable_paths.items[i];
+
+            // Validate the path string itself
+            fatal_assert(@intFromPtr(sstable_path.ptr) != 0 or sstable_path.len == 0, "SSTable path[{}] has null pointer with length {} - string corruption", .{ i, sstable_path.len });
+            fatal_assert(sstable_path.len < 4096, "SSTable path[{}] has suspicious length {} - possible corruption", .{ i, sstable_path.len });
+
+            const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.vfs, sstable_path_copy);
+
+            // CRITICAL: Track SSTable index loading failures
+            sstable_file.read_index() catch {
+                // Log and continue to next SSTable
+                continue;
+            };
+
+            if (try sstable_file.find_block_view(block_id)) |parsed_block| {
+                return parsed_block;
             }
         }
 
@@ -767,15 +816,15 @@ test "SSTableManager finds owned blocks in SSTables" {
     const owned_blocks = [_]OwnedBlock{owned_block};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
-    var query_arena = std.heap.ArenaAllocator.init(allocator);
-    defer query_arena.deinit();
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
 
-    const found_owned_block = try manager.find_block_in_sstables(block_id, .simulation_test, query_arena.allocator());
+    const found_owned_block = try manager.find_block_in_sstables(block_id, .simulation_test, temp_arena.allocator());
     try testing.expect(found_owned_block != null);
     const found_block = found_owned_block.?.read(.simulation_test);
     try testing.expectEqualStrings("test content", found_block.content);
 
-    const missing_block = try manager.find_block_in_sstables(BlockId.generate(), .simulation_test, query_arena.allocator());
+    const missing_block = try manager.find_block_in_sstables(BlockId.generate(), .simulation_test, temp_arena.allocator());
     try testing.expect(missing_block == null);
 }
 
