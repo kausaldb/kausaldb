@@ -162,13 +162,11 @@ pub fn build(b: *std.Build) void {
     const tidy_exe = b.addExecutable(.{
         .name = "tidy",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/tidy/main.zig"),
+            .root_source_file = b.path("src/dev/tidy.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
-    tidy_exe.root_module.addImport("build_options", build_options.createModule());
-    tidy_exe.root_module.addImport("internal", internal_module);
     b.installArtifact(tidy_exe);
 
     const tidy_cmd = b.addRunArtifact(tidy_exe);

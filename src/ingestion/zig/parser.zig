@@ -142,7 +142,7 @@ pub const ZigParser = struct {
         }
     }
 
-    fn try_parse_type( // tidy:ignore-length
+    fn try_parse_type(
         self: *Self,
         units: *std.array_list.Managed(ParsedUnit),
         allocator: std.mem.Allocator,
