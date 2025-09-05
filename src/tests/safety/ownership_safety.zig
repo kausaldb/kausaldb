@@ -18,7 +18,7 @@ const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = types.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedBlockCollection = ownership.OwnedBlockCollection;
-const TypedArenaType = arena.TypedArenaType;
+const TypedArenaType = arena.typed_arena_type;
 
 // Test subsystem simulators
 const MemtableSubsystem = struct {
@@ -312,7 +312,7 @@ test "large scale ownership operations" {
 test "memory accounting accuracy" {
     if (builtin.mode != .Debug) return; // Debug info only available in debug mode
 
-    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer test_arena.deinit();
 
     // Check initial state

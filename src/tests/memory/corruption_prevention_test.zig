@@ -22,7 +22,7 @@ const testing = std.testing;
 const validate_no_raw_pointers = arena_mod.validate_no_raw_pointers;
 const validate_ownership_usage = ownership.validate_ownership_usage;
 
-const TypedArenaType = arena_mod.TypedArenaType;
+const TypedArenaType = arena_mod.typed_arena_type;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ArenaOwnership = arena_mod.ArenaOwnership;
 const owned_ptr_type = arena_mod.owned_ptr_type;

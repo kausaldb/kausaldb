@@ -233,7 +233,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
         },
         storage.StorageError.WriteBlocked => {
             // Trigger compaction to free up L0 SSTable slots and retry operation
-            context.engine.flush_memtable_to_sstable() catch |compact_err| {
+            context.storage_engine.?.flush_memtable_to_sstable() catch |compact_err| {
                 if (cmd.format == .json) {
                     print_json_stdout(context.allocator,
                         \\{{"error": "Storage write blocked and compaction failed"}}
@@ -289,7 +289,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
         },
         storage.StorageError.WriteBlocked => {
             // Trigger compaction to free up L0 SSTable slots and retry operation
-            context.engine.flush_memtable_to_sstable() catch |compact_err| {
+            context.storage_engine.?.flush_memtable_to_sstable() catch |compact_err| {
                 if (cmd.format == .json) {
                     print_json_stdout(context.allocator,
                         \\{{"error": "Storage write blocked and compaction failed"}}

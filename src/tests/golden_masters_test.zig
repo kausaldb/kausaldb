@@ -108,10 +108,10 @@ const GoldenMasterSuite = struct {
         }
 
         const final_block_count = engine2.block_count();
-        const expected_block_count = self.expected_block_count(test_name);
+        const expected_count = self.expected_block_count(test_name);
 
-        if (final_block_count != expected_block_count) {
-            std.debug.print("GOLDEN MASTER MISMATCH: '{s}' - expected {} blocks, got {}\n", .{ test_name, expected_block_count, final_block_count });
+        if (final_block_count != expected_count) {
+            std.debug.print("GOLDEN MASTER MISMATCH: '{s}' - expected {} blocks, got {}\n", .{ test_name, expected_count, final_block_count });
             return error.GoldenMasterMismatch;
         }
 

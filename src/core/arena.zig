@@ -57,9 +57,9 @@ pub const ArenaOwnership = enum {
 /// - Compile-time prevention of cross-arena access
 /// - O(1) bulk deallocation through arena reset
 /// - Debug-mode allocation tracking and validation
-pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
+pub fn typed_arena_type(comptime T: type, comptime Owner: type) type {
     return struct {
-        const Arena = TypedArenaType(T, Owner);
+        const Arena = typed_arena_type(T, Owner);
         arena: std.heap.ArenaAllocator,
         ownership: ArenaOwnership,
         debug_allocation_count: if (builtin.mode == .Debug) usize else void,
@@ -204,15 +204,15 @@ pub fn validate_arena_naming(comptime T: type) void {
                     }
                 }
 
-                // Validate TypedArenaType fields have proper naming
+                // Validate typed_arena_type fields have proper naming
                 const field_type_name = @typeName(field.type);
-                if (std.mem.startsWith(u8, field_type_name, "arena.TypedArenaType") or
-                    std.mem.startsWith(u8, field_type_name, "core.arena.TypedArenaType") or
-                    std.mem.startsWith(u8, field_type_name, "kausaldb.arena.TypedArenaType") or
-                    std.mem.indexOf(u8, field_type_name, "TypedArenaType") != null)
+                if (std.mem.startsWith(u8, field_type_name, "arena.typed_arena_type") or
+                    std.mem.startsWith(u8, field_type_name, "core.arena.typed_arena_type") or
+                    std.mem.startsWith(u8, field_type_name, "kausaldb.arena.typed_arena_type") or
+                    std.mem.indexOf(u8, field_type_name, "typed_arena_type") != null)
                 {
                     if (!std.mem.endsWith(u8, field.name, "_arena")) {
-                        @compileError("TypedArenaType field '" ++ field.name ++ "' in " ++ @typeName(T) ++
+                        @compileError("typed_arena_type field '" ++ field.name ++ "' in " ++ @typeName(T) ++
                             " must end with '_arena' suffix");
                     }
                 }
@@ -330,7 +330,7 @@ comptime {
 
 test "TypedArena basic allocation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
@@ -340,7 +340,7 @@ test "TypedArena basic allocation" {
 
 test "TypedArena slice allocation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u8, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u8, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const slice = try arena.alloc_slice(10);
@@ -357,7 +357,7 @@ test "TypedArena slice allocation" {
 
 test "TypedArena create convenience method" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u64, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u64, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.create(100);
@@ -366,7 +366,7 @@ test "TypedArena create convenience method" {
 
 test "TypedArena clone method" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const original = @as(u32, 42);
@@ -377,7 +377,7 @@ test "TypedArena clone method" {
 
 test "TypedArena reset clears all allocations" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     // Allocate some data
@@ -397,7 +397,7 @@ test "TypedArena reset clears all allocations" {
 
 test "OwnedPtr ownership validation" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
@@ -416,7 +416,7 @@ test "OwnedPtr ownership validation" {
 
 test "OwnedPtr ownership transfer" {
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     const ptr = try arena.alloc();
@@ -477,7 +477,7 @@ test "TypedArena debug info in debug mode" {
     if (builtin.mode != .Debug) return;
 
     const TestOwner = struct {};
-    var arena = TypedArenaType(u32, TestOwner).init(std.testing.allocator, .simulation_test);
+    var arena = typed_arena_type(u32, TestOwner).init(std.testing.allocator, .simulation_test);
     defer arena.deinit();
 
     // Allocate some items
