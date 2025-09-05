@@ -22,7 +22,7 @@ const testing = std.testing;
 const validate_no_raw_pointers = arena_mod.validate_no_raw_pointers;
 const validate_ownership_usage = ownership.validate_ownership_usage;
 
-const typed_arena_type = arena_mod.typed_arena_type;
+const TypedArenaType = arena_mod.TypedArenaType;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ArenaOwnership = arena_mod.ArenaOwnership;
 const owned_ptr_type = arena_mod.owned_ptr_type;
@@ -49,10 +49,10 @@ test "CORRUPTION PREVENTION: Cross-arena pointer access caught at runtime" {
     // This test simulates the bug where pointers from one arena were
     // accidentally used after another arena was reset, causing use-after-free
 
-    var memtable_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var memtable_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer memtable_arena.deinit();
 
-    var sstable_arena = typed_arena_type(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
+    var sstable_arena = TypedArenaType(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
     defer sstable_arena.deinit();
 
     // Allocate block in memtable arena
@@ -208,7 +208,7 @@ test "CORRUPTION PREVENTION: Arena reset safety with memory accounting" {
     // This test demonstrates memory accounting that prevents the accounting
     // underflow bugs that indicated heap corruption
 
-    var test_arena = typed_arena_type(u8, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = TypedArenaType(u8, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer test_arena.deinit();
 
     // Simulate memory accounting like in BlockIndex
@@ -406,13 +406,13 @@ test "CORRUPTION PREVENTION: Memory safety integration test" {
     // have been vulnerable to corruption in the old system
 
     // Set up multiple subsystems with type-safe arenas
-    var memtable_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var memtable_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer memtable_arena.deinit();
 
-    var sstable_arena = typed_arena_type(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
+    var sstable_arena = TypedArenaType(ContextBlock, SSTableSubsystem).init(testing.allocator, .sstable_manager);
     defer sstable_arena.deinit();
 
-    var query_arena = typed_arena_type(u32, QuerySubsystem).init(testing.allocator, .query_engine);
+    var query_arena = TypedArenaType(u32, QuerySubsystem).init(testing.allocator, .query_engine);
     defer query_arena.deinit();
 
     // Create test blocks

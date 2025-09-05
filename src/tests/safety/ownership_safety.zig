@@ -18,18 +18,18 @@ const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = types.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedBlockCollection = ownership.OwnedBlockCollection;
-const typed_arena_type = arena.typed_arena_type;
+const TypedArenaType = arena.TypedArenaType;
 
 // Test subsystem simulators
 const MemtableSubsystem = struct {
-    arena: typed_arena_type(ContextBlock, @This()),
+    arena: TypedArenaType(ContextBlock, @This()),
     blocks: OwnedBlockCollection,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = typed_arena_type(ContextBlock, Self).init(allocator, .memtable_manager),
+            .arena = TypedArenaType(ContextBlock, Self).init(allocator, .memtable_manager),
             .blocks = OwnedBlockCollection.init(allocator, .memtable_manager),
         };
     }
@@ -59,14 +59,14 @@ const MemtableSubsystem = struct {
 };
 
 const StorageSubsystem = struct {
-    arena: typed_arena_type(ContextBlock, @This()),
+    arena: TypedArenaType(ContextBlock, @This()),
     blocks: OwnedBlockCollection,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = typed_arena_type(ContextBlock, Self).init(allocator, .storage_engine),
+            .arena = TypedArenaType(ContextBlock, Self).init(allocator, .storage_engine),
             .blocks = OwnedBlockCollection.init(allocator, .storage_engine),
         };
     }
@@ -87,14 +87,14 @@ const StorageSubsystem = struct {
 };
 
 const QuerySubsystem = struct {
-    arena: typed_arena_type(u8, @This()),
+    arena: TypedArenaType(u8, @This()),
     temp_blocks: std.array_list.Managed(OwnedBlock),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = typed_arena_type(u8, Self).init(allocator, .query_engine),
+            .arena = TypedArenaType(u8, Self).init(allocator, .query_engine),
             .temp_blocks = std.array_list.Managed(OwnedBlock).init(allocator),
         };
     }
@@ -312,7 +312,7 @@ test "large scale ownership operations" {
 test "memory accounting accuracy" {
     if (builtin.mode != .Debug) return; // Debug info only available in debug mode
 
-    var test_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer test_arena.deinit();
 
     // Check initial state
