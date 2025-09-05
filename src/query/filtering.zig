@@ -244,10 +244,11 @@ pub const FilteredQueryIterator = struct {
     pub fn next(self: *FilteredQueryIterator) !?OwnedQueryEngineBlock {
         if (self.finished) return null;
 
-        while (try self.storage_iterator.next()) |block| {
+        while (try self.storage_iterator.next()) |owned_block| {
             self.total_scanned += 1;
+            const block = owned_block.read(.storage_engine);
 
-            if (try self.query.expression.matches(block, self.allocator)) {
+            if (try self.query.expression.matches(block.*, self.allocator)) {
                 self.total_matches += 1;
 
                 // Pagination requires skipping initial matches to implement offset functionality
@@ -260,7 +261,7 @@ pub const FilteredQueryIterator = struct {
                 }
 
                 // Clone block to ensure iterator owns the memory
-                const cloned_block = try clone_block(self.allocator, block);
+                const cloned_block = try clone_block(self.allocator, block.*);
                 self.results_returned += 1;
                 return OwnedQueryEngineBlock.init(cloned_block);
             }
@@ -497,8 +498,8 @@ pub fn execute_filtered_query(
     var iterator = storage_engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    while (try iterator.next()) |block| {
-        const ctx_block = block;
+    while (try iterator.next()) |owned_block| {
+        const ctx_block = owned_block.read(.storage_engine).*;
         if (try query.expression.matches(ctx_block, allocator)) {
             total_matches += 1;
 

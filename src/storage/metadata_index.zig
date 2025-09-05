@@ -12,6 +12,7 @@ const std = @import("std");
 
 const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
+const ownership = @import("../core/ownership.zig");
 const assert_mod = @import("../core/assert.zig");
 
 const assert = assert_mod.assert;
@@ -19,6 +20,7 @@ const assert = assert_mod.assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const ContextBlock = context_block.ContextBlock;
+const OwnedBlock = ownership.OwnedBlock;
 
 /// Secondary index entry mapping metadata value to block IDs
 const IndexEntry = struct {

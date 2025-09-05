@@ -99,7 +99,8 @@ pub const GoldenMaster = struct {
         var block_iterator = storage_engine.iterate_all_blocks();
         defer block_iterator.deinit();
 
-        while (try block_iterator.next()) |block| {
+        while (try block_iterator.next()) |owned_block| {
+            const block = owned_block.read(.storage_engine).*;
             const id_hex = try block.id.to_hex(self.allocator);
             defer self.allocator.free(id_hex);
 

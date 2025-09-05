@@ -729,7 +729,8 @@ pub const QueryEngine = struct {
         defer iterator.deinit();
         var matches_found: u32 = 0;
 
-        while (try iterator.next()) |block| {
+        while (try iterator.next()) |owned_block| {
+            const block = owned_block.read(.storage_engine).*;
             var parsed = std.json.parseFromSlice(
                 std.json.Value,
                 self.allocator,
@@ -777,7 +778,8 @@ pub const QueryEngine = struct {
         defer iterator.deinit();
         var matches_found: u32 = 0;
 
-        while (try iterator.next()) |block| {
+        while (try iterator.next()) |owned_block| {
+            const block = owned_block.read(.storage_engine).*;
             var parsed = std.json.parseFromSlice(
                 std.json.Value,
                 self.allocator,
@@ -841,11 +843,12 @@ pub const QueryEngine = struct {
         var filtered_paths = std.array_list.Managed([]const BlockId).init(arena_allocator);
         var filtered_depths = std.array_list.Managed(u32).init(arena_allocator);
 
-        for (traversal_result.blocks, 0..) |block, i| {
+        for (traversal_result.blocks, 0..) |owned_query_block, i| {
+            const block_data = owned_query_block.read(.query_engine);
             var parsed = std.json.parseFromSlice(
                 std.json.Value,
                 self.allocator,
-                block.block.metadata_json,
+                block_data.metadata_json,
                 .{},
             ) catch continue;
             defer parsed.deinit();
@@ -853,7 +856,7 @@ pub const QueryEngine = struct {
             const metadata = parsed.value;
             const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
             if (std.mem.eql(u8, block_codebase, codebase)) {
-                try filtered_blocks.append(block);
+                try filtered_blocks.append(owned_query_block);
                 // Copy the path data using the arena allocator for consistent lifecycle
                 const path_copy = try arena_allocator.dupe(BlockId, traversal_result.paths[i]);
                 try filtered_paths.append(path_copy);

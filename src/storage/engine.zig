@@ -577,12 +577,17 @@ pub const StorageEngine = struct {
         // Validation should be called explicitly when needed, not on every write
     }
 
-    /// Write a ContextBlock to storage with automatic ownership transfer.
-    /// Convenience method that wraps the block with memtable_manager ownership.
+    /// Write a block to storage - primary public API.
+    /// Accepts ContextBlock from external callers and manages internal ownership transfer.
     pub fn put_block(self: *StorageEngine, block: ContextBlock) !void {
+        // Convert to owned block for internal storage subsystem coordination
         const owned_block = OwnedBlock.take_ownership(block, .memtable_manager);
         return self.put_block_owned(owned_block);
     }
+
+    // REMOVED: put_block_temporary() - Use put_block() with OwnedBlock.
+    // For legacy callers, create OwnedBlock.take_ownership(block, .temporary) 
+    // before calling put_block().
 
     /// Find a Context Block by ID with ownership-aware semantics.
     /// Returns OwnedBlock that can be safely transferred between subsystems.
@@ -932,14 +937,21 @@ pub const StorageEngine = struct {
         current_sstable: ?*SSTable,
         seen_blocks: std.AutoHashMap(BlockId, void),
 
-        /// Iterate through memtable first, then all SSTables in order
-        pub fn next(self: *BlockIterator) !?ContextBlock {
+        /// Iterate through memtable first, then all SSTables in order.
+        /// Returns OwnedBlock with storage_engine ownership for safe cross-subsystem usage.
+        pub fn next(self: *BlockIterator) !?StorageEngineBlock {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
-                const block = entry.value_ptr.block;
+                const owned_block = entry.value_ptr.*;
+                // Clone with storage_engine ownership for iterator return
+                const cloned_block = try owned_block.clone_with_ownership(
+                    self.backing_allocator, 
+                    .storage_engine, 
+                    null
+                );
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
-                self.seen_blocks.put(block.id, {}) catch {};
-                return block;
+                self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
+                return StorageEngineBlock.init(cloned_block.read(.storage_engine).*);
             }
 
             // Then iterate through SSTables
@@ -983,12 +995,17 @@ pub const StorageEngine = struct {
                 self.sstable_manager.arena_coordinator.validate_coordinator();
 
                 if (try self.current_sstable_iterator.?.next()) |sstable_block| {
-                    const block = sstable_block.read(.sstable_manager).*;
-                    // Skip if we've already seen this block (deduplication)
-                    // If OOM, skip deduplication and return block anyway
-                    const gop = self.seen_blocks.getOrPut(block.id) catch return block;
+                    const block_data = sstable_block.read(.sstable_manager);
+                    // Create owned block with storage_engine ownership for iterator return
+                    const storage_block = OwnedBlock.take_ownership(block_data.*, .storage_engine);
+                    
+                    // Skip if we've already seen this block (deduplication)  
+                    const gop = self.seen_blocks.getOrPut(block_data.id) catch {
+                        // If dedup tracking OOM, just return the block anyway
+                        return StorageEngineBlock.init(storage_block.read(.storage_engine).*);
+                    };
                     if (!gop.found_existing) {
-                        return block;
+                        return StorageEngineBlock.init(storage_block.read(.storage_engine).*);
                     }
                     // Continue to next block if duplicate
                     continue;
@@ -1357,7 +1374,7 @@ test "block iterator with empty storage" {
     defer iterator.deinit();
 
     const block = try iterator.next();
-    try testing.expectEqual(@as(?ContextBlock, null), block);
+    try testing.expectEqual(@as(?StorageEngineBlock, null), block);
 }
 
 test "block iterator with memtable blocks only" {
@@ -1394,8 +1411,8 @@ test "block iterator with memtable blocks only" {
     var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
-    while (try iterator.next()) |block| {
-        try found_blocks.append(block);
+    while (try iterator.next()) |owned_block| {
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1454,8 +1471,8 @@ test "block iterator with SSTable blocks" {
     var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
-    while (try iterator.next()) |block| {
-        try found_blocks.append(block);
+    while (try iterator.next()) |owned_block| {
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1499,8 +1516,8 @@ test "block iterator with mixed memtable and SSTable blocks" {
     var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
-    while (try iterator.next()) |block| {
-        try found_blocks.append(block);
+    while (try iterator.next()) |owned_block| {
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1546,10 +1563,10 @@ test "block iterator handles multiple calls to next after exhaustion" {
     try testing.expect(first != null);
 
     const second = try iterator.next();
-    try testing.expectEqual(@as(?ContextBlock, null), second);
+    try testing.expectEqual(@as(?StorageEngineBlock, null), second);
 
     const third = try iterator.next();
-    try testing.expectEqual(@as(?ContextBlock, null), third);
+    try testing.expectEqual(@as(?StorageEngineBlock, null), third);
 }
 
 test "error context logging for storage operations" {

@@ -119,7 +119,7 @@ pub const MemtableManager = struct {
         self.backing_allocator.free(self.data_dir);
     }
 
-    /// Add a context block to the in-memory memtable with full durability guarantees.
+    /// Add a block to the in-memory memtable with full durability guarantees.
     /// WAL-first design ensures durability before in-memory state update.
     /// This is the primary method for durable block storage operations.
     pub fn put_block_durable(self: *MemtableManager, block: ContextBlock) !void {
@@ -154,7 +154,7 @@ pub const MemtableManager = struct {
         try self.block_index.put_block(block);
     }
 
-    /// Add a context block to the in-memory memtable without WAL durability.
+    /// Add a block to the in-memory memtable without WAL durability.
     /// Used for WAL recovery operations where durability is already guaranteed.
     /// For regular operations, use put_block_durable() instead.
     pub fn put_block(self: *MemtableManager, block: ContextBlock) !void {
