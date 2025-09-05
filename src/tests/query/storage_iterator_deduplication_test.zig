@@ -9,14 +9,14 @@ const std = @import("std");
 
 const harness_mod = @import("../harness.zig");
 const context_block = @import("../../core/types.zig");
-const parse_file_to_blocks = @import("../../ingestion/parse_file_to_blocks.zig");
+const ingest_file = @import("../../ingestion/ingest_file.zig");
 
 const testing = std.testing;
 const StorageHarness = harness_mod.StorageHarness;
 const ContextBlock = context_block.ContextBlock;
 const BlockId = context_block.BlockId;
-const FileContent = parse_file_to_blocks.FileContent;
-const ParseConfig = parse_file_to_blocks.ParseConfig;
+const FileContent = ingest_file.FileContent;
+const ParseConfig = ingest_file.ParseConfig;
 
 test "storage iterator returns unique blocks only" {
     var test_harness = try StorageHarness.init_and_startup(testing.allocator, "iterator_dedup_test");
@@ -71,6 +71,7 @@ test "storage iterator returns unique blocks only" {
 
     // Iterate through all blocks and verify uniqueness
     var iterator = test_harness.storage_engine.iterate_all_blocks();
+    defer iterator.deinit();
     var total_blocks_returned: u32 = 0;
 
     while (try iterator.next()) |block| {
@@ -105,7 +106,7 @@ test "storage iterator consistency across multiple iterations" {
     defer test_harness.deinit();
 
     // Create a larger set of test blocks to stress test the iterator
-    var test_blocks = std.ArrayList(ContextBlock).init(testing.allocator);
+    var test_blocks = std.array_list.Managed(ContextBlock).init(testing.allocator);
     defer {
         for (test_blocks.items) |block| {
             testing.allocator.free(block.source_uri);
@@ -120,7 +121,7 @@ test "storage iterator consistency across multiple iterations" {
     var i: u32 = 0;
     while (i < num_test_blocks) : (i += 1) {
         const block = ContextBlock{
-            .id = BlockId.from_u32(i + 100), // Offset to avoid conflicts with other tests
+            .id = BlockId.from_u64(i + 100), // Offset to avoid conflicts with other tests
             .version = 1,
             .source_uri = try std.fmt.allocPrint(testing.allocator, "file://test_file_{d}.zig#L{d}-{d}", .{ i, i * 10, (i + 1) * 10 }),
             .metadata_json = try std.fmt.allocPrint(testing.allocator, "{{\"unit_type\":\"function\",\"unit_id\":\"test_file_{d}.zig:test_function_{d}\"}}", .{ i, i }),
@@ -144,6 +145,7 @@ test "storage iterator consistency across multiple iterations" {
         defer current_iteration_ids.deinit();
 
         var iterator = test_harness.storage_engine.iterate_all_blocks();
+        defer iterator.deinit();
         var blocks_in_this_iteration: u32 = 0;
 
         while (try iterator.next()) |block| {
@@ -217,13 +219,16 @@ test "storage iterator works correctly with parsed blocks" {
         .create_import_blocks = true, // Include imports to test more blocks
     };
 
-    const blocks = try parse_file_to_blocks.parse_file_to_blocks(
+    const blocks = try ingest_file.parse_file_to_blocks(
         testing.allocator,
         file_content,
         "storage_dedup_test",
         parse_config,
     );
-    defer testing.allocator.free(blocks);
+    defer {
+        for (blocks) |block| block.deinit(testing.allocator);
+        testing.allocator.free(blocks);
+    }
 
     // Store parsed blocks
     for (blocks) |block| {
@@ -235,6 +240,7 @@ test "storage iterator works correctly with parsed blocks" {
     defer seen_block_ids.deinit();
 
     var iterator = test_harness.storage_engine.iterate_all_blocks();
+    defer iterator.deinit();
     var total_blocks: u32 = 0;
 
     while (try iterator.next()) |block| {
@@ -254,5 +260,5 @@ test "storage iterator works correctly with parsed blocks" {
     try testing.expectEqual(total_blocks, seen_block_ids.count());
 
     // Verify the iterator returns exactly the number of blocks we stored
-    try testing.expectEqual(@as(u32, blocks.len), total_blocks);
+    try testing.expectEqual(@as(u32, @intCast(blocks.len)), total_blocks);
 }

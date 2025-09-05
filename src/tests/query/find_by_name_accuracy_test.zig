@@ -9,7 +9,7 @@ const std = @import("std");
 const harness_mod = @import("../harness.zig");
 const context_block = @import("../../core/types.zig");
 const ingest_directory = @import("../../ingestion/ingest_directory.zig");
-const parse_file_to_blocks = @import("../../ingestion/ingest_file.zig");
+const ingest_file = @import("../../ingestion/ingest_file.zig");
 const query = @import("../../query/engine.zig");
 
 const testing = std.testing;
@@ -17,8 +17,8 @@ const QueryHarness = harness_mod.QueryHarness;
 const ContextBlock = context_block.ContextBlock;
 const BlockId = context_block.BlockId;
 const IngestionConfig = ingest_directory.IngestionConfig;
-const FileContent = parse_file_to_blocks.FileContent;
-const ParseConfig = parse_file_to_blocks.ParseConfig;
+const FileContent = ingest_file.FileContent;
+const ParseConfig = ingest_file.ParseConfig;
 
 test "find_by_name returns exact function matches only" {
     var test_harness = try QueryHarness.init_and_startup(testing.allocator, "find_accuracy_test");
@@ -71,13 +71,16 @@ test "find_by_name returns exact function matches only" {
         .create_import_blocks = false,
     };
 
-    const blocks = try parse_file_to_blocks.parse_file_to_blocks(
+    const blocks = try ingest_file.parse_file_to_blocks(
         testing.allocator,
         file_content,
         "find_accuracy_test",
         parse_config,
     );
-    defer testing.allocator.free(blocks);
+    defer {
+        for (blocks) |block| block.deinit(testing.allocator);
+        testing.allocator.free(blocks);
+    }
 
     // Store blocks in storage engine
     for (blocks) |block| {
@@ -102,21 +105,21 @@ test "find_by_name returns exact function matches only" {
     }
 
     // Query for "deinit" - should find exactly 1
-    const deinit_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "deinit");
+    const deinit_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "deinit");
     defer deinit_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), deinit_results.total_matches);
     try testing.expectEqual(@as(usize, 1), deinit_results.results.len);
 
     // Query for "initialize_system" - should find exactly 1
-    const initialize_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "initialize_system");
+    const initialize_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "initialize_system");
     defer initialize_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), initialize_results.total_matches);
     try testing.expectEqual(@as(usize, 1), initialize_results.results.len);
 
     // Query for non-existent function - should find 0
-    const missing_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "nonexistent_function");
+    const missing_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "nonexistent_function");
     defer missing_results.deinit();
 
     try testing.expectEqual(@as(u32, 0), missing_results.total_matches);
@@ -131,8 +134,8 @@ test "find_by_name filters by entity type correctly" {
     const test_zig_content =
         \\const std = @import("std");
         \\
-        \\pub fn config_type() void {
-        \\    // Function with config in name
+        \\pub fn config() void {
+        \\    // Function named config
         \\}
         \\
         \\pub const Config = struct {
@@ -167,20 +170,23 @@ test "find_by_name filters by entity type correctly" {
         .create_import_blocks = false,
     };
 
-    const blocks = try parse_file_to_blocks.parse_file_to_blocks(
+    const blocks = try ingest_file.parse_file_to_blocks(
         testing.allocator,
         file_content,
         "find_accuracy_test",
         parse_config,
     );
-    defer testing.allocator.free(blocks);
+    defer {
+        for (blocks) |block| block.deinit(testing.allocator);
+        testing.allocator.free(blocks);
+    }
 
     for (blocks) |block| {
         try test_harness.storage().put_block(block);
     }
 
-    // Query for function named "Config" - should find exactly 1 function, not the struct
-    const function_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "Config");
+    // Query for function named "config" - should find exactly 1 function, not the struct
+    const function_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "config");
     defer function_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), function_results.total_matches);
@@ -188,11 +194,11 @@ test "find_by_name filters by entity type correctly" {
 
     // Verify it's actually the function by checking content
     const result_content = function_results.results[0].block.block.content;
-    try testing.expect(std.mem.indexOf(u8, result_content, "pub fn Config() void") != null);
+    try testing.expect(std.mem.indexOf(u8, result_content, "pub fn config() void") != null);
 
     // Query for struct named "Config" - when struct querying is implemented
     // This verifies entity type filtering works correctly
-    const struct_results = try test_harness.query_engine.find_by_name("test_codebase", "struct", "Config");
+    const struct_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "struct", "Config");
     defer struct_results.deinit();
 
     // Should find 0 for now since struct parsing might not be fully implemented
@@ -241,38 +247,41 @@ test "find_by_name handles complex function names correctly" {
         .create_import_blocks = false,
     };
 
-    const blocks = try parse_file_to_blocks.parse_file_to_blocks(
+    const blocks = try ingest_file.parse_file_to_blocks(
         testing.allocator,
         file_content,
         "find_accuracy_test",
         parse_config,
     );
-    defer testing.allocator.free(blocks);
+    defer {
+        for (blocks) |block| block.deinit(testing.allocator);
+        testing.allocator.free(blocks);
+    }
 
     for (blocks) |block| {
         try test_harness.storage().put_block(block);
     }
 
     // Test exact name matching for snake_case
-    const snake_case_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "process_data");
+    const snake_case_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "process_data");
     defer snake_case_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), snake_case_results.total_matches);
 
     // Test exact name matching for alternative function
-    const alternative_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "process_data_alternative");
+    const alternative_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "process_data_alternative");
     defer alternative_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), alternative_results.total_matches);
 
     // Test that partial matches are not returned
-    const partial_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "find");
+    const partial_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "find");
     defer partial_results.deinit();
 
     try testing.expectEqual(@as(u32, 0), partial_results.total_matches);
 
     // Test specific function with underscores
-    const specific_results = try test_harness.query_engine.find_by_name("test_codebase", "function", "maybe_find_block");
+    const specific_results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "maybe_find_block");
     defer specific_results.deinit();
 
     try testing.expectEqual(@as(u32, 1), specific_results.total_matches);
@@ -307,13 +316,16 @@ test "find_by_name result consistency across multiple queries" {
         .create_import_blocks = false,
     };
 
-    const blocks = try parse_file_to_blocks.parse_file_to_blocks(
+    const blocks = try ingest_file.parse_file_to_blocks(
         testing.allocator,
         file_content,
         "find_accuracy_test",
         parse_config,
     );
-    defer testing.allocator.free(blocks);
+    defer {
+        for (blocks) |block| block.deinit(testing.allocator);
+        testing.allocator.free(blocks);
+    }
 
     for (blocks) |block| {
         try test_harness.storage().put_block(block);
@@ -325,7 +337,7 @@ test "find_by_name result consistency across multiple queries" {
 
     var i: usize = 0;
     while (i < num_iterations) : (i += 1) {
-        const results = try test_harness.query_engine.find_by_name("test_codebase", "function", "consistent_function");
+        const results = try test_harness.query_engine.find_by_name("find_accuracy_test", "function", "consistent_function");
         defer results.deinit();
 
         // Should always find exactly 1 result
