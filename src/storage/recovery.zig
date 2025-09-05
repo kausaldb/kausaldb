@@ -14,9 +14,12 @@ const context_block = @import("../core/types.zig");
 const graph_edge_index = @import("graph_edge_index.zig");
 const harness = @import("../tests/harness.zig");
 const memory = @import("../core/memory.zig");
+const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const wal = @import("wal.zig");
 const assert_mod = @import("../core/assert.zig");
+
+const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 
 const assert = assert_mod.assert;
 const assert_fmt = assert_mod.assert_fmt;

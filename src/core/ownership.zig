@@ -691,14 +691,13 @@ test "OwnedBlock basic operations" {
         std.testing.allocator.free(block.metadata_json);
         std.testing.allocator.free(block.content);
     }
-
-    var owned = OwnedBlock.init(block, .simulation_test, null);
+    var owned = OwnedBlock.take_ownership(block, .memtable_manager);
 
     // Owner can read and write
-    const read_ptr = owned.read(.simulation_test);
+    const read_ptr = owned.read(.memtable_manager);
     try std.testing.expect(read_ptr.id.eql(block.id));
 
-    const write_ptr = owned.write(.simulation_test);
+    const write_ptr = owned.write(.memtable_manager);
     write_ptr.version = 2;
     try std.testing.expect(owned.block.version == 2);
 
@@ -721,8 +720,7 @@ test "OwnedBlock ownership transfer" {
         std.testing.allocator.free(block.metadata_json);
         std.testing.allocator.free(block.content);
     }
-
-    var owned = OwnedBlock.init(block, .memtable_manager, null);
+    var owned = OwnedBlock.take_ownership(block, .memtable_manager);
 
     // Transfer ownership using new safe method
     var transferred = owned.transfer(.query_engine, null);

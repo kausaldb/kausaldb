@@ -1,25 +1,19 @@
-//! Direct File-to-Blocks Parser
+//! Direct File-to-Blocks Parser (Ownership-Compliant)
 //!
-//! Eliminates the ParsedUnit abstraction by parsing files directly into ContextBlocks.
-//! Follows KausalDB's "Simplicity is the prerequisite for reliability" principle
-//! by providing a single, explicit function that handles file parsing without
-//! intermediate representations or complex chunking strategies.
-//!
-//! Design Principles:
-//! - Direct transformation: FileContent -> ContextBlocks (no intermediate steps)
-//! - Single responsibility: One function handles complete file processing
-//! - Explicit control flow: No hidden abstractions or pipeline magic
-//! - Arena-based memory management for bounded allocations
+//! All internal helpers, structs, and collections use IngestionBlock (ownership wrapper).
+//! Only the final API boundary converts to ContextBlock for external use.
 
 const std = @import("std");
 const assert_mod = @import("../core/assert.zig");
 const assert = assert_mod.assert;
 const types = @import("../core/types.zig");
+const ownership = @import("../core/ownership.zig");
 
 const Allocator = std.mem.Allocator;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
+const IngestionBlock = ownership.comptime_owned_block_type(.ingestion_pipeline);
 
 /// Simple file content structure for direct parsing
 /// Compatible with ingest_directory.zig FileContent
@@ -33,47 +27,47 @@ pub const FileContent = struct {
 
 /// Configuration for direct parsing behavior
 pub const ParseConfig = struct {
-    /// Whether to include function bodies or just signatures
     include_function_bodies: bool = true,
-    /// Whether to extract private (non-pub) definitions
     include_private: bool = true,
-    /// Whether to extract test blocks
     include_tests: bool = true,
-    /// Maximum function body size to parse (bytes)
     max_function_body_size: u32 = 8192,
-    /// Whether to create separate blocks for imports
     create_import_blocks: bool = true,
 };
 
-/// Parse a file directly into ContextBlocks, eliminating intermediate abstractions
+/// Parse a file directly into ContextBlocks (API boundary)
 pub fn parse_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
     codebase_name: []const u8,
     config: ParseConfig,
 ) ![]ContextBlock {
-    // Route to appropriate parser based on content type
+    var owned_blocks: []IngestionBlock = undefined;
     if (std.mem.eql(u8, file_content.content_type, "text/zig")) {
-        return parse_zig_file_to_blocks(allocator, file_content, codebase_name, config);
+        owned_blocks = try parse_zig_file_to_blocks(allocator, file_content, codebase_name, config);
     } else if (std.mem.startsWith(u8, file_content.content_type, "text/")) {
-        return parse_text_file_to_blocks(allocator, file_content, codebase_name, config);
+        owned_blocks = try parse_text_file_to_blocks(allocator, file_content, codebase_name, config);
     } else {
         // Unsupported content type - return empty slice
         return allocator.alloc(ContextBlock, 0);
     }
+    // Convert to ContextBlock at API boundary
+    var blocks = try allocator.alloc(ContextBlock, owned_blocks.len);
+    for (owned_blocks, 0..) |owned, i| {
+        blocks[i] = owned.extract();
+    }
+    return blocks;
 }
 
-/// Parse Zig source file directly into ContextBlocks
+/// Parse Zig source file directly into IngestionBlocks
 fn parse_zig_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
     codebase_name: []const u8,
     config: ParseConfig,
-) ![]ContextBlock {
-    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
-    defer blocks.deinit(); // Only on error - success path transfers ownership
+) ![]IngestionBlock {
+    var blocks = std.array_list.Managed(IngestionBlock).init(allocator);
+    defer blocks.deinit(); // Only on error
 
-    // Parse the file line by line to extract semantic units
     var lines = std.mem.splitSequence(u8, file_content.data, "\n");
     var line_num: u32 = 1;
     var current_function: ?FunctionInfo = null;
@@ -83,12 +77,11 @@ fn parse_zig_file_to_blocks(
         defer line_num += 1;
 
         const trimmed_line = std.mem.trim(u8, line, " \t");
-        if (trimmed_line.len == 0) continue; // Skip empty lines
+        if (trimmed_line.len == 0) continue;
 
-        // Track brace depth for function body extraction
         brace_depth = brace_depth + @as(i32, @intCast(count_char(trimmed_line, '{'))) - @as(i32, @intCast(count_char(trimmed_line, '}')));
 
-        // Handle imports
+        // Imports
         if (config.create_import_blocks and std.mem.startsWith(u8, trimmed_line, "const ") and
             std.mem.indexOf(u8, trimmed_line, "@import(") != null)
         {
@@ -97,44 +90,36 @@ fn parse_zig_file_to_blocks(
             continue;
         }
 
-        // Handle function declarations
+        // Function declarations
         if (is_function_declaration(trimmed_line)) {
-            // Finish previous function if any
             if (current_function) |*func_info| {
                 const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num - 1);
                 try blocks.append(func_block);
                 func_info.deinit();
             }
-
-            // Start new function
             current_function = try parse_function_declaration(allocator, trimmed_line, line_num);
             errdefer if (current_function) |*func| func.deinit();
         } else if (current_function != null) {
-            // Accumulate function body
             if (config.include_function_bodies and
                 current_function.?.body_lines.items.len * 80 < config.max_function_body_size)
-            { // Rough size estimate
+            {
                 try current_function.?.body_lines.append(try allocator.dupe(u8, trimmed_line));
             }
-
-            // End function when braces balance and we're back to top level
             if (brace_depth <= 0 and trimmed_line.len > 0 and trimmed_line[trimmed_line.len - 1] == '}') {
                 const func_block = try create_function_block(allocator, file_content.path, codebase_name, current_function.?, line_num);
                 try blocks.append(func_block);
-
-                // Function ownership transfers to blocks list, preventing memory leaks
                 current_function.?.deinit();
                 current_function = null;
             }
         }
 
-        // Handle test blocks
+        // Test blocks
         if (config.include_tests and std.mem.startsWith(u8, trimmed_line, "test ")) {
             const test_block = try create_test_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
             try blocks.append(test_block);
         }
 
-        // Handle struct/const declarations
+        // Struct/const declarations
         if (std.mem.startsWith(u8, trimmed_line, "pub const ") or
             std.mem.startsWith(u8, trimmed_line, "const "))
         {
@@ -148,7 +133,7 @@ fn parse_zig_file_to_blocks(
         }
     }
 
-    // Handle final function if file ended mid-function
+    // Final function if file ended mid-function
     if (current_function) |*func_info| {
         const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num);
         try blocks.append(func_block);
@@ -158,36 +143,35 @@ fn parse_zig_file_to_blocks(
     return blocks.toOwnedSlice();
 }
 
-/// Parse non-Zig text files into a single documentation block
+/// Parse non-Zig text files into a single documentation IngestionBlock
 fn parse_text_file_to_blocks(
     allocator: Allocator,
     file_content: FileContent,
     codebase_name: []const u8,
     config: ParseConfig,
-) ![]ContextBlock {
-    _ = config; // Not used for text files yet
+) ![]IngestionBlock {
+    _ = config;
 
-    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    var blocks = std.array_list.Managed(IngestionBlock).init(allocator);
 
-    // Create a single documentation block for the entire file
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L1-{d}", .{ file_content.path, count_lines(file_content.data) });
     const metadata_json = try create_text_metadata_json(allocator, file_content, codebase_name);
     const content = try allocator.dupe(u8, file_content.data);
 
-    const block = ContextBlock{
+    const block = IngestionBlock.init(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = content,
-    };
+    });
 
     try blocks.append(block);
     return blocks.toOwnedSlice();
 }
 
-/// Information about a function being parsed
+/// Information about a function being parsed (internal, not a ContextBlock)
 const FunctionInfo = struct {
     name: []const u8,
     signature: []const u8,
@@ -207,7 +191,6 @@ const FunctionInfo = struct {
     }
 };
 
-/// Check if a line contains a function declaration
 fn is_function_declaration(line: []const u8) bool {
     return (std.mem.startsWith(u8, line, "pub fn ") or
         std.mem.startsWith(u8, line, "fn ") or
@@ -216,11 +199,9 @@ fn is_function_declaration(line: []const u8) bool {
         std.mem.indexOf(u8, line, "(") != null;
 }
 
-/// Parse function declaration into FunctionInfo
 fn parse_function_declaration(allocator: Allocator, line: []const u8, line_num: u32) !FunctionInfo {
     const is_public = std.mem.startsWith(u8, line, "pub ");
 
-    // Extract function name
     const fn_start = std.mem.indexOf(u8, line, "fn ") orelse return error.InvalidFunction;
     const name_start = fn_start + 3;
     const name_end = std.mem.indexOfAny(u8, line[name_start..], " (") orelse return error.InvalidFunction;
@@ -237,19 +218,17 @@ fn parse_function_declaration(allocator: Allocator, line: []const u8, line_num: 
     };
 }
 
-/// Create a ContextBlock for a function
+/// Create an IngestionBlock for a function
 fn create_function_block(
     allocator: Allocator,
     file_path: []const u8,
     codebase_name: []const u8,
     func_info: FunctionInfo,
     end_line: u32,
-) !ContextBlock {
+) !IngestionBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, func_info.start_line, end_line });
 
-    // JSON metadata enables downstream query engine to filter and classify blocks
-    // without re-parsing source code, trading storage space for query performance
     const metadata_json = try std.fmt.allocPrint(allocator, "{{" ++
         "\"unit_type\":\"function\"," ++
         "\"unit_id\":\"{s}:{s}\"," ++
@@ -266,7 +245,6 @@ fn create_function_block(
         "}}" ++
         "}}", .{ file_path, func_info.name, codebase_name, file_path, func_info.start_line, end_line, if (func_info.is_public) "public" else "private" });
 
-    // Build content
     var content = std.array_list.Managed(u8).init(allocator);
     defer content.deinit();
 
@@ -279,23 +257,23 @@ fn create_function_block(
         }
     }
 
-    return ContextBlock{
+    return IngestionBlock.init(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try content.toOwnedSlice(),
-    };
+    });
 }
 
-/// Create a ContextBlock for an import
+/// Create an IngestionBlock for an import
 fn create_import_block(
     allocator: Allocator,
     file_path: []const u8,
     codebase_name: []const u8,
     line: []const u8,
     line_num: u32,
-) !ContextBlock {
+) !IngestionBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
@@ -312,23 +290,23 @@ fn create_import_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return ContextBlock{
+    return IngestionBlock.init(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),
-    };
+    });
 }
 
-/// Create a ContextBlock for a test
+/// Create an IngestionBlock for a test
 fn create_test_block(
     allocator: Allocator,
     file_path: []const u8,
     codebase_name: []const u8,
     line: []const u8,
     line_num: u32,
-) !ContextBlock {
+) !IngestionBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
@@ -345,23 +323,23 @@ fn create_test_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return ContextBlock{
+    return IngestionBlock.init(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),
-    };
+    });
 }
 
-/// Create a ContextBlock for a struct/const declaration
+/// Create an IngestionBlock for a struct/const declaration
 fn create_struct_block(
     allocator: Allocator,
     file_path: []const u8,
     codebase_name: []const u8,
     line: []const u8,
     line_num: u32,
-) !ContextBlock {
+) !IngestionBlock {
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L{d}-{d}", .{ file_path, line_num, line_num });
 
@@ -378,13 +356,13 @@ fn create_struct_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return ContextBlock{
+    return IngestionBlock.init(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),
-    };
+    });
 }
 
 /// Create metadata JSON for text files
@@ -408,7 +386,6 @@ fn create_text_metadata_json(
         "}}", .{ file_content.path, codebase_name, file_content.path, count_lines(file_content.data), file_content.content_type });
 }
 
-/// Count occurrences of a character in a string
 fn count_char(str: []const u8, char: u8) u32 {
     var count: u32 = 0;
     for (str) |c| {
@@ -417,7 +394,6 @@ fn count_char(str: []const u8, char: u8) u32 {
     return count;
 }
 
-/// Count lines in text content
 fn count_lines(content: []const u8) u32 {
     return @intCast(std.mem.count(u8, content, "\n") + 1);
 }

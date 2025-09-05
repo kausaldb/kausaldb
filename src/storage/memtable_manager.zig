@@ -29,6 +29,7 @@ const GraphEdge = context_block.GraphEdge;
 const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
+const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 const VFS = vfs.VFS;
 const WAL = wal.WAL;
 const WALEntry = wal.WALEntry;
@@ -243,9 +244,9 @@ pub const MemtableManager = struct {
         id: BlockId,
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
-        if (self.block_index.find_block(id, .memtable_manager)) |block_ptr| {
+        if (self.block_index.find_block(id, .memtable_manager)) |block_data| {
             // Create temporary owned block for cloning
-            const temp_owned = OwnedBlock.init(block_ptr.*, .memtable_manager, null);
+            const temp_owned = OwnedBlock.init(block_data, .memtable_manager, null);
             // Clone with new ownership for safe transfer between subsystems
             return try temp_owned.clone_with_ownership(self.backing_allocator, block_ownership, null);
         }

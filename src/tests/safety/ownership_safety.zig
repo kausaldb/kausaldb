@@ -21,65 +21,65 @@ const OwnedBlockCollection = ownership.OwnedBlockCollection;
 const TypedArenaType = arena.typed_arena_type;
 
 // Test subsystem simulators
+const MemtableBlock = ownership.comptime_owned_block_type(.memtable_manager);
+const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
+const QueryBlock = ownership.comptime_owned_block_type(.query_engine);
+
 const MemtableSubsystem = struct {
-    arena: TypedArenaType(ContextBlock, @This()),
-    blocks: OwnedBlockCollection,
+    arena: TypedArenaType(MemtableBlock, @This()),
+    blocks: std.ArrayListUnmanaged(MemtableBlock),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(ContextBlock, Self).init(allocator, .memtable_manager),
-            .blocks = OwnedBlockCollection.init(allocator, .memtable_manager),
+            .arena = TypedArenaType(MemtableBlock, Self).init(allocator, .memtable_manager),
+            .blocks = std.ArrayListUnmanaged(MemtableBlock){},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.blocks.blocks.deinit();
+        self.blocks.deinit(self.arena.allocator());
         self.arena.deinit();
     }
 
     pub fn add_block(self: *Self, block: ContextBlock) !void {
-        const owned_block = try self.arena.alloc();
-        owned_block.* = block;
-
-        var wrapped = OwnedBlock.init(owned_block.*, .memtable_manager, &self.arena.arena);
-        try self.blocks.add_block(&wrapped);
+        const owned = MemtableBlock.init(block);
+        try self.blocks.append(self.arena.allocator(), owned);
     }
 
     pub fn transfer_to_storage(self: *Self, storage: *StorageSubsystem) !void {
-        for (self.blocks.blocks.items) |*owned_block| {
-            const cloned = try owned_block.clone_with_ownership(storage.arena.allocator(), .storage_engine, &storage.arena.arena);
-            try storage.blocks.add_block_by_clone(&cloned, storage.arena.allocator());
+        for (self.blocks.items) |*memtable_block| {
+            const storage_owned = StorageBlock.init(memtable_block.extract());
+            try storage.blocks.append(storage.arena.allocator(), storage_owned);
         }
-        // Clear memtable after transfer - arena reset handles memory cleanup
-        self.blocks.blocks.clearRetainingCapacity();
+        self.blocks.clearRetainingCapacity();
         self.arena.reset();
     }
 };
 
 const StorageSubsystem = struct {
-    arena: TypedArenaType(ContextBlock, @This()),
-    blocks: OwnedBlockCollection,
+    arena: TypedArenaType(StorageBlock, @This()),
+    blocks: std.ArrayListUnmanaged(StorageBlock),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(ContextBlock, Self).init(allocator, .storage_engine),
-            .blocks = OwnedBlockCollection.init(allocator, .storage_engine),
+            .arena = TypedArenaType(StorageBlock, Self).init(allocator, .storage_engine),
+            .blocks = std.ArrayListUnmanaged(StorageBlock){},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.blocks.blocks.deinit();
+        self.blocks.deinit(self.arena.allocator());
         self.arena.deinit();
     }
 
     pub fn find_block(self: *Self, block_id: BlockId) ?*const ContextBlock {
-        for (self.blocks.blocks.items) |*owned_block| {
-            if (owned_block.block.id.eql(block_id)) {
-                return owned_block.read(.storage_engine);
+        for (self.blocks.items) |*storage_block| {
+            if (storage_block.block.id.eql(block_id)) {
+                return storage_block.read(.storage_engine);
             }
         }
         return null;
@@ -87,29 +87,26 @@ const StorageSubsystem = struct {
 };
 
 const QuerySubsystem = struct {
-    arena: TypedArenaType(u8, @This()),
-    temp_blocks: std.array_list.Managed(OwnedBlock),
+    arena: TypedArenaType(QueryBlock, @This()),
+    temp_blocks: std.ArrayListUnmanaged(QueryBlock),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(u8, Self).init(allocator, .query_engine),
-            .temp_blocks = std.array_list.Managed(OwnedBlock).init(allocator),
+            .arena = TypedArenaType(QueryBlock, Self).init(allocator, .query_engine),
+            .temp_blocks = std.ArrayListUnmanaged(QueryBlock){},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        // Arena cleanup handles memory for cloned blocks
-        self.temp_blocks.deinit();
+        self.temp_blocks.deinit(self.arena.allocator());
         self.arena.deinit();
     }
 
     pub fn create_query_result(self: *Self, source_block: *const ContextBlock) !void {
-        // Clone block for query processing with temporary ownership
-        const cloned = try OwnedBlock.take_ownership(source_block.*, .temporary)
-            .clone_with_ownership(self.arena.allocator(), .query_engine, &self.arena.arena);
-        try self.temp_blocks.append(cloned);
+        const query_owned = QueryBlock.init(source_block.*);
+        try self.temp_blocks.append(self.arena.allocator(), query_owned);
     }
 };
 
@@ -171,12 +168,12 @@ test "complete block lifecycle with ownership transfers" {
     // Step 1: Add blocks to memtable
     try memtable.add_block(block1);
     try memtable.add_block(block2);
-    try testing.expect(memtable.blocks.blocks.items.len == 2);
+    try testing.expect(memtable.blocks.items.len == 2);
 
     // Step 2: Transfer blocks to storage (memtable flush simulation)
     try memtable.transfer_to_storage(&storage);
-    try testing.expect(memtable.blocks.blocks.items.len == 0); // Memtable cleared
-    try testing.expect(storage.blocks.blocks.items.len == 2); // Storage has blocks
+    try testing.expect(memtable.blocks.items.len == 0); // Memtable cleared
+    try testing.expect(storage.blocks.items.len == 2); // Storage has blocks
 
     // Step 3: Query can read from storage
     const found_block = storage.find_block(block1.id);
@@ -189,7 +186,7 @@ test "complete block lifecycle with ownership transfers" {
 
     // Step 5: Verify ownership isolation
     // Each subsystem owns its blocks independently
-    for (storage.blocks.blocks.items) |*storage_block| {
+    for (storage.blocks.items) |*storage_block| {
         try testing.expect(storage_block.is_owned_by(.storage_engine));
     }
 
@@ -223,10 +220,10 @@ test "memory safety with arena reset and reuse" {
         };
 
         try memtable.add_block(block);
-        try testing.expect(memtable.blocks.blocks.items.len == 1);
+        try testing.expect(memtable.blocks.items.len == 1);
 
         // Clear and reset for next cycle - arena reset handles memory cleanup
-        memtable.blocks.blocks.clearRetainingCapacity();
+        memtable.blocks.clearRetainingCapacity();
         memtable.arena.reset();
     }
 }
@@ -296,15 +293,15 @@ test "large scale ownership operations" {
         try memtable.add_block(block);
     }
 
-    try testing.expect(memtable.blocks.blocks.items.len == num_blocks);
+    try testing.expect(memtable.blocks.items.len == num_blocks);
 
     // Transfer all blocks
     try memtable.transfer_to_storage(&storage);
-    try testing.expect(memtable.blocks.blocks.items.len == 0);
-    try testing.expect(storage.blocks.blocks.items.len == num_blocks);
+    try testing.expect(memtable.blocks.items.len == 0);
+    try testing.expect(storage.blocks.items.len == num_blocks);
 
     // Verify all blocks are properly owned by storage
-    for (storage.blocks.blocks.items) |*owned_block| {
+    for (storage.blocks.items) |*owned_block| {
         try testing.expect(owned_block.is_owned_by(.storage_engine));
     }
 }

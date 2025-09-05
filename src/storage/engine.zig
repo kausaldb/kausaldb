@@ -46,6 +46,8 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ComptimeOwnedBlock = ownership.ComptimeOwnedBlock;
 const ContextBlock = context_block.ContextBlock;
+
+const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 const GraphEdge = context_block.GraphEdge;
 const ParsedBlock = context_block.ParsedBlock;
 const MemtableBlock = ownership.MemtableBlock;
@@ -545,7 +547,12 @@ pub const StorageEngine = struct {
         }
 
         fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
-        self.memtable_manager.put_block_durable_owned(owned_block) catch |err| {
+
+        // Transfer ownership from storage engine to memtable manager
+        var mutable_owned_block = owned_block;
+        const transferred_block = mutable_owned_block.transfer(.memtable_manager, undefined);
+
+        self.memtable_manager.put_block_durable_owned(transferred_block) catch |err| {
             error_context.log_storage_error(err, error_context.block_context("put_block_durable_owned", block_data.id));
             return err;
         };
@@ -581,12 +588,12 @@ pub const StorageEngine = struct {
     /// Accepts ContextBlock from external callers and manages internal ownership transfer.
     pub fn put_block(self: *StorageEngine, block: ContextBlock) !void {
         // Convert to owned block for internal storage subsystem coordination
-        const owned_block = OwnedBlock.take_ownership(block, .memtable_manager);
+        const owned_block = OwnedBlock.take_ownership(block, .storage_engine);
         return self.put_block_owned(owned_block);
     }
 
     // REMOVED: put_block_temporary() - Use put_block() with OwnedBlock.
-    // For legacy callers, create OwnedBlock.take_ownership(block, .temporary) 
+    // For legacy callers, create OwnedBlock.take_ownership(block, .temporary)
     // before calling put_block().
 
     /// Find a Context Block by ID with ownership-aware semantics.
@@ -944,11 +951,7 @@ pub const StorageEngine = struct {
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
                 // Clone with storage_engine ownership for iterator return
-                const cloned_block = try owned_block.clone_with_ownership(
-                    self.backing_allocator, 
-                    .storage_engine, 
-                    null
-                );
+                const cloned_block = try owned_block.clone_with_ownership(self.backing_allocator, .storage_engine, null);
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
                 self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
                 return StorageEngineBlock.init(cloned_block.read(.storage_engine).*);
@@ -998,8 +1001,8 @@ pub const StorageEngine = struct {
                     const block_data = sstable_block.read(.sstable_manager);
                     // Create owned block with storage_engine ownership for iterator return
                     const storage_block = OwnedBlock.take_ownership(block_data.*, .storage_engine);
-                    
-                    // Skip if we've already seen this block (deduplication)  
+
+                    // Skip if we've already seen this block (deduplication)
                     const gop = self.seen_blocks.getOrPut(block_data.id) catch {
                         // If dedup tracking OOM, just return the block anyway
                         return StorageEngineBlock.init(storage_block.read(.storage_engine).*);
@@ -1390,29 +1393,28 @@ test "block iterator with memtable blocks only" {
     const block1 = ContextBlock{
         .id = BlockId.generate(),
         .version = 1,
-        .source_uri = "test1.zig",
+        .source_uri = "file://memtable1.zig",
         .metadata_json = "{}",
         .content = "content 1",
     };
     const block2 = ContextBlock{
         .id = BlockId.generate(),
         .version = 1,
-        .source_uri = "test2.zig",
+        .source_uri = "file://memtable2.zig",
         .metadata_json = "{}",
         .content = "content 2",
     };
-
     try engine.put_block(block1);
     try engine.put_block(block2);
 
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block.read(.storage_engine).*);
+        try found_blocks.append(owned_block);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1420,12 +1422,13 @@ test "block iterator with memtable blocks only" {
     var found_block1 = false;
     var found_block2 = false;
     for (found_blocks.items) |block| {
-        if (std.mem.eql(u8, &block.id.bytes, &block1.id.bytes)) {
+        const raw_block = block.extract();
+        if (std.mem.eql(u8, &raw_block.id.bytes, &block1.id.bytes)) {
             found_block1 = true;
-            try testing.expectEqualStrings("content 1", block.content);
-        } else if (std.mem.eql(u8, &block.id.bytes, &block2.id.bytes)) {
+            try testing.expectEqualStrings("content 1", raw_block.content);
+        } else if (std.mem.eql(u8, &raw_block.id.bytes, &block2.id.bytes)) {
             found_block2 = true;
-            try testing.expectEqualStrings("content 2", block.content);
+            try testing.expectEqualStrings("content 2", raw_block.content);
         }
     }
     try testing.expect(found_block1);
@@ -1446,18 +1449,17 @@ test "block iterator with SSTable blocks" {
     const block1 = ContextBlock{
         .id = BlockId.generate(),
         .version = 1,
-        .source_uri = "sstable1.zig",
+        .source_uri = "file://sstable1.zig",
         .metadata_json = "{}",
         .content = "sstable content 1",
     };
     const block2 = ContextBlock{
         .id = BlockId.generate(),
         .version = 1,
-        .source_uri = "sstable2.zig",
+        .source_uri = "file://sstable2.zig",
         .metadata_json = "{}",
         .content = "sstable content 2",
     };
-
     try engine.put_block(block1);
     try engine.put_block(block2);
 
@@ -1468,11 +1470,11 @@ test "block iterator with SSTable blocks" {
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block.read(.storage_engine).*);
+        try found_blocks.append(owned_block);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1513,11 +1515,11 @@ test "block iterator with mixed memtable and SSTable blocks" {
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block.read(.storage_engine).*);
+        try found_blocks.append(owned_block);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1525,12 +1527,13 @@ test "block iterator with mixed memtable and SSTable blocks" {
     var found_sstable_block = false;
     var found_memtable_block = false;
     for (found_blocks.items) |block| {
-        if (std.mem.eql(u8, &block.id.bytes, &sstable_block.id.bytes)) {
+        const raw_block = block.extract();
+        if (std.mem.eql(u8, &raw_block.id.bytes, &sstable_block.id.bytes)) {
             found_sstable_block = true;
-            try testing.expectEqualStrings("sstable content", block.content);
-        } else if (std.mem.eql(u8, &block.id.bytes, &memtable_block.id.bytes)) {
+            try testing.expectEqualStrings("sstable content", raw_block.content);
+        } else if (std.mem.eql(u8, &raw_block.id.bytes, &memtable_block.id.bytes)) {
             found_memtable_block = true;
-            try testing.expectEqualStrings("memtable content", block.content);
+            try testing.expectEqualStrings("memtable content", raw_block.content);
         }
     }
     try testing.expect(found_sstable_block);

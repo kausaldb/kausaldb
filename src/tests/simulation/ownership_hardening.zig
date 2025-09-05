@@ -32,7 +32,7 @@ test "cross-subsystem memory access violation detection" {
     // Enable ownership violation injection with 50% rate for varied patterns
     harness.simulation.enable_ownership_violations(0.5);
 
-    // Create test blocks as raw ContextBlocks (storage engine will wrap as .temporary)
+    // Create test blocks and wrap in explicit ownership types
     const storage_block_raw = ContextBlock{
         .id = TestData.deterministic_block_id(1),
         .version = 1,
@@ -40,6 +40,7 @@ test "cross-subsystem memory access violation detection" {
         .metadata_json = "{}",
         .content = "Cross-subsystem access test content",
     };
+    const storage_owned = ownership.OwnedBlock.take_ownership(storage_block_raw, .storage_engine);
 
     const query_block_raw = ContextBlock{
         .id = TestData.deterministic_block_id(2),
@@ -62,9 +63,7 @@ test "cross-subsystem memory access violation detection" {
     while (attempts < max_attempts and !violation_detected) : (attempts += 1) {
         harness.simulation.reset_ownership_violation_stats();
 
-        // Create owned block for violation injection testing
-        const storage_owned = ownership.OwnedBlock.take_ownership(storage_block_raw, .storage_engine);
-
+        // Use explicit owned block for violation injection testing
         // Inject cross-subsystem access violation
         const potentially_corrupted = harness.simulation.inject_ownership_violation(
             storage_owned,

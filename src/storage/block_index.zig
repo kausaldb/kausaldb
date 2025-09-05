@@ -21,6 +21,7 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
+const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 
 /// In-memory block index using Arena Coordinator Pattern for efficient bulk operations.
 /// Provides fast writes and reads while maintaining O(1) memory cleanup through
@@ -107,33 +108,30 @@ pub const BlockIndex = struct {
         // Catch null pointers masquerading as slices
         if (block.source_uri.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.source_uri.ptr) != 0, "source_uri has null pointer with non-zero length", .{});
+            assert_fmt(@intFromPtr(block.source_uri.ptr) != 0, "source_uri has null pointer", .{});
         }
         if (block.metadata_json.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.metadata_json.ptr) != 0, "metadata_json has null pointer with non-zero length", .{});
+            assert_fmt(@intFromPtr(block.metadata_json.ptr) != 0, "metadata_json has null pointer", .{});
         }
         if (block.content.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.content.ptr) != 0, "content has null pointer with non-zero length", .{});
+            assert_fmt(@intFromPtr(block.content.ptr) != 0, "content has null pointer", .{});
         }
 
         // Clone all string content through arena coordinator for O(1) bulk deallocation
         // Large blocks use chunked copying to avoid cache misses during multi-MB allocations
-        const cloned_owned_block = if (block.content.len >= 512 * 1024) blk: {
-            break :blk try self.clone_large_block(&block);
+        const cloned_block = if (block.content.len >= 512 * 1024) blk: {
+            break :blk try self.clone_large_block(block);
         } else blk: {
-            const small_block = ContextBlock{
+            break :blk ContextBlock{
                 .id = block.id,
                 .version = block.version,
                 .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
                 .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
                 .content = try self.arena_coordinator.duplicate_slice(u8, block.content),
             };
-            break :blk OwnedBlock.take_ownership(small_block, .memtable_manager);
         };
-        
-        const cloned_block = cloned_owned_block.read(.memtable_manager);
 
         // Debug-time validation that coordinator correctly clones strings.
         // These checks ensure memory safety during development but compile to no-ops
@@ -157,10 +155,11 @@ pub const BlockIndex = struct {
             fatal_assert(self.memory_used >= old_memory, "Memory accounting underflow: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
         }
 
-        const new_memory = block.source_uri.len + block.metadata_json.len + block.content.len;
+        const new_memory = cloned_block.source_uri.len + cloned_block.metadata_json.len + cloned_block.content.len;
 
         // Critical: Update HashMap first, then memory accounting to prevent corruption on allocation failure
-        try self.blocks.put(cloned_block.id, cloned_owned_block);
+        const memtable_owned_block = OwnedBlock.take_ownership(cloned_block, .memtable_manager);
+        try self.blocks.put(cloned_block.id, memtable_owned_block);
 
         // Update memory accounting only after successful HashMap operation
         self.memory_used = self.memory_used - old_memory + new_memory;
@@ -174,11 +173,11 @@ pub const BlockIndex = struct {
     // For legacy callers: use OwnedBlock.take_ownership(block, .temporary) then put_block()
 
     /// Find a block by ID with ownership validation.
-    /// Returns pointer to the block if found and accessor has valid ownership.
-    pub fn find_block(self: *const BlockIndex, block_id: BlockId, accessor: BlockOwnership) ?*const ContextBlock {
+    /// Returns block data if found and accessor has valid ownership.
+    pub fn find_block(self: *const BlockIndex, block_id: BlockId, accessor: BlockOwnership) ?ContextBlock {
         if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
             // Validate ownership access through OwnedBlock
-            return owned_block_ptr.read_runtime(accessor);
+            return owned_block_ptr.read_runtime(accessor).*;
         }
         return null;
     }
@@ -247,8 +246,8 @@ pub const BlockIndex = struct {
 
     /// Large block cloning with chunked copy to improve cache locality.
     /// Standard dupe() performs large single allocations that can cause cache misses.
-    /// Returns OwnedBlock with memtable_manager ownership for proper tracking.
-    fn clone_large_block(self: *BlockIndex, block: *const ContextBlock) !OwnedBlock {
+    /// Returns StorageBlock with storage_engine ownership for proper tracking.
+    fn clone_large_block(self: *BlockIndex, block: ContextBlock) !ContextBlock {
         const content_buffer = try self.arena_coordinator.alloc(u8, block.content.len);
 
         // Chunked copying improves cache performance for multi-megabyte blocks
@@ -264,16 +263,13 @@ pub const BlockIndex = struct {
             @memcpy(content_buffer, block.content);
         }
 
-        const cloned_block = ContextBlock{
+        return ContextBlock{
             .id = block.id,
             .version = block.version,
             .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
             .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
             .content = content_buffer,
         };
-        
-        // Return with memtable_manager ownership for proper tracking
-        return OwnedBlock.take_ownership(cloned_block, .memtable_manager);
     }
 
     /// Comprehensive invariant validation for debug builds.
@@ -418,7 +414,7 @@ test "put block clones strings into arena" {
         .version = 1,
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
-        .content = original_content,
+        .content = "test content",
     };
 
     try index.put_block(test_block);
@@ -463,15 +459,15 @@ test "block replacement updates memory accounting correctly" {
     defer index.deinit();
 
     const block_id = BlockId.generate();
-    const original_block = ContextBlock{
+    const test_block = ContextBlock{
         .id = block_id,
         .version = 1,
-        .source_uri = "test://example.zig",
+        .source_uri = "test://original.zig",
         .metadata_json = "{}",
-        .content = "short",
+        .content = "original content",
     };
 
-    try index.put_block(original_block);
+    try index.put_block(test_block);
     const memory_after_first = index.memory_usage();
 
     const replacement_block = ContextBlock{
@@ -479,7 +475,7 @@ test "block replacement updates memory accounting correctly" {
         .version = 2,
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
-        .content = "much longer content than before",
+        .content = "replacement content",
     };
 
     try index.put_block(replacement_block);
@@ -569,9 +565,9 @@ test "large block content handling" {
     const test_block = ContextBlock{
         .id = block_id,
         .version = 1,
-        .source_uri = "test://large.zig",
+        .source_uri = "test://bulk.zig",
         .metadata_json = "{}",
-        .content = large_content,
+        .content = "bulk content",
     };
 
     try index.put_block(test_block);
