@@ -100,13 +100,15 @@ fn parse_zig_file_to_blocks(
         // Handle function declarations
         if (is_function_declaration(trimmed_line)) {
             // Finish previous function if any
-            if (current_function) |func_info| {
-                const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info, line_num - 1);
+            if (current_function) |*func_info| {
+                const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num - 1);
                 try blocks.append(func_block);
+                func_info.deinit();
             }
 
             // Start new function
             current_function = try parse_function_declaration(allocator, trimmed_line, line_num);
+            errdefer if (current_function) |*func| func.deinit();
         } else if (current_function != null) {
             // Accumulate function body
             if (config.include_function_bodies and
