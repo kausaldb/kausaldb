@@ -312,7 +312,7 @@ test "large scale ownership operations" {
 test "memory accounting accuracy" {
     if (builtin.mode != .Debug) return; // Debug info only available in debug mode
 
-    var test_arena = typed_arena_type(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
     defer test_arena.deinit();
 
     // Check initial state
