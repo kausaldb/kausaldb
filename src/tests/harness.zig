@@ -199,6 +199,7 @@ pub const QueryHarness = struct {
 
     /// Clean up all harness resources
     pub fn deinit(self: *Self) void {
+        self.query_engine.deinit();
         self.storage_harness.allocator.destroy(self.query_engine);
         self.storage_harness.deinit();
     }
@@ -264,6 +265,7 @@ pub const ProductionHarness = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        self.query_engine.deinit();
         self.storage_harness.allocator.destroy(self.query_engine);
         self.storage_harness.deinit();
     }
