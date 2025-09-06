@@ -9,7 +9,7 @@ const ownership = @import("../core/ownership.zig");
 const assert = assert_mod.assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ContextBlock = context_block.ContextBlock;
-const IngestionBlock = ownership.comptime_owned_block_type(.ingestion_pipeline);
+const IngestionBlock = ownership.comptime_owned_block_type(.temporary);
 const FileContent = parse_file_to_blocks.FileContent;
 const VFS = vfs.VFS;
 
@@ -145,14 +145,52 @@ fn collect_git_tracked_files(
     exclude_patterns: [][]const u8,
     out_paths: *std.array_list.Managed([]const u8),
 ) !void {
-    // Suppress unused parameter errors for now
-    _ = allocator;
+    // Git-based implementation doesn't use VFS - suppress unused parameter
     _ = file_system;
-    _ = directory_path;
-    _ = include_patterns;
-    _ = exclude_patterns;
-    _ = out_paths;
-    @compileError("collect_git_tracked_files not implemented in this refactor sweep. Implement as needed, ensuring no ContextBlock usage internally.");
+    // Use git ls-files to get tracked files, then filter by patterns
+    var git_process = std.ChildProcess.init(&[_][]const u8{ "git", "ls-files", directory_path }, allocator);
+    git_process.stdout_behavior = .Pipe;
+    git_process.stderr_behavior = .Pipe;
+
+    try git_process.spawn();
+    defer _ = git_process.wait() catch {};
+    defer if (git_process.stdout) |stdout| stdout.close();
+    defer if (git_process.stderr) |stderr| stderr.close();
+
+    if (git_process.stdout) |stdout| {
+        const git_output = try stdout.readToEndAlloc(allocator, 1024 * 1024); // 1MB max
+        defer allocator.free(git_output);
+
+        var lines = std.mem.split(u8, git_output, "\n");
+        while (lines.next()) |line| {
+            const trimmed_line = std.mem.trim(u8, line, " \t\r\n");
+            if (trimmed_line.len == 0) continue;
+
+            // Check if file matches include patterns and doesn't match exclude patterns
+            var matches_include = include_patterns.len == 0; // If no include patterns, include all
+            for (include_patterns) |pattern| {
+                if (std.mem.indexOf(u8, trimmed_line, pattern) != null or
+                    std.mem.endsWith(u8, trimmed_line, pattern[2..]) and std.mem.startsWith(u8, pattern, "**"))
+                {
+                    matches_include = true;
+                    break;
+                }
+            }
+
+            var matches_exclude = false;
+            for (exclude_patterns) |pattern| {
+                if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
+                    matches_exclude = true;
+                    break;
+                }
+            }
+
+            if (matches_include and !matches_exclude) {
+                const file_path = try allocator.dupe(u8, trimmed_line);
+                try out_paths.append(file_path);
+            }
+        }
+    }
 }
 
 // Additional helpers (collect_git_ls_files, collect_matching_files, etc.) would also avoid ContextBlock internally.

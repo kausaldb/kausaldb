@@ -78,19 +78,19 @@ test "storage iterator returns unique blocks only" {
         total_blocks_returned += 1;
 
         // Check for BlockId duplicates
-        const id_was_present = try seen_block_ids.fetchPut(block.id, {});
+        const id_was_present = try seen_block_ids.fetchPut(block.block.id, {});
         if (id_was_present != null) {
-            std.debug.print("ERROR: Duplicate BlockId found: {any}\n", .{block.id});
-            std.debug.print("Source URI: {s}\n", .{block.source_uri});
+            std.debug.print("ERROR: Duplicate BlockId found: {any}\n", .{block.block.id});
+            std.debug.print("Source URI: {s}\n", .{block.block.source_uri});
             try testing.expect(false); // Fail test on duplicate BlockId
         }
 
         // Check for content hash duplicates (different BlockIds with same content)
-        const content_hash = std.hash_map.hashString(block.content);
+        const content_hash = std.hash_map.hashString(block.block.content);
         const content_was_present = try seen_content_hashes.fetchPut(content_hash, {});
         if (content_was_present != null) {
-            std.debug.print("ERROR: Duplicate content hash found for BlockId: {any}\n", .{block.id});
-            std.debug.print("Content: {s}\n", .{block.content});
+            std.debug.print("ERROR: Duplicate content found (different BlockIds): {any}\n", .{block.block.id});
+            std.debug.print("Content: {s}\n", .{block.block.content});
             try testing.expect(false); // Fail test on duplicate content
         }
     }
@@ -150,7 +150,7 @@ test "storage iterator consistency across multiple iterations" {
 
         while (try iterator.next()) |block| {
             blocks_in_this_iteration += 1;
-            try current_iteration_ids.put(block.id, {});
+            try current_iteration_ids.put(block.block.id, {});
         }
 
         // Verify consistent block count across iterations
@@ -246,11 +246,11 @@ test "storage iterator works correctly with parsed blocks" {
     while (try iterator.next()) |block| {
         total_blocks += 1;
 
-        const was_present = try seen_block_ids.fetchPut(block.id, {});
+        const was_present = try seen_block_ids.fetchPut(block.block.id, {});
         if (was_present != null) {
-            std.debug.print("ERROR: Duplicate BlockId in parsed blocks: {any}\n", .{block.id});
-            std.debug.print("Source: {s}\n", .{block.source_uri});
-            std.debug.print("Metadata: {s}\n", .{block.metadata_json});
+            std.debug.print("ERROR: Duplicate BlockId in parsed blocks: {any}\n", .{block.block.id});
+            std.debug.print("Source: {s}\n", .{block.block.source_uri});
+            std.debug.print("Metadata: {s}\n", .{block.block.metadata_json});
             try testing.expect(false);
         }
     }

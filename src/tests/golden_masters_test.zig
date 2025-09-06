@@ -212,9 +212,8 @@ const GoldenMasterSuite = struct {
         std.debug.print("\nGolden master results: {d} passed, {d} failed\n", .{ passed, failed });
 
         if (failed > 0) {
-            std.debug.print("Note: Some golden master scenarios had issues but build system is functional\n", .{});
-            // Strict validation disabled due to golden master mismatches
-            // return error.GoldenMasterValidationFailed;
+            std.debug.print("Golden master validation failed: {d} scenarios failed\n", .{failed});
+            return error.GoldenMasterValidationFailed;
         }
     }
 };
@@ -256,8 +255,8 @@ test "wal single block recovery golden master" {
             std.debug.print("Golden master not found - this will create one on first run\n", .{});
         },
         else => {
-            // Golden master validation disabled due to mismatches - framework validation only
-            std.debug.print("Golden master mismatch detected - framework is functional\n", .{});
+            std.debug.print("Golden master validation failed: {}\n", .{err});
+            return err;
         },
     };
 }
