@@ -371,8 +371,8 @@ pub const WorkspaceManager = struct {
         const coordinator = ArenaCoordinator.init(&ingestion_arena);
 
         const config = IngestionConfig{
-            .include_patterns = &[_][]const u8{"**/*.zig"},
-            .exclude_patterns = &[_][]const u8{},
+            .include_patterns = @constCast(&[_][]const u8{"**/*.zig"}),
+            .exclude_patterns = @constCast(&[_][]const u8{}),
             .max_file_size = 1024 * 1024, // 1MB limit per file
             .include_function_bodies = true,
             .include_private = true,

@@ -939,6 +939,7 @@ pub const StorageEngine = struct {
         memtable_iterator: BlockHashMapIterator,
         sstable_manager: *SSTableManager,
         backing_allocator: std.mem.Allocator,
+        iteration_arena: std.heap.ArenaAllocator,
         current_sstable_index: u32,
         current_sstable_iterator: ?sstable.SSTableIterator,
         current_sstable: ?*SSTable,
@@ -950,8 +951,8 @@ pub const StorageEngine = struct {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
-                // Clone with storage_engine ownership for iterator return
-                const cloned_block = try owned_block.clone_with_ownership(self.backing_allocator, .storage_engine, null);
+                // Clone with storage_engine ownership using iteration arena for automatic cleanup
+                const cloned_block = try owned_block.clone_with_ownership(self.iteration_arena.allocator(), .storage_engine, null);
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
                 self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
                 return StorageEngineBlock.init(cloned_block.read(.storage_engine).*);
@@ -1038,6 +1039,7 @@ pub const StorageEngine = struct {
                 self.backing_allocator.destroy(table);
             }
             self.seen_blocks.deinit();
+            self.iteration_arena.deinit();
         }
     };
 
@@ -1048,6 +1050,7 @@ pub const StorageEngine = struct {
             .memtable_iterator = self.memtable_manager.raw_iterator(),
             .sstable_manager = &self.sstable_manager,
             .backing_allocator = self.backing_allocator,
+            .iteration_arena = std.heap.ArenaAllocator.init(self.backing_allocator),
             .current_sstable_index = 0,
             .current_sstable_iterator = null,
             .current_sstable = null,

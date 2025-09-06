@@ -11,7 +11,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     log.info("Scanning for specific ownership violations...", .{});
-    
+
     try scan_for_violations(allocator);
 }
 
@@ -26,16 +26,17 @@ fn scan_for_violations(allocator: std.mem.Allocator) !void {
     defer walker.deinit();
 
     var storage_violations: u32 = 0;
-    var query_violations: u32 = 0; 
+    var query_violations: u32 = 0;
     var test_violations: u32 = 0;
     var other_violations: u32 = 0;
 
     while (try walker.next()) |entry| {
         if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
-        
-        if (std.mem.indexOf(u8, entry.path, "ownership.zig") != null or 
+
+        if (std.mem.indexOf(u8, entry.path, "ownership.zig") != null or
             std.mem.indexOf(u8, entry.path, "tidy_ownership.zig") != null or
-            std.mem.indexOf(u8, entry.path, "violation_scanner.zig") != null) {
+            std.mem.indexOf(u8, entry.path, "violation_scanner.zig") != null)
+        {
             continue;
         }
 
@@ -46,36 +47,40 @@ fn scan_for_violations(allocator: std.mem.Allocator) !void {
         defer allocator.free(file_content);
 
         var violations_in_file: u32 = 0;
-        
+
         // Check for raw ContextBlock usage
         if (std.mem.indexOf(u8, file_content, "ContextBlock,") != null or
-            std.mem.indexOf(u8, file_content, ": ContextBlock") != null) {
+            std.mem.indexOf(u8, file_content, ": ContextBlock") != null)
+        {
             violations_in_file += 1;
         }
-        
+
         // Check for raw pointer usage
         if (std.mem.indexOf(u8, file_content, "*ContextBlock") != null or
-            std.mem.indexOf(u8, file_content, "?*ContextBlock") != null) {
+            std.mem.indexOf(u8, file_content, "?*ContextBlock") != null)
+        {
             violations_in_file += 1;
         }
-        
+
         // Check for unsafe collections
         if (std.mem.indexOf(u8, file_content, "ArrayList(ContextBlock)") != null or
-            (std.mem.indexOf(u8, file_content, "HashMap(") != null and 
-             std.mem.indexOf(u8, file_content, "ContextBlock") != null)) {
+            (std.mem.indexOf(u8, file_content, "HashMap(") != null and
+                std.mem.indexOf(u8, file_content, "ContextBlock") != null))
+        {
             violations_in_file += 1;
         }
 
         if (violations_in_file > 0) {
-            log.info("VIOLATIONS in {s}: {}", .{entry.path, violations_in_file});
-            
+            log.info("VIOLATIONS in {s}: {}", .{ entry.path, violations_in_file });
+
             // Categorize violations
             if (std.mem.indexOf(u8, entry.path, "storage/") != null) {
                 storage_violations += violations_in_file;
             } else if (std.mem.indexOf(u8, entry.path, "query/") != null) {
                 query_violations += violations_in_file;
-            } else if (std.mem.indexOf(u8, entry.path, "tests/") != null or 
-                      std.mem.indexOf(u8, entry.path, "test") != null) {
+            } else if (std.mem.indexOf(u8, entry.path, "tests/") != null or
+                std.mem.indexOf(u8, entry.path, "test") != null)
+            {
                 test_violations += violations_in_file;
             } else {
                 other_violations += violations_in_file;

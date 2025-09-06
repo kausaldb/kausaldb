@@ -175,6 +175,28 @@ pub fn execute_natural_command(
     }
 }
 
+// === CLI Compaction Management ===
+
+/// Proactively manage L0 SSTable pressure to prevent WriteBlocked errors in CLI context.
+///
+/// CLI operations are single-threaded and lack background compaction, so we must
+/// aggressively compact L0 SSTables before hitting hard limits. This prevents
+/// the need to disable fatal assertions, maintaining KausalDB's defensive programming philosophy.
+fn ensure_cli_compaction_headroom(storage_engine: *StorageEngine) !void {
+    // Check current L0 SSTable count and trigger compaction if approaching limits
+    const throttle_status = storage_engine.sstable_manager.compaction_manager.query_throttle_status();
+    const l0_count = throttle_status.l0_sstable_count;
+    const l0_soft_threshold = 6; // Start compaction at 50% of hard limit (12)
+
+    if (l0_count >= l0_soft_threshold) {
+        // Force L0 compaction to reduce SSTable pressure
+        storage_engine.sstable_manager.execute_compaction() catch |err| {
+            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "cli_proactive_compaction" });
+            return err;
+        };
+    }
+}
+
 // === Command Implementations ===
 
 fn execute_version_command() void {
@@ -209,6 +231,9 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
         else => return err,
     };
 
+    // Proactively manage L0 compaction to prevent WriteBlocked errors during ingestion
+    try ensure_cli_compaction_headroom(context.storage_engine.?);
+
     workspace.link_codebase(resolved_path, cmd.name) catch |err| switch (err) {
         workspace_manager.WorkspaceError.CodebaseAlreadyLinked => {
             if (cmd.format == .json) {
@@ -232,18 +257,18 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             return error.InvalidCodebasePath;
         },
         storage.StorageError.WriteBlocked => {
-            // Trigger compaction to free up L0 SSTable slots and retry operation
-            context.storage_engine.?.flush_memtable_to_sstable() catch |compact_err| {
+            // Force aggressive L0 compaction to reduce SSTable count below hard limit
+            context.storage_engine.?.sstable_manager.execute_compaction() catch |compact_err| {
                 if (cmd.format == .json) {
                     print_json_stdout(context.allocator,
-                        \\{{"error": "Storage write blocked and compaction failed"}}
+                        \\{{"error": "Storage write blocked and L0 compaction failed"}}
                     , .{});
                 } else {
-                    print_stderr("Error: Storage write blocked and compaction failed: {}\n", .{compact_err});
+                    print_stderr("Error: Storage write blocked and L0 compaction failed: {}\n", .{compact_err});
                 }
                 return compact_err;
             };
-            // Retry the link operation after compaction
+            // Retry the link operation after L0 compaction
             return execute_link_command(context, cmd);
         },
         else => {
@@ -288,18 +313,18 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
             return error.CodebaseNotFound;
         },
         storage.StorageError.WriteBlocked => {
-            // Trigger compaction to free up L0 SSTable slots and retry operation
-            context.storage_engine.?.flush_memtable_to_sstable() catch |compact_err| {
+            // Force aggressive L0 compaction to reduce SSTable count below hard limit
+            context.storage_engine.?.sstable_manager.execute_compaction() catch |compact_err| {
                 if (cmd.format == .json) {
                     print_json_stdout(context.allocator,
-                        \\{{"error": "Storage write blocked and compaction failed"}}
+                        \\{{"error": "Storage write blocked and L0 compaction failed"}}
                     , .{});
                 } else {
-                    print_stderr("Error: Storage write blocked and compaction failed: {}\n", .{compact_err});
+                    print_stderr("Error: Storage write blocked and L0 compaction failed: {}\n", .{compact_err});
                 }
                 return compact_err;
             };
-            // Retry the unlink operation after compaction
+            // Retry the unlink operation after L0 compaction
             return execute_unlink_command(context, cmd);
         },
         else => {
@@ -327,6 +352,9 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
 fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.SyncCommand) !void {
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
+
+    // Proactively manage L0 compaction to prevent WriteBlocked errors during sync operations
+    try ensure_cli_compaction_headroom(context.storage_engine.?);
 
     if (cmd.all) {
         // Sync all codebases

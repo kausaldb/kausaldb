@@ -414,7 +414,7 @@ test "put block clones strings into arena" {
         .version = 1,
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
-        .content = "test content",
+        .content = original_content,
     };
 
     try index.put_block(test_block);
@@ -475,7 +475,7 @@ test "block replacement updates memory accounting correctly" {
         .version = 2,
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
-        .content = "replacement content",
+        .content = "much longer content than before",
     };
 
     try index.put_block(replacement_block);
@@ -567,7 +567,7 @@ test "large block content handling" {
         .version = 1,
         .source_uri = "test://bulk.zig",
         .metadata_json = "{}",
-        .content = "bulk content",
+        .content = large_content,
     };
 
     try index.put_block(test_block);

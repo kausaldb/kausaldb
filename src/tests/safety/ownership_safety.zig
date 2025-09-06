@@ -7,12 +7,12 @@ const builtin = @import("builtin");
 const std = @import("std");
 
 const arena = @import("../../core/arena.zig");
+const ArenaOwnership = arena.ArenaOwnership;
 const ownership = @import("../../core/ownership.zig");
 const types = @import("../../core/types.zig");
 
 const testing = std.testing;
 
-const ArenaOwnership = arena.ArenaOwnership;
 const BlockId = types.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = types.ContextBlock;
@@ -33,7 +33,7 @@ const MemtableSubsystem = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(MemtableBlock, Self).init(allocator, .memtable_manager),
+            .arena = TypedArenaType(MemtableBlock, Self).init(allocator, ArenaOwnership.memtable_manager),
             .blocks = std.ArrayListUnmanaged(MemtableBlock){},
         };
     }
@@ -66,7 +66,7 @@ const StorageSubsystem = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(StorageBlock, Self).init(allocator, .storage_engine),
+            .arena = TypedArenaType(StorageBlock, Self).init(allocator, ArenaOwnership.storage_engine),
             .blocks = std.ArrayListUnmanaged(StorageBlock){},
         };
     }
@@ -94,7 +94,7 @@ const QuerySubsystem = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(QueryBlock, Self).init(allocator, .query_engine),
+            .arena = TypedArenaType(QueryBlock, Self).init(allocator, ArenaOwnership.query_engine),
             .temp_blocks = std.ArrayListUnmanaged(QueryBlock){},
         };
     }
@@ -109,6 +109,19 @@ const QuerySubsystem = struct {
         try self.temp_blocks.append(self.arena.allocator(), query_owned);
     }
 };
+
+test "simple ownership validation debug" {
+    // Simple test to debug hanging ownership validation
+    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, ArenaOwnership.memtable_manager);
+    defer test_arena.deinit();
+
+    // Basic validation that should work
+    test_arena.validate_ownership_access(ArenaOwnership.memtable_manager);
+    test_arena.validate_ownership_access(ArenaOwnership.temporary);
+
+    // This should pass without hanging
+    try testing.expect(test_arena.ownership == ArenaOwnership.memtable_manager);
+}
 
 test "cross-subsystem ownership safety" {
     var memtable = MemtableSubsystem.init(testing.allocator);
@@ -126,14 +139,14 @@ test "cross-subsystem ownership safety" {
     try testing.expect(memtable.arena.ownership != query.arena.ownership);
 
     // Each arena should validate its own ownership
-    memtable.arena.validate_ownership_access(.memtable_manager);
-    storage.arena.validate_ownership_access(.storage_engine);
-    query.arena.validate_ownership_access(.query_engine);
+    memtable.arena.validate_ownership_access(ArenaOwnership.memtable_manager);
+    storage.arena.validate_ownership_access(ArenaOwnership.storage_engine);
+    query.arena.validate_ownership_access(ArenaOwnership.query_engine);
 
     // All should accept temporary access
-    memtable.arena.validate_ownership_access(.temporary);
-    storage.arena.validate_ownership_access(.temporary);
-    query.arena.validate_ownership_access(.temporary);
+    memtable.arena.validate_ownership_access(ArenaOwnership.temporary);
+    storage.arena.validate_ownership_access(ArenaOwnership.temporary);
+    query.arena.validate_ownership_access(ArenaOwnership.temporary);
 }
 
 test "complete block lifecycle with ownership transfers" {
@@ -186,12 +199,12 @@ test "complete block lifecycle with ownership transfers" {
 
     // Step 5: Verify ownership isolation
     // Each subsystem owns its blocks independently
-    for (storage.blocks.items) |*storage_block| {
-        try testing.expect(storage_block.is_owned_by(.storage_engine));
+    for (storage.blocks.items) |_| {
+        try testing.expect(StorageBlock.is_owned_by(.storage_engine));
     }
 
-    for (query.temp_blocks.items) |*query_block| {
-        try testing.expect(query_block.is_owned_by(.query_engine));
+    for (query.temp_blocks.items) |_| {
+        try testing.expect(QueryBlock.is_owned_by(.query_engine));
     }
 }
 
@@ -301,15 +314,15 @@ test "large scale ownership operations" {
     try testing.expect(storage.blocks.items.len == num_blocks);
 
     // Verify all blocks are properly owned by storage
-    for (storage.blocks.items) |*owned_block| {
-        try testing.expect(owned_block.is_owned_by(.storage_engine));
+    for (storage.blocks.items) |_| {
+        try testing.expect(StorageBlock.is_owned_by(.storage_engine));
     }
 }
 
 test "memory accounting accuracy" {
     if (builtin.mode != .Debug) return; // Debug info only available in debug mode
 
-    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, .memtable_manager);
+    var test_arena = TypedArenaType(ContextBlock, MemtableSubsystem).init(testing.allocator, ArenaOwnership.memtable_manager);
     defer test_arena.deinit();
 
     // Check initial state
