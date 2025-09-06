@@ -70,6 +70,25 @@ fn scan_for_violations(allocator: std.mem.Allocator) !void {
             violations_in_file += 1;
         }
 
+        // Check for deprecated specialized block types
+        const deprecated_types = [_][]const u8{
+            "StorageEngineBlock",
+            "MemtableBlock",
+            "OwnedQueryEngineBlock",
+            "TemporaryBlock",
+            "StorageBlock",
+            "QueryBlock",
+            "SSTableBlock",
+            "EngineBlock",
+        };
+
+        for (deprecated_types) |deprecated_type| {
+            if (std.mem.indexOf(u8, file_content, deprecated_type) != null) {
+                violations_in_file += 1;
+                break; // Only count once per file
+            }
+        }
+
         if (violations_in_file > 0) {
             log.info("VIOLATIONS in {s}: {}", .{ entry.path, violations_in_file });
 

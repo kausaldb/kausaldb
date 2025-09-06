@@ -25,6 +25,8 @@ pub const ValidationResult = struct {
             raw_context_block_pointer,
             raw_context_block_optional_pointer,
             unsafe_collection,
+            deprecated_specialized_type,
+            legacy_block_usage,
         };
     };
 };
@@ -258,6 +260,28 @@ fn analyze_file_for_ownership_patterns(file_path: []const u8, content: []const u
         };
         try violations.append(violation);
     }
+
+    // Pattern 4: Usage of deprecated specialized block types
+    if (has_deprecated_specialized_types(content)) |details| {
+        const violation = ValidationResult.ValidationViolation{
+            .type_name = file_path,
+            .field_name = details,
+            .violation_type = .deprecated_specialized_type,
+            .description = "Using deprecated specialized block types - use unified OwnedBlock pattern",
+        };
+        try violations.append(violation);
+    }
+
+    // Pattern 5: Legacy block construction patterns
+    if (has_legacy_block_patterns(content)) |details| {
+        const violation = ValidationResult.ValidationViolation{
+            .type_name = file_path,
+            .field_name = details,
+            .violation_type = .legacy_block_usage,
+            .description = "Legacy block usage pattern - should use take_ownership() pattern",
+        };
+        try violations.append(violation);
+    }
 }
 
 /// Determine if a file should be skipped from ownership validation
@@ -391,6 +415,110 @@ fn has_collection_violations(content: []const u8) ?[]const u8 {
     }
 
     return null;
+}
+
+/// Check for usage of deprecated specialized block types
+fn has_deprecated_specialized_types(content: []const u8) ?[]const u8 {
+    const deprecated_types = [_][]const u8{
+        "StorageEngineBlock",
+        "MemtableBlock",
+        "OwnedQueryEngineBlock",
+        "TemporaryBlock",
+        "StorageBlock",
+        "QueryBlock",
+        "SSTableBlock",
+        "EngineBlock",
+    };
+
+    for (deprecated_types) |deprecated_type| {
+        // Look for type usage patterns
+        if (std.mem.indexOf(u8, content, deprecated_type) != null) {
+            // Avoid false positives by checking if it's actually being used as a type
+            var lines = std.mem.splitScalar(u8, content, '\n');
+            while (lines.next()) |line| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+
+                // Skip comments
+                if (std.mem.startsWith(u8, trimmed, "//")) continue;
+
+                if (std.mem.indexOf(u8, line, deprecated_type)) |start_pos| {
+                    // Check for word boundaries - ensure this is not part of a larger identifier
+                    const is_word_start = start_pos == 0 or !is_word_char(line[start_pos - 1]);
+                    const end_pos = start_pos + deprecated_type.len;
+                    const is_word_end = end_pos >= line.len or !is_word_char(line[end_pos]);
+
+                    if (!is_word_start or !is_word_end) continue;
+
+                    // Check for actual type usage patterns by building and checking complete patterns
+                    var buf: [256]u8 = undefined;
+
+                    // Pattern: ": TypeName"
+                    if (std.fmt.bufPrint(buf[0..], ": {s}", .{deprecated_type})) |pattern| {
+                        if (std.mem.indexOf(u8, line, pattern) != null) return deprecated_type;
+                    } else |_| {}
+
+                    // Pattern: "(TypeName"
+                    if (std.fmt.bufPrint(buf[0..], "({s}", .{deprecated_type})) |pattern| {
+                        if (std.mem.indexOf(u8, line, pattern) != null) return deprecated_type;
+                    } else |_| {}
+
+                    // Pattern: "ArrayList(TypeName"
+                    if (std.fmt.bufPrint(buf[0..], "ArrayList({s}", .{deprecated_type})) |pattern| {
+                        if (std.mem.indexOf(u8, line, pattern) != null) return deprecated_type;
+                    } else |_| {}
+
+                    // Pattern: "const TypeName"
+                    if (std.fmt.bufPrint(buf[0..], "const {s}", .{deprecated_type})) |pattern| {
+                        if (std.mem.indexOf(u8, line, pattern) != null) return deprecated_type;
+                    } else |_| {}
+
+                    // Pattern: "var TypeName"
+                    if (std.fmt.bufPrint(buf[0..], "var {s}", .{deprecated_type})) |pattern| {
+                        if (std.mem.indexOf(u8, line, pattern) != null) return deprecated_type;
+                    } else |_| {}
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/// Check for legacy block construction/usage patterns
+fn has_legacy_block_patterns(content: []const u8) ?[]const u8 {
+    // Look for old-style block initialization patterns that should use take_ownership()
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t");
+
+        // Skip comments
+        if (std.mem.startsWith(u8, trimmed, "//")) continue;
+
+        // Check for OwnedBlock.init() pattern - should be take_ownership()
+        if (std.mem.indexOf(u8, line, "OwnedBlock.init(") != null) {
+            return "OwnedBlock.init()";
+        }
+
+        // Check for TypedBlock.init() pattern - should be take_ownership()
+        if (std.mem.indexOf(u8, line, "Block.init(") != null) {
+            return "Block.init()";
+        }
+
+        // Check for factory function calls like new_block() but not parameter declarations
+        if (std.mem.indexOf(u8, line, "new_block(") != null or
+            std.mem.indexOf(u8, line, "= new_block(") != null)
+        {
+            return "new_block()";
+        }
+    }
+    return null;
+}
+
+/// Check if a character is a word character (alphanumeric or underscore)
+fn is_word_char(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or
+        (c >= 'A' and c <= 'Z') or
+        (c >= '0' and c <= '9') or
+        (c == '_');
 }
 
 /// Report ownership validation statistics
