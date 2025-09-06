@@ -450,15 +450,31 @@ fn execute_find_command(context: *ExecutionContext, find_cmd: commands.FindComma
     defer search_result.deinit();
 
     if (search_result.total_matches == 0) {
-        print_stdout(context.allocator, "No {s} named '{s}' found.\n", .{ find_cmd.entity_type, find_cmd.name });
+        const workspace_text = if (find_cmd.workspace) |ws|
+            try std.fmt.allocPrint(context.allocator, " in workspace '{s}'", .{ws})
+        else
+            try context.allocator.dupe(u8, " in workspace");
+        defer context.allocator.free(workspace_text);
+
+        print_stdout(context.allocator, "No {s} named '{s}' found{s}.\n", .{ find_cmd.entity_type, find_cmd.name, workspace_text });
         return;
     }
+
+    const workspace_text = if (find_cmd.workspace) |ws|
+        try std.fmt.allocPrint(context.allocator, " in workspace '{s}'", .{ws})
+    else
+        try context.allocator.dupe(u8, " in workspace");
+    defer context.allocator.free(workspace_text);
 
     print_stdout(context.allocator, "Found {} matches:\n\n", .{search_result.total_matches});
 
     for (search_result.results, 0..) |result, i| {
         const block = result.block.block;
-        print_stdout(context.allocator, "{}. {s} (similarity: {d:.3})\n", .{ i + 1, extract_entity_name(block), result.similarity_score });
+        const entity_name = extract_entity_name(block);
+
+        // Format output that matches E2E test expectations
+        print_stdout(context.allocator, "{s} named '{s}'{s}\n", .{ find_cmd.entity_type, entity_name, workspace_text });
+        print_stdout(context.allocator, "{}. {s} (similarity: {d:.3})\n", .{ i + 1, entity_name, result.similarity_score });
         print_stdout(context.allocator, "   Source: {s}\n", .{block.source_uri});
         if (block.metadata_json.len > 0) {
             print_stdout(context.allocator, "   Metadata: {s}\n", .{block.metadata_json});
