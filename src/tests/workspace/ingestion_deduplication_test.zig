@@ -129,7 +129,7 @@ test "block updates replace existing blocks correctly" {
     try testing.expectEqual(@as(u32, 1), results.total_matches);
 
     // Verify it's the updated version
-    const returned_block = results.results[0].block.extract();
+    const returned_block = results.results[0].block.read_immutable().*;
     try testing.expectEqual(@as(u64, 2), returned_block.version);
     try testing.expect(std.mem.indexOf(u8, returned_block.content, "v2 - updated") != null);
 }
@@ -159,6 +159,6 @@ test "empty metadata handles deduplication gracefully" {
     try testing.expect(found_block != null);
 
     // Verify content is correct
-    const extracted = found_block.?.extract();
+    const extracted = found_block.?.read_immutable().*;
     try testing.expect(std.mem.eql(u8, extracted.content, "// minimal content"));
 }

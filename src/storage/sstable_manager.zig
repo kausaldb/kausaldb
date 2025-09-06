@@ -196,7 +196,7 @@ pub const SSTableManager = struct {
                 };
                 // Note: OwnedBlock.init still expects arena pointer for debug tracking
                 // In hierarchical model, this is now coordinator's arena
-                const owned_block = OwnedBlock.init(cloned_block, accessor, null);
+                const owned_block = OwnedBlock.take_ownership(cloned_block, accessor);
                 return owned_block;
             }
         }
@@ -296,17 +296,27 @@ pub const SSTableManager = struct {
         defer self.backing_allocator.free(sstable_filename);
         self.next_sstable_id += 1;
 
-        const sorted_blocks = try self.backing_allocator.alloc(ContextBlock, owned_blocks.len);
+        // Create a sorted list of OwnedBlocks for consistent ownership model
+        const sorted_owned_blocks = try self.backing_allocator.alloc(OwnedBlock, owned_blocks.len);
+        defer self.backing_allocator.free(sorted_owned_blocks);
+        @memcpy(sorted_owned_blocks, owned_blocks);
+
+        const SortContext = struct {
+            fn less_than(context: void, a: OwnedBlock, b: OwnedBlock) bool {
+                _ = context;
+                const block_a = a.read(accessor);
+                const block_b = b.read(accessor);
+                return std.mem.lessThan(u8, &block_a.id.bytes, &block_b.id.bytes);
+            }
+        };
+        std.sort.pdq(OwnedBlock, sorted_owned_blocks, {}, SortContext.less_than);
+
+        // Extract sorted ContextBlocks for SSTable writing
+        const sorted_blocks = try self.backing_allocator.alloc(ContextBlock, sorted_owned_blocks.len);
         defer self.backing_allocator.free(sorted_blocks);
-        for (owned_blocks, 0..) |*owned_block, i| {
+        for (sorted_owned_blocks, 0..) |owned_block, i| {
             sorted_blocks[i] = owned_block.read(accessor).*;
         }
-
-        std.sort.pdq(ContextBlock, sorted_blocks, {}, struct {
-            fn less_than(_: void, a: ContextBlock, b: ContextBlock) bool {
-                return std.mem.lessThan(u8, &a.id.bytes, &b.id.bytes);
-            }
-        }.less_than);
 
         var new_sstable = SSTable.init(self.arena_coordinator, self.backing_allocator, self.vfs, sstable_filename);
         defer {
@@ -780,7 +790,7 @@ test "SSTableManager creates new SSTable from owned blocks" {
         .content = "test content 1",
     };
 
-    const owned_block1 = OwnedBlock.init(block1, .simulation_test, null);
+    const owned_block1 = OwnedBlock.take_ownership(block1, .simulation_test);
     const owned_blocks = [_]OwnedBlock{owned_block1};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
@@ -812,7 +822,7 @@ test "SSTableManager finds owned blocks in SSTables" {
         .content = "test content",
     };
 
-    const owned_block = OwnedBlock.init(block, .simulation_test, null);
+    const owned_block = OwnedBlock.take_ownership(block, .simulation_test);
     const owned_blocks = [_]OwnedBlock{owned_block};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
@@ -861,8 +871,8 @@ test "SSTableManager total_block_count aggregates across SSTables" {
         .content = "test content 2",
     };
 
-    const owned_block1 = OwnedBlock.init(block1, .simulation_test, null);
-    const owned_block2 = OwnedBlock.init(block2, .simulation_test, null);
+    const owned_block1 = OwnedBlock.take_ownership(block1, .simulation_test);
+    const owned_block2 = OwnedBlock.take_ownership(block2, .simulation_test);
     const first_sstable_blocks = [_]OwnedBlock{ owned_block1, owned_block2 };
     try manager.create_new_sstable(&first_sstable_blocks, .simulation_test);
 
@@ -878,7 +888,7 @@ test "SSTableManager total_block_count aggregates across SSTables" {
         .content = "test content 3",
     };
 
-    const owned_block3 = OwnedBlock.init(block3, .simulation_test, null);
+    const owned_block3 = OwnedBlock.take_ownership(block3, .simulation_test);
     const second_sstable_blocks = [_]OwnedBlock{owned_block3};
     try manager.create_new_sstable(&second_sstable_blocks, .simulation_test);
 

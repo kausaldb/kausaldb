@@ -22,8 +22,6 @@ const WarmupUtils = coordinator.WarmupUtils;
 const StorageEngine = coordinator.storage.StorageEngine;
 const ContextBlock = coordinator.types.ContextBlock;
 const BlockId = coordinator.types.BlockId;
-const StorageEngineBlock = ownership.StorageEngineBlock;
-const OwnedBlock = ownership.OwnedBlock;
 
 const BLOCK_WRITE_THRESHOLD_NS = 100_000; // target: production writes with WAL sync (100µs)
 const BLOCK_READ_THRESHOLD_NS = 1_000; // measured 39ns → 1µs (25x margin)

@@ -242,7 +242,7 @@ pub const MemtableManager = struct {
     ) !?OwnedBlock {
         if (self.block_index.find_block(id, .memtable_manager)) |block_data| {
             // Create temporary owned block for cloning
-            const temp_owned = OwnedBlock.init(block_data, .memtable_manager, null);
+            const temp_owned = OwnedBlock.take_ownership(block_data, .memtable_manager);
             // Clone with new ownership for safe transfer between subsystems
             return try temp_owned.clone_with_ownership(self.backing_allocator, block_ownership, null);
         }

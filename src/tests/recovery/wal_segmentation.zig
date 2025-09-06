@@ -332,7 +332,7 @@ test "recovery from mixed segments and sstables" {
     const phase1_id = BlockId{ .bytes = phase1_id_bytes };
     const phase1_block = try harness.storage_engine.find_block(phase1_id, .query_engine);
     if (phase1_block) |block| {
-        try testing.expectEqualStrings("phase 1 content", block.extract().content);
+        try testing.expectEqualStrings("phase 1 content", block.read_immutable().*.content);
     } else {
         try testing.expect(false); // STRICT: Phase 1 block must be found - no corruption tolerance
     }
@@ -344,7 +344,7 @@ test "recovery from mixed segments and sstables" {
         try testing.expect(false); // Phase 2 blocks (WAL) should always exist
         return;
     };
-    try testing.expectEqualStrings("phase 2 content", phase2_block.extract().content);
+    try testing.expectEqualStrings("phase 2 content", phase2_block.read_immutable().*.content);
 }
 
 test "segment number persistence" {

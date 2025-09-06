@@ -124,7 +124,7 @@ test "WAL cleanup partial failure recovery" {
     try engine.put_block(test_block);
     const found_block = try engine.find_block(test_block.id, .query_engine);
     try testing.expect(found_block != null);
-    try testing.expectEqualStrings(test_block.content, found_block.?.extract().content);
+    try testing.expectEqualStrings(test_block.content, found_block.?.read_immutable().*.content);
 
     std.debug.print("WAL cleanup fault injection test completed successfully\n", .{});
 }

@@ -230,7 +230,7 @@ fn test_large_block_insertion(engine: *StorageEngine, allocator: std.mem.Allocat
     // Verify the large block can be retrieved correctly
     const retrieved = engine.find_block(large_block.id, .storage_engine) catch return;
     if (retrieved) |found| {
-        const extracted = found.extract();
+        const extracted = found.read_immutable().*;
         // Basic validation - content length should match
         if (extracted.content.len != large_block.content.len) {
             // This would indicate a serious data corruption bug

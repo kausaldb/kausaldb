@@ -19,6 +19,7 @@ const assert_mod = @import("../core/assert.zig");
 const bounded_mod = @import("../core/bounded.zig");
 const error_context_mod = @import("../core/error_context.zig");
 const memory_mod = @import("../core/memory.zig");
+const ownership = @import("../core/ownership.zig");
 const storage_mod = @import("engine.zig");
 const types = @import("../core/types.zig");
 
@@ -30,6 +31,7 @@ const bounded_hash_map_type = bounded_mod.bounded_hash_map_type;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
+const OwnedBlock = ownership.OwnedBlock;
 const StorageEngine = storage_mod.StorageEngine;
 
 const Allocator = std.mem.Allocator;
@@ -148,13 +150,13 @@ pub const BatchWriter = struct {
     lifetime_stats: LifetimeStatistics,
 
     const BatchEntry = struct {
-        block: *const ContextBlock,
+        block: OwnedBlock,
         submit_order: u32, // For conflict resolution
         workspace: []const u8,
     };
 
     const ValidatedBlock = struct {
-        block: *const ContextBlock,
+        block: OwnedBlock,
         workspace: []const u8,
         is_update: bool, // true if updating existing block
     };
@@ -186,7 +188,7 @@ pub const BatchWriter = struct {
         config: BatchConfig,
     ) !BatchWriter {
         try config.validate();
-        fatal_assert(storage_engine.state == .running, "Storage engine must be running", .{});
+        fatal_assert(storage_engine.state.can_write(), "Storage engine must be in writable state", .{});
 
         return BatchWriter{
             .allocator = allocator,
@@ -258,7 +260,7 @@ pub const BatchWriter = struct {
             } else {
                 // New block in batch
                 gop.value_ptr.* = BatchEntry{
-                    .block = block,
+                    .block = OwnedBlock.take_ownership(block.*, .storage_engine),
                     .submit_order = @as(u32, @intCast(i)),
                     .workspace = workspace,
                 };
@@ -271,19 +273,19 @@ pub const BatchWriter = struct {
         var dedup_iter = self.dedup_map.iterator();
         while (dedup_iter.next()) |entry| {
             const batch_entry = entry.value;
-            const block = batch_entry.block;
+            const block_data = batch_entry.block.read(.storage_engine);
 
             // Check if block exists in storage
-            if (try self.storage_engine.find_block(block.id, .storage_engine)) |existing_block| {
-                const should_write = try self.resolve_version_conflict(block, existing_block.read(.storage_engine));
+            if (try self.storage_engine.find_block(block_data.id, .storage_engine)) |existing_block| {
+                const should_write = try self.resolve_version_conflict(block_data, existing_block.read(.storage_engine));
                 if (should_write) {
-                    try self.stage_block_for_commit(block, batch_entry.workspace, true);
+                    try self.stage_block_for_commit(batch_entry.block, batch_entry.workspace, true);
                 } else {
                     self.current_stats.version_conflicts += 1;
                 }
             } else {
                 // New block - always stage for commit
-                try self.stage_block_for_commit(block, batch_entry.workspace, false);
+                try self.stage_block_for_commit(batch_entry.block, batch_entry.workspace, false);
             }
         }
     }
@@ -292,7 +294,8 @@ pub const BatchWriter = struct {
     fn commit_staged_blocks(self: *BatchWriter) !void {
         // Write all staged blocks
         for (self.staging_blocks.slice()) |validated| {
-            try self.storage_engine.put_block(validated.block.*);
+            const block_data = validated.block.read(.storage_engine);
+            try self.storage_engine.put_block(block_data.*);
             self.current_stats.blocks_written += 1;
         }
 
@@ -308,16 +311,18 @@ pub const BatchWriter = struct {
         workspace: []const u8,
         submit_order: u32,
     ) !void {
+        const existing_block_data = existing.block.read(.storage_engine);
+
         switch (self.config.conflict_resolution) {
             .skip_older_versions => {
                 // Keep the block with higher version, or later submit order if versions equal
-                if (new_block.version > existing.block.version or
-                    (new_block.version == existing.block.version and submit_order > existing.submit_order))
+                if (new_block.version > existing_block_data.version or
+                    (new_block.version == existing_block_data.version and submit_order > existing.submit_order))
                 {
                     // Update to newer block
                     const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                     entry_ptr.* = BatchEntry{
-                        .block = new_block,
+                        .block = OwnedBlock.take_ownership(new_block.*, .storage_engine),
                         .submit_order = submit_order,
                         .workspace = workspace,
                     };
@@ -327,7 +332,7 @@ pub const BatchWriter = struct {
                 // Always use the later submitted block
                 const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                 entry_ptr.* = BatchEntry{
-                    .block = new_block,
+                    .block = OwnedBlock.take_ownership(new_block.*, .storage_engine),
                     .submit_order = submit_order,
                     .workspace = workspace,
                 };
@@ -363,7 +368,7 @@ pub const BatchWriter = struct {
     /// Stage validated block for atomic commit
     fn stage_block_for_commit(
         self: *BatchWriter,
-        block: *const ContextBlock,
+        block: OwnedBlock,
         workspace: []const u8,
         is_update: bool,
     ) !void {

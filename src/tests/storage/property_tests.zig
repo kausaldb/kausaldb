@@ -13,6 +13,7 @@
 const std = @import("std");
 
 const types = @import("../../core/types.zig");
+const ownership = @import("../../core/ownership.zig");
 const storage = @import("../../storage/engine.zig");
 const config = @import("../../storage/config.zig");
 const test_harness = @import("../harness.zig");
@@ -23,8 +24,8 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 const ArrayList = std.ArrayList;
-
 const ContextBlock = types.ContextBlock;
+const OwnedBlock = ownership.OwnedBlock;
 const BlockId = types.BlockId;
 const StorageEngine = storage.StorageEngine;
 const Config = config.Config;
@@ -354,25 +355,28 @@ test "property: concurrent-like access patterns" {
 
     // Property: Interleaved puts and gets should maintain consistency
     const pattern_iterations = 25;
-    var stored_blocks = std.ArrayList(ContextBlock){};
+    var stored_blocks = std.array_list.Managed(OwnedBlock).init(std.testing.allocator);
     defer {
         for (stored_blocks.items) |block| {
-            std.testing.allocator.free(block.content);
-            std.testing.allocator.free(block.source_uri);
+            const block_data = block.read(.temporary);
+            std.testing.allocator.free(block_data.content);
+            std.testing.allocator.free(block_data.source_uri);
         }
-        stored_blocks.deinit(std.testing.allocator);
+        stored_blocks.deinit();
     }
 
     var i: u32 = 0;
     while (i < pattern_iterations) : (i += 1) {
         // Put a new block
         const new_block = try generate_test_block(i + 5000, std.testing.allocator);
-        try stored_blocks.append(std.testing.allocator, new_block);
+        const owned_block = OwnedBlock.take_ownership(new_block, .temporary);
+        try stored_blocks.append(owned_block);
         try put_block_with_backpressure(&engine, new_block);
 
         // Verify all previously stored blocks are still findable
         for (stored_blocks.items) |stored_block| {
-            const found = try engine.find_block(stored_block.id, .temporary);
+            const stored_block_data = stored_block.read(.temporary);
+            const found = try engine.find_block(stored_block_data.id, .temporary);
             try expect(found != null);
         }
 

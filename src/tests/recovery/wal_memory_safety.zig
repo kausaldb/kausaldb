@@ -91,7 +91,7 @@ test "sequential recovery cycles" {
                 };
 
                 const expected_size = (block_idx + 1) * 256;
-                try testing.expectEqual(expected_size, recovered.extract().content.len);
+                try testing.expectEqual(expected_size, recovered.read_immutable().*.content.len);
             }
         }
     }
@@ -166,10 +166,10 @@ test "allocator stress testing" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expectEqual(size, recovered.extract().content.len);
+        try testing.expectEqual(size, recovered.read_immutable().*.content.len);
 
         // Verify pattern integrity
-        for (recovered.extract().content, 0..) |byte, i| {
+        for (recovered.read_immutable().*.content, 0..) |byte, i| {
             const expected: u8 = @intCast((i + index) % 256);
             try testing.expectEqual(expected, byte);
         }
@@ -241,7 +241,7 @@ test "edge case robustness" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expectEqualStrings(" ", recovered.extract().content);
+        try testing.expectEqualStrings(" ", recovered.read_immutable().*.content);
     }
 
     // Test 2: Very long strings (stress string allocation)
@@ -262,7 +262,7 @@ test "edge case robustness" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expectEqual(long_content.len, recovered.extract().content.len);
+        try testing.expectEqual(long_content.len, recovered.read_immutable().*.content.len);
     }
 
     // Test 3: Special characters and UTF-8 (encoding edge cases)
@@ -290,7 +290,7 @@ test "edge case robustness" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expectEqualStrings(special_content, recovered.extract().content);
+        try testing.expectEqualStrings(special_content, recovered.read_immutable().*.content);
     }
 }
 
@@ -353,6 +353,6 @@ test "rapid sequential operations" {
         const expected_content = try std.fmt.allocPrint(allocator, "operation {} content", .{index});
         defer allocator.free(expected_content);
 
-        try testing.expectEqualStrings(expected_content, recovered.extract().content);
+        try testing.expectEqualStrings(expected_content, recovered.read_immutable().*.content);
     }
 }

@@ -169,10 +169,10 @@ test "state machine violation resilience" {
 
     // Verify correct ownership types
     if (retrieved1) |block| {
-        try testing.expect(@TypeOf(block).query_owner() == .query_engine);
+        try testing.expect(block.query_owner() == .query_engine);
     }
     if (retrieved2) |block| {
-        try testing.expect(@TypeOf(block).query_owner() == .query_engine);
+        try testing.expect(block.query_owner() == .query_engine);
     }
 }
 

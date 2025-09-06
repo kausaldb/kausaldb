@@ -135,7 +135,7 @@ test "fault injection read corruption during query" {
     };
 
     if (found_block) |block| {
-        try testing.expect(std.mem.eql(u8, block.extract().content, test_block.content));
+        try testing.expect(std.mem.eql(u8, block.read_immutable().*.content, test_block.content));
     }
     // Block not found is also acceptable under fault injection
 }

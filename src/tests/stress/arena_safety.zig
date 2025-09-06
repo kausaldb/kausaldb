@@ -254,7 +254,7 @@ test "large allocation stress" {
     // Verify large blocks can be retrieved
     const first_block = try harness.storage_engine.find_block(TestData.deterministic_block_id(0), .query_engine);
     try testing.expect(first_block != null);
-    try testing.expect(first_block.?.extract().content.len == large_size);
+    try testing.expect(first_block.?.read_immutable().*.content.len == large_size);
 }
 
 test "cross allocator corruption detection" {

@@ -172,8 +172,8 @@ pub const WorkspaceManager = struct {
         // Edge count estimation: assume average of 2 edges per block (imports, calls)
         // Get the entry again since we need a mutable reference
         var codebase_entry = self.linked_codebases.getEntry(codebase_info.name).?;
-        codebase_entry.value_ptr.block_count = ingestion_stats.blocks_generated;
-        codebase_entry.value_ptr.edge_count = ingestion_stats.blocks_generated * 2;
+        codebase_entry.value_ptr.block_count = @intCast(ingestion_stats.blocks_generated);
+        codebase_entry.value_ptr.edge_count = @intCast(ingestion_stats.blocks_generated * 2);
 
         // Persist updated statistics to ensure they survive restarts
         try self.persist_workspace_metadata();
@@ -246,8 +246,8 @@ pub const WorkspaceManager = struct {
 
         // Update block count with actual statistics from ingestion
         // Edge count estimation: assume average of 2 edges per block (imports, calls)
-        codebase_entry.value_ptr.block_count = ingestion_stats.blocks_generated;
-        codebase_entry.value_ptr.edge_count = ingestion_stats.blocks_generated * 2;
+        codebase_entry.value_ptr.block_count = @intCast(ingestion_stats.blocks_generated);
+        codebase_entry.value_ptr.edge_count = @intCast(ingestion_stats.blocks_generated * 2);
 
         // Persist updated statistics to ensure they survive restarts
         try self.persist_workspace_metadata();

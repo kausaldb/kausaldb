@@ -317,7 +317,7 @@ pub const Server = struct {
             return;
         }
 
-        var found_blocks = std.array_list.Managed(query_engine.QueryEngineBlock).init(allocator);
+        var found_blocks = std.array_list.Managed(ownership.OwnedBlock).init(allocator);
         defer found_blocks.deinit();
 
         for (0..block_count) |i| {
@@ -477,12 +477,12 @@ pub const Server = struct {
     fn serialize_blocks_array(
         _: *Server,
         allocator: std.mem.Allocator,
-        blocks: []const query_engine.QueryEngineBlock,
+        blocks: []const ownership.OwnedBlock,
     ) ![]u8 {
         var total_size: usize = 4; // 4 bytes for block count
 
         for (blocks) |block| {
-            const block_data = block.read_block();
+            const block_data = block.read_immutable();
             total_size += 16; // Block ID
             total_size += 4 + block_data.source_uri.len;
             total_size += 4 + block_data.metadata_json.len;
@@ -496,7 +496,7 @@ pub const Server = struct {
         offset += 4;
 
         for (blocks) |block| {
-            const block_data = block.read_block();
+            const block_data = block.read_immutable();
             @memcpy(buffer[offset .. offset + 16], &block_data.id.bytes);
             offset += 16;
 

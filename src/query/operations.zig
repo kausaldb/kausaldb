@@ -292,9 +292,10 @@ pub const SemanticQueryResult = struct {
 
     pub fn deinit(self: SemanticQueryResult) void {
         for (self.results) |result| {
-            self.allocator.free(result.block.block.source_uri);
-            self.allocator.free(result.block.block.metadata_json);
-            self.allocator.free(result.block.block.content);
+            const block_data = result.block.read_immutable();
+            self.allocator.free(block_data.source_uri);
+            self.allocator.free(block_data.metadata_json);
+            self.allocator.free(block_data.content);
         }
         self.allocator.free(self.results);
     }
@@ -305,22 +306,23 @@ pub const SemanticQueryResult = struct {
 
         for (self.results, 0..) |search_result, i| {
             try writer.writeAll("--- BEGIN CONTEXT BLOCK ---\n");
+            const block_data = search_result.block.read_immutable();
             try writer.print("Block {} (ID: {}, Similarity: {d:.3}):\n", .{
                 i + 1,
-                search_result.block.id,
+                block_data.id,
                 search_result.similarity_score,
             });
-            try writer.print("Source: {s}\n", .{search_result.block.source_uri});
-            try writer.print("Version: {}\n", .{search_result.block.version});
-            try writer.print("Metadata: {s}\n", .{search_result.block.metadata_json});
-            try writer.print("Content: {s}\n", .{search_result.block.content});
+            try writer.print("Source: {s}\n", .{block_data.source_uri});
+            try writer.print("Version: {}\n", .{block_data.version});
+            try writer.print("Metadata: {s}\n", .{block_data.metadata_json});
+            try writer.print("Content: {s}\n", .{block_data.content});
             try writer.writeAll("--- END CONTEXT BLOCK ---\n\n");
         }
     }
 
-    /// Get blocks sorted by similarity score (highest first)
-    pub fn sorted_blocks(self: SemanticQueryResult, allocator: std.mem.Allocator) QueryError![]ContextBlock {
-        var blocks = try allocator.alloc(ContextBlock, self.results.len);
+    /// Get blocks sorted by similarity score (highest first) using unified ownership model
+    pub fn sorted_blocks(self: SemanticQueryResult, allocator: std.mem.Allocator) QueryError![]OwnedBlock {
+        var blocks = try allocator.alloc(OwnedBlock, self.results.len);
 
         const sorted_results = try allocator.dupe(SemanticResult, self.results);
         defer allocator.free(sorted_results);
@@ -328,7 +330,8 @@ pub const SemanticQueryResult = struct {
         std.sort.heap(SemanticResult, sorted_results, {}, semantic_result_less_than);
 
         for (sorted_results, 0..) |search_result, i| {
-            blocks[i] = try clone_block(allocator, search_result.block.block);
+            const cloned_block = try clone_block(allocator, search_result.block.read(.query_engine));
+            blocks[i] = OwnedBlock.take_ownership(cloned_block, .query_engine);
         }
 
         return blocks;
@@ -365,14 +368,14 @@ pub fn execute_keyword_query(
 
     var matches_found: u32 = 0;
     while (try iterator.next()) |block| {
-        const similarity = calculate_keyword_similarity(block.content, query.query_text);
+        const similarity = calculate_keyword_similarity(block.read_immutable().content, query.query_text);
 
         if (similarity >= query.similarity_threshold) {
             matches_found += 1;
 
             if (results.items.len < query.max_results) {
                 try results.append(SemanticResult{
-                    .block = OwnedBlock.take_ownership(block, .query_engine),
+                    .block = block,
                     .similarity_score = similarity,
                 });
             }

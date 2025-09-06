@@ -82,10 +82,10 @@ test "streaming WAL recovery basic correctness" {
             try testing.expect(false); // Block should exist
             continue;
         };
-        try testing.expectEqualSlices(u8, expected_block.source_uri, recovered_block.extract().source_uri);
-        try testing.expectEqualSlices(u8, expected_block.metadata_json, recovered_block.extract().metadata_json);
-        try testing.expectEqualSlices(u8, expected_block.content, recovered_block.extract().content);
-        try testing.expectEqual(expected_block.version, recovered_block.extract().version);
+        try testing.expectEqualSlices(u8, expected_block.source_uri, recovered_block.read_immutable().*.source_uri);
+        try testing.expectEqualSlices(u8, expected_block.metadata_json, recovered_block.read_immutable().*.metadata_json);
+        try testing.expectEqualSlices(u8, expected_block.content, recovered_block.read_immutable().*.content);
+        try testing.expectEqual(expected_block.version, recovered_block.read_immutable().*.version);
     }
 }
 
@@ -177,7 +177,7 @@ test "streaming WAL recovery empty file handling" {
         try testing.expect(false); // Block should exist
         return;
     };
-    try testing.expectEqualSlices(u8, test_block.content, retrieved_block.extract().content);
+    try testing.expectEqualSlices(u8, test_block.content, retrieved_block.read_immutable().*.content);
 }
 
 test "streaming WAL recovery arena memory reset validation" {

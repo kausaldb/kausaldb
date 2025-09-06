@@ -92,7 +92,7 @@ test "high volume writes during network partition" {
     while (i < 101) : (i += 1) {
         const block_id = TestData.deterministic_block_id(i);
         if (try harness.storage_engine.find_block(block_id, .query_engine)) |retrieved| {
-            try std.testing.expect(retrieved.extract().id.eql(block_id));
+            try std.testing.expect(retrieved.read_immutable().*.id.eql(block_id));
             retrieved_count += 1;
         }
     }
@@ -157,12 +157,12 @@ test "recovery from WAL corruption simulation" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try std.testing.expect(block_id.eql(recovered_block.extract().id));
-        try std.testing.expectEqual(@as(u64, 1), recovered_block.extract().version);
-        try std.testing.expectEqualStrings("test://storage_load_concurrent.zig", recovered_block.extract().source_uri);
+        try std.testing.expect(block_id.eql(recovered_block.read_immutable().*.id));
+        try std.testing.expectEqual(@as(u64, 1), recovered_block.read_immutable().*.version);
+        try std.testing.expectEqualStrings("test://storage_load_concurrent.zig", recovered_block.read_immutable().*.source_uri);
         try std.testing.expectEqualStrings(
             "{\"test\":\"storage_load_concurrent\"}",
-            recovered_block.extract().metadata_json,
+            recovered_block.read_immutable().*.metadata_json,
         );
     }
 }
@@ -205,8 +205,8 @@ test "large block handling limits" {
         try testing.expect(false); // Block should exist
         return;
     };
-    try std.testing.expectEqual(@as(usize, 1024 * 1024), retrieved.extract().content.len);
-    try std.testing.expectEqualSlices(u8, large_content, retrieved.extract().content);
+    try std.testing.expectEqual(@as(usize, 1024 * 1024), retrieved.read_immutable().*.content.len);
+    try std.testing.expectEqualSlices(u8, large_content, retrieved.read_immutable().*.content);
 }
 
 test "rapid block updates concurrency" {
@@ -251,15 +251,15 @@ test "rapid block updates concurrency" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try std.testing.expectEqual(version, retrieved.extract().version);
+        try std.testing.expectEqual(version, retrieved.read_immutable().*.version);
 
         harness.tick(1);
     }
 
     // Final verification
     const final_block = (try harness.storage_engine.find_block(block_id, .query_engine)).?;
-    try std.testing.expectEqual(@as(u64, 50), final_block.extract().version);
-    try std.testing.expect(std.mem.indexOf(u8, final_block.extract().content, "Version 50") != null);
+    try std.testing.expectEqual(@as(u64, 50), final_block.read_immutable().*.version);
+    try std.testing.expect(std.mem.indexOf(u8, final_block.read_immutable().*.content, "Version 50") != null);
 }
 
 test "duplicate block handling integrity" {
@@ -300,9 +300,9 @@ test "duplicate block handling integrity" {
         try testing.expect(false); // Block should exist
         return;
     };
-    try std.testing.expectEqual(@as(u64, 2), retrieved.extract().version);
-    try std.testing.expectEqualStrings("Updated content", retrieved.extract().content);
-    try std.testing.expectEqualStrings("test://duplicate_handling_updated.zig", retrieved.extract().source_uri);
+    try std.testing.expectEqual(@as(u64, 2), retrieved.read_immutable().*.version);
+    try std.testing.expectEqualStrings("Updated content", retrieved.read_immutable().*.content);
+    try std.testing.expectEqualStrings("test://duplicate_handling_updated.zig", retrieved.read_immutable().*.source_uri);
 }
 
 test "graph relationship persistence" {
@@ -371,7 +371,7 @@ test "graph relationship persistence" {
         try testing.expect(false); // Block should exist
         return;
     };
-    try std.testing.expect(std.mem.indexOf(u8, retrieved_main.extract().content, "utils.helper()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, retrieved_main.read_immutable().*.content, "utils.helper()") != null);
 }
 
 test "batch operations under load" {
@@ -448,13 +448,13 @@ test "batch operations under load" {
         try testing.expect(false); // Block should exist
         return;
     };
-    try std.testing.expect(std.mem.indexOf(u8, first_block.extract().content, "Batch 0 item 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first_block.read_immutable().*.content, "Batch 0 item 0") != null);
 
     const last_block = (try harness.storage_engine.find_block(last_block_id, .query_engine)) orelse {
         try testing.expect(false); // Block should exist
         return;
     };
-    try std.testing.expect(std.mem.indexOf(u8, last_block.extract().content, "Batch 4 item 19") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last_block.read_immutable().*.content, "Batch 4 item 19") != null);
 }
 
 test "invalid data handling robustness" {

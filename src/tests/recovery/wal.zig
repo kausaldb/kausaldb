@@ -91,11 +91,11 @@ test "wal recovery single block recovery" {
         try testing.expect(false);
         return;
     };
-    try testing.expect(test_block.id.eql(recovered_block.extract().id));
-    try testing.expectEqual(test_block.version, recovered_block.extract().version);
-    try testing.expectEqualStrings(test_block.source_uri, recovered_block.extract().source_uri);
-    try testing.expectEqualStrings(test_block.metadata_json, recovered_block.extract().metadata_json);
-    try testing.expectEqualStrings(test_block.content, recovered_block.extract().content);
+    try testing.expect(test_block.id.eql(recovered_block.read_immutable().*.id));
+    try testing.expectEqual(test_block.version, recovered_block.read_immutable().*.version);
+    try testing.expectEqualStrings(test_block.source_uri, recovered_block.read_immutable().*.source_uri);
+    try testing.expectEqualStrings(test_block.metadata_json, recovered_block.read_immutable().*.metadata_json);
+    try testing.expectEqualStrings(test_block.content, recovered_block.read_immutable().*.content);
 
     // Golden master validation: ensure recovery behavior is deterministic
     try golden_master.verify_recovery_golden_master(allocator, "wal_single_block_recovery", &storage_engine2);
@@ -168,8 +168,8 @@ test "wal recovery multiple blocks and operations" {
 
     // Block2 should exist
     const recovered_block2 = (try storage_engine2.find_block(block2.id, .query_engine)).?;
-    try testing.expect(block2.id.eql(recovered_block2.extract().id));
-    try testing.expectEqual(block2.version, recovered_block2.extract().version);
+    try testing.expect(block2.id.eql(recovered_block2.read_immutable().*.id));
+    try testing.expectEqual(block2.version, recovered_block2.read_immutable().*.version);
 }
 
 test "wal recovery corruption with invalid checksum" {
@@ -285,8 +285,8 @@ test "wal recovery with large blocks" {
 
     try testing.expectEqual(@as(u32, 1), storage_engine2.block_count());
     const recovered = (try storage_engine2.find_block(large_block.id, .query_engine)).?;
-    try testing.expectEqual(large_content.len, recovered.extract().content.len);
-    try testing.expect(std.mem.eql(u8, large_content, recovered.extract().content));
+    try testing.expectEqual(large_content.len, recovered.read_immutable().*.content.len);
+    try testing.expect(std.mem.eql(u8, large_content, recovered.read_immutable().*.content));
 }
 
 test "wal recovery stress with many entries" {
@@ -374,10 +374,10 @@ test "wal recovery stress with many entries" {
     // Verify all blocks were recovered correctly
     for (expected_blocks.items) |expected| {
         const recovered = (try storage_engine2.find_block(expected.id, .query_engine)).?;
-        try testing.expect(expected.id.eql(recovered.extract().id));
-        try testing.expectEqual(expected.version, recovered.extract().version);
-        try testing.expectEqualStrings(expected.source_uri, recovered.extract().source_uri);
-        try testing.expectEqualStrings(expected.metadata_json, recovered.extract().metadata_json);
-        try testing.expectEqualStrings(expected.content, recovered.extract().content);
+        try testing.expect(expected.id.eql(recovered.read_immutable().*.id));
+        try testing.expectEqual(expected.version, recovered.read_immutable().*.version);
+        try testing.expectEqualStrings(expected.source_uri, recovered.read_immutable().*.source_uri);
+        try testing.expectEqualStrings(expected.metadata_json, recovered.read_immutable().*.metadata_json);
+        try testing.expectEqualStrings(expected.content, recovered.read_immutable().*.content);
     }
 }

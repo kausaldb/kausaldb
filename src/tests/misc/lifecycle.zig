@@ -181,8 +181,8 @@ test "full data lifecycle with compaction" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expectEqual(@as(u64, 2), retrieved.extract().version);
-        try testing.expect(std.mem.indexOf(u8, retrieved.extract().content, "updated") != null);
+        try testing.expectEqual(@as(u64, 2), retrieved.read_immutable().*.version);
+        try testing.expect(std.mem.indexOf(u8, retrieved.read_immutable().*.content, "updated") != null);
     }
 
     // Phase 5: WAL flush and persistence
@@ -301,7 +301,7 @@ test "concurrent storage and query operations" {
             try testing.expect(false); // Block should exist
             return;
         };
-        try testing.expect(read_result.extract().content.len > 0);
+        try testing.expect(read_result.read_immutable().*.content.len > 0);
 
         // Query multiple blocks
         if (round % 10 == 0) {
@@ -425,7 +425,7 @@ test "storage recovery and query consistency" {
             try testing.expect(false); // Block should exist
             continue;
         };
-        try testing.expect(block.extract().content.len > 0); // Verify block has content
+        try testing.expect(block.read_immutable().*.content.len > 0); // Verify block has content
     }
 
     // Test graph relationships survived recovery
@@ -513,7 +513,7 @@ test "large scale performance characteristics" {
 
             const result = try harness.storage_engine.find_block(block_id, .query_engine);
             try testing.expect(result != null); // Block should exist after compaction
-            try testing.expect(result.?.extract().content.len >= 512);
+            try testing.expect(result.?.read_immutable().*.content.len >= 512);
         }
     }
 

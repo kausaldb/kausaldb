@@ -53,7 +53,7 @@ test "arena corruption detection through storage engine" {
     // Verify basic storage engine operation without corruption
     const retrieved = try engine.find_block(test_block.id, .query_engine);
     try testing.expect(retrieved != null);
-    try testing.expectEqualStrings(test_block.content, retrieved.?.extract().content);
+    try testing.expectEqualStrings(test_block.content, retrieved.?.read_immutable().*.content);
 }
 
 // Test VFS handle corruption detection
@@ -143,7 +143,7 @@ test "memory accounting corruption detection through storage engine" {
     // Verify accounting through successful retrieval
     const retrieved = try engine.find_block(test_block.id, .query_engine);
     try testing.expect(retrieved != null);
-    try testing.expectEqualStrings(test_block.content, retrieved.?.extract().content);
+    try testing.expectEqualStrings(test_block.content, retrieved.?.read_immutable().*.content);
 }
 
 // Test arena clear corruption detection through storage engine
@@ -184,7 +184,7 @@ test "arena clear corruption detection through storage engine" {
     // Verify data persistence after flush
     const post_flush_retrieved = try engine.find_block(test_block.id, .query_engine);
     try testing.expect(post_flush_retrieved != null);
-    try testing.expectEqualStrings(test_block.content, post_flush_retrieved.?.extract().content);
+    try testing.expectEqualStrings(test_block.content, post_flush_retrieved.?.read_immutable().*.content);
 }
 
 // Integration test: verify fatal assertions don't trigger in normal operation
@@ -218,7 +218,7 @@ test "normal operation does not trigger fatal assertions" {
     // Normal find operation
     const found_block = try engine.find_block(test_block.id, .query_engine);
     try testing.expect(found_block != null);
-    try testing.expect(std.mem.eql(u8, found_block.?.extract().content, test_block.content));
+    try testing.expect(std.mem.eql(u8, found_block.?.read_immutable().*.content, test_block.content));
 
     // Normal VFS operations
     var test_file = try vfs_interface.create("normal_test_file.txt");

@@ -53,8 +53,8 @@ test "workspace filtering isolates query results by codebase" {
     try testing.expectEqual(@as(u32, 1), limbo_results.total_matches);
 
     // Verify correct blocks returned for each workspace
-    const kausal_returned_id = kausal_results.results[0].block.extract().id;
-    const limbo_returned_id = limbo_results.results[0].block.extract().id;
+    const kausal_returned_id = kausal_results.results[0].block.read_immutable().*.id;
+    const limbo_returned_id = limbo_results.results[0].block.read_immutable().*.id;
 
     try testing.expect(std.mem.eql(u8, &kausal_returned_id.bytes, &kausal_block.id.bytes));
     try testing.expect(std.mem.eql(u8, &limbo_returned_id.bytes, &limbo_block.id.bytes));
@@ -117,6 +117,6 @@ test "workspace filtering skips blocks with malformed metadata" {
     defer results.deinit();
 
     try testing.expectEqual(@as(u32, 1), results.total_matches);
-    const returned_id = results.results[0].block.extract().id;
+    const returned_id = results.results[0].block.read_immutable().*.id;
     try testing.expect(std.mem.eql(u8, &returned_id.bytes, &valid_block.id.bytes));
 }

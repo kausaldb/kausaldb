@@ -642,7 +642,7 @@ pub const StorageEngine = struct {
         if (parsed_block_result) |parsed_block| {
             // Convert to owned block only at the final moment for ownership transfer
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            const owned_block = OwnedBlock.init(owned_context_block, block_ownership, null);
+            const owned_block = OwnedBlock.take_ownership(owned_context_block, block_ownership);
 
             const end_time = std.time.nanoTimestamp();
             const read_duration: u64 = if (end_time >= start_time)

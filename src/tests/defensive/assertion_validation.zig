@@ -91,7 +91,7 @@ test "storage engine defensive programming validation" {
     // Test block retrieval
     const retrieved = try engine.find_block(valid_block.id, .query_engine);
     try testing.expect(retrieved != null);
-    try testing.expectEqualStrings(valid_block.content, retrieved.?.extract().content);
+    try testing.expectEqualStrings(valid_block.content, retrieved.?.read_immutable().*.content);
 
     // Test valid edge operations
     const valid_edge = GraphEdge{
@@ -195,7 +195,7 @@ test "block validation defensive programming" {
             // Verify retrieval works
             const retrieved = try engine.find_block(test_block.id, .query_engine);
             try testing.expect(retrieved != null);
-            try testing.expectEqual(test_block.version, retrieved.?.extract().version);
+            try testing.expectEqual(test_block.version, retrieved.?.read_immutable().*.version);
         }
     }
 }
@@ -330,14 +330,14 @@ test "memory management defensive programming" {
         // Verify immediate retrieval
         const retrieved = try engine.find_block(blocks[i].id, .query_engine);
         try testing.expect(retrieved != null);
-        try testing.expectEqualStrings(blocks[i].content, retrieved.?.extract().content);
+        try testing.expectEqualStrings(blocks[i].content, retrieved.?.read_immutable().*.content);
     }
 
     // Verify all blocks are still retrievable after potential flushes
     for (blocks) |block| {
         const retrieved = try engine.find_block(block.id, .query_engine);
         try testing.expect(retrieved != null);
-        try testing.expectEqual(block.version, retrieved.?.extract().version);
+        try testing.expectEqual(block.version, retrieved.?.read_immutable().*.version);
     }
 
     // Test metrics consistency
@@ -386,7 +386,7 @@ test "concurrent operation defensive programming" {
         // Immediate read to test assertion validation under rapid access
         const retrieved = try engine.find_block(block.id, .query_engine);
         try testing.expect(retrieved != null);
-        try testing.expectEqualStrings(block.content, retrieved.?.extract().content);
+        try testing.expectEqualStrings(block.content, retrieved.?.read_immutable().*.content);
 
         // Add edge to create graph structure - use previous block as target to avoid self-reference
         if (previous_block_id) |prev_id| {

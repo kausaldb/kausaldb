@@ -385,7 +385,7 @@ pub const ScenarioExecutor = struct {
 
         try storage_engine.put_block(recovery_block);
         const retrieved = (try storage_engine.find_block(recovery_block.id, .storage_engine)).?;
-        try testing.expect(retrieved.extract().id.eql(recovery_block.id));
+        try testing.expect(retrieved.read_immutable().*.id.eql(recovery_block.id));
     }
 };
 

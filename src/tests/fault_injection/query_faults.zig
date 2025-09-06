@@ -65,7 +65,7 @@ test "query handles SSTable read errors gracefully" {
     if (find_result) |maybe_block| {
         if (maybe_block) |found_block| {
             // Success case - block found despite I/O pressure
-            try testing.expectEqual(test_block.id, found_block.extract().id);
+            try testing.expectEqual(test_block.id, found_block.read_immutable().*.id);
         }
         // If null, block not found but no error - acceptable
     } else |err| {
@@ -119,7 +119,7 @@ test "query handles memory pressure in large result sets" {
     const find_result = engine.find_block(test_block_id(1), .query_engine);
     if (find_result) |maybe_block| {
         if (maybe_block) |found_block| {
-            try testing.expectEqual(test_block_id(1), found_block.extract().id);
+            try testing.expectEqual(test_block_id(1), found_block.read_immutable().*.id);
         }
         // If null, block not found but no error - acceptable under pressure
     } else |err| {
@@ -173,7 +173,7 @@ test "query handles storage corruption during graph traversal" {
     const find_result = engine.find_block(test_block_id(1001), .query_engine);
     if (find_result) |maybe_block| {
         if (maybe_block) |found_block| {
-            try testing.expectEqual(main_block.id, found_block.extract().id);
+            try testing.expectEqual(main_block.id, found_block.read_immutable().*.id);
         }
         // If null, block not found but no error - acceptable under corruption
     } else |err| {
@@ -214,7 +214,7 @@ test "query handles slow I/O and timeout conditions" {
 
     if (find_result) |maybe_block| {
         if (maybe_block) |found_block| {
-            try testing.expectEqual(test_block.id, found_block.extract().id);
+            try testing.expectEqual(test_block.id, found_block.read_immutable().*.id);
         }
         // If null, block not found but no error - acceptable under slow I/O
     } else |err| {
@@ -248,7 +248,7 @@ test "query provides detailed error context for debugging" {
         if (find_result) |maybe_block| {
             if (maybe_block) |found_block| {
                 // Unexpected success - block somehow exists
-                try testing.expect(found_block.extract().id.eql(block_id));
+                try testing.expect(found_block.read_immutable().*.id.eql(block_id));
             }
             // If null, block not found - expected for invalid IDs
         } else |err| {
@@ -301,7 +301,7 @@ test "semantic query handles parsing and similarity failures" {
         const find_result = engine.find_block(expected_block.id, .query_engine);
         if (find_result) |maybe_block| {
             if (maybe_block) |found_block| {
-                try testing.expectEqual(expected_block.id, found_block.extract().id);
+                try testing.expectEqual(expected_block.id, found_block.read_immutable().*.id);
             }
             // If null, block not found but no error - acceptable under corruption
         } else |err| {
@@ -350,7 +350,7 @@ test "query handles resource contention and concurrent access" {
         const find_result = engine.find_block(block_id, .query_engine);
         if (find_result) |maybe_block| {
             if (maybe_block) |found_block| {
-                try testing.expectEqual(block_id, found_block.extract().id);
+                try testing.expectEqual(block_id, found_block.read_immutable().*.id);
                 successful_queries += 1;
             }
             // If null, block not found but no error
@@ -392,7 +392,7 @@ test "query properly cleans up resources after failures" {
     if (find_result) |maybe_block| {
         if (maybe_block) |found_block| {
             // Success case - verify proper operation
-            try testing.expectEqual(test_block.id, found_block.extract().id);
+            try testing.expectEqual(test_block.id, found_block.read_immutable().*.id);
         }
         // If null, block not found but no error - acceptable
     } else |_| {
@@ -423,7 +423,7 @@ test "query validates parameters and handles malformed inputs" {
         if (find_result) |maybe_block| {
             if (maybe_block) |found_block| {
                 // Unexpected success - somehow found invalid block
-                try testing.expect(found_block.extract().id.eql(block_id));
+                try testing.expect(found_block.read_immutable().*.id.eql(block_id));
             }
             // If null, block not found - expected for invalid IDs
         } else |err| {

@@ -53,7 +53,7 @@ test "memory isolation with 5 storage cycles" {
                 try testing.expect(false); // Block should exist
                 continue;
             };
-            try testing.expect(retrieved.extract().id.eql(block.id));
+            try testing.expect(retrieved.read_immutable().*.id.eql(block.id));
         }
 
         log.debug("Completed storage cycle {} successfully", .{cycle});
@@ -88,7 +88,7 @@ test "hashmap operations under stress" {
                 try testing.expect(false); // Block should exist
                 continue;
             };
-            try testing.expect(retrieved.extract().id.eql(block.id));
+            try testing.expect(retrieved.read_immutable().*.id.eql(block.id));
         }
     }
 

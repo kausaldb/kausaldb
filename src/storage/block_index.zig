@@ -205,7 +205,8 @@ pub const BlockIndex = struct {
     /// Arena memory cleanup happens at StorageEngine level through bulk reset.
     pub fn remove_block(self: *BlockIndex, block_id: BlockId) void {
         if (self.blocks.get(block_id)) |existing_block| {
-            const old_memory = existing_block.block.source_uri.len + existing_block.block.metadata_json.len + existing_block.block.content.len;
+            const block_data = existing_block.read(.memtable_manager);
+            const old_memory = block_data.source_uri.len + block_data.metadata_json.len + block_data.content.len;
             fatal_assert(self.memory_used >= old_memory, "Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
             self.memory_used -= old_memory;
         }
@@ -245,7 +246,7 @@ pub const BlockIndex = struct {
 
     /// Large block cloning with chunked copy to improve cache locality.
     /// Standard dupe() performs large single allocations that can cause cache misses.
-    /// Returns StorageBlock with storage_engine ownership for proper tracking.
+    /// Returns ContextBlock for unified ownership pattern with OwnedBlock wrapper.
     fn clone_large_block(self: *BlockIndex, block: ContextBlock) !ContextBlock {
         const content_buffer = try self.arena_coordinator.alloc(u8, block.content.len);
 
@@ -288,10 +289,10 @@ pub const BlockIndex = struct {
         var calculated_memory: u64 = 0;
         var iterator = self.blocks.iterator();
         while (iterator.next()) |entry| {
-            const block = &entry.value_ptr.block;
-            calculated_memory += block.source_uri.len +
-                block.metadata_json.len +
-                block.content.len;
+            const block_data = entry.value_ptr.read(.memtable_manager);
+            calculated_memory += block_data.source_uri.len +
+                block_data.metadata_json.len +
+                block_data.content.len;
         }
         fatal_assert(self.memory_used == calculated_memory, "Memory accounting mismatch: tracked={} actual={}", .{ self.memory_used, calculated_memory });
     }
@@ -322,7 +323,8 @@ pub const BlockIndex = struct {
             // Verify each block can be found by its ID
             const found = self.blocks.get(entry.key_ptr.*);
             fatal_assert(found != null, "Block ID corruption: stored block not findable by key", .{});
-            fatal_assert(found.?.block.id.eql(entry.key_ptr.*), "Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found.?.block.id });
+            const found_block_data = found.?.read(.memtable_manager);
+            fatal_assert(found_block_data.id.eql(entry.key_ptr.*), "Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found_block_data.id });
         }
 
         fatal_assert(actual_count == expected_count, "HashMap count corruption: expected={} actual={}", .{ expected_count, actual_count });
@@ -332,23 +334,23 @@ pub const BlockIndex = struct {
     fn validate_content_integrity(self: *const BlockIndex) void {
         var iterator = self.blocks.iterator();
         while (iterator.next()) |entry| {
-            const block = &entry.value_ptr.block;
+            const block_data = entry.value_ptr.read(.memtable_manager);
 
             // Validate content pointers are not null for non-empty strings
-            if (block.source_uri.len > 0) {
-                fatal_assert(@intFromPtr(block.source_uri.ptr) != 0, "source_uri pointer corruption: null with length {}", .{block.source_uri.len});
+            if (block_data.source_uri.len > 0) {
+                fatal_assert(@intFromPtr(block_data.source_uri.ptr) != 0, "source_uri pointer corruption: null with length {}", .{block_data.source_uri.len});
             }
-            if (block.metadata_json.len > 0) {
-                fatal_assert(@intFromPtr(block.metadata_json.ptr) != 0, "metadata_json pointer corruption: null with length {}", .{block.metadata_json.len});
+            if (block_data.metadata_json.len > 0) {
+                fatal_assert(@intFromPtr(block_data.metadata_json.ptr) != 0, "metadata_json pointer corruption: null with length {}", .{block_data.metadata_json.len});
             }
-            if (block.content.len > 0) {
-                fatal_assert(@intFromPtr(block.content.ptr) != 0, "content pointer corruption: null with length {}", .{block.content.len});
+            if (block_data.content.len > 0) {
+                fatal_assert(@intFromPtr(block_data.content.ptr) != 0, "content pointer corruption: null with length {}", .{block_data.content.len});
             }
 
             // Validate string lengths are reasonable (detect corruption)
-            fatal_assert(block.source_uri.len < 10 * 1024 * 1024, "source_uri length corruption: {} bytes too large", .{block.source_uri.len});
-            fatal_assert(block.metadata_json.len < 10 * 1024 * 1024, "metadata_json length corruption: {} bytes too large", .{block.metadata_json.len});
-            fatal_assert(block.content.len < 1024 * 1024 * 1024, "content length corruption: {} bytes too large", .{block.content.len});
+            fatal_assert(block_data.source_uri.len < 10 * 1024 * 1024, "source_uri length corruption: {} bytes too large", .{block_data.source_uri.len});
+            fatal_assert(block_data.metadata_json.len < 10 * 1024 * 1024, "metadata_json length corruption: {} bytes too large", .{block_data.metadata_json.len});
+            fatal_assert(block_data.content.len < 1024 * 1024 * 1024, "content length corruption: {} bytes too large", .{block_data.content.len});
         }
     }
 };
