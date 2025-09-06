@@ -111,15 +111,19 @@ pub fn ingest_directory_to_blocks(
                 .timestamp_ns = @intCast(std.time.nanoTimestamp()),
             };
 
-            // Get owned ingestion blocks
-            const file_blocks = try parse_file_to_blocks.parse_file_to_blocks_owned(
+            // Get context blocks and convert to owned ingestion blocks
+            const file_blocks = try parse_file_to_blocks.parse_file_to_blocks(
                 coordinator.allocator(),
                 file_content_struct,
                 codebase_name,
                 parse_config,
             );
 
-            try all_blocks.appendSlice(file_blocks);
+            // Convert each ContextBlock to IngestionBlock for ownership tracking
+            for (file_blocks) |block| {
+                const ingestion_block = IngestionBlock.take_ownership(block);
+                try all_blocks.append(ingestion_block);
+            }
             stats.blocks_generated += @intCast(file_blocks.len);
         }
     }
@@ -145,51 +149,127 @@ fn collect_git_tracked_files(
     exclude_patterns: [][]const u8,
     out_paths: *std.array_list.Managed([]const u8),
 ) !void {
-    // Git-based implementation doesn't use VFS - suppress unused parameter
-    _ = file_system;
-    // Use git ls-files to get tracked files, then filter by patterns
-    var git_process = std.process.Child.init(&[_][]const u8{ "git", "ls-files", directory_path }, allocator);
-    git_process.stdout_behavior = .Pipe;
-    git_process.stderr_behavior = .Pipe;
+    const git_result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "git", "ls-files" },
+        .cwd = directory_path,
+        .max_output_bytes = 1024 * 1024, // 1MB max
+    }) catch |err| switch (err) {
+        error.FileNotFound => return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths),
+        else => return err,
+    };
+    defer allocator.free(git_result.stdout);
+    defer allocator.free(git_result.stderr);
 
-    try git_process.spawn();
-    defer _ = git_process.wait() catch {};
-    defer if (git_process.stdout) |stdout| stdout.close();
-    defer if (git_process.stderr) |stderr| stderr.close();
+    switch (git_result.term) {
+        .Exited => |code| if (code != 0) {
+            return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths);
+        },
+        else => return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths),
+    }
 
-    if (git_process.stdout) |stdout| {
-        const git_output = try stdout.readToEndAlloc(allocator, 1024 * 1024); // 1MB max
-        defer allocator.free(git_output);
+    var git_files_found = false;
 
-        var lines = std.mem.split(u8, git_output, "\n");
-        while (lines.next()) |line| {
-            const trimmed_line = std.mem.trim(u8, line, " \t\r\n");
-            if (trimmed_line.len == 0) continue;
+    var lines = std.mem.splitScalar(u8, git_result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed_line = std.mem.trim(u8, line, " \t\r\n");
+        if (trimmed_line.len == 0) continue;
 
-            // Check if file matches include patterns and doesn't match exclude patterns
-            var matches_include = include_patterns.len == 0; // If no include patterns, include all
-            for (include_patterns) |pattern| {
-                if (std.mem.indexOf(u8, trimmed_line, pattern) != null or
-                    std.mem.endsWith(u8, trimmed_line, pattern[2..]) and std.mem.startsWith(u8, pattern, "**"))
-                {
+        git_files_found = true;
+
+        var matches_include = include_patterns.len == 0;
+        for (include_patterns) |pattern| {
+            if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
+                matches_include = true;
+                break;
+            } else if (std.mem.startsWith(u8, pattern, "**/*")) {
+                const extension = pattern[4..];
+                if (std.mem.endsWith(u8, trimmed_line, extension)) {
                     matches_include = true;
                     break;
                 }
             }
+        }
 
-            var matches_exclude = false;
-            for (exclude_patterns) |pattern| {
-                if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
-                    matches_exclude = true;
-                    break;
-                }
-            }
-
-            if (matches_include and !matches_exclude) {
-                const file_path = try allocator.dupe(u8, trimmed_line);
-                try out_paths.append(file_path);
+        var matches_exclude = false;
+        for (exclude_patterns) |pattern| {
+            if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
+                matches_exclude = true;
+                break;
             }
         }
+
+        if (matches_include and !matches_exclude) {
+            const absolute_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, trimmed_line });
+            try out_paths.append(absolute_path);
+        }
+    }
+
+    // If Git found no files, fall back to filesystem traversal
+    if (!git_files_found) {
+        return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths);
+    }
+}
+
+fn collect_filesystem_files(
+    allocator: std.mem.Allocator,
+    file_system: *VFS,
+    directory_path: []const u8,
+    include_patterns: [][]const u8,
+    exclude_patterns: [][]const u8,
+    out_paths: *std.array_list.Managed([]const u8),
+) !void {
+    var iterator = try file_system.iterate_directory(directory_path, allocator);
+    defer iterator.deinit(allocator);
+
+    while (iterator.next()) |entry| {
+        if (entry.kind != .file) continue;
+
+        const file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, entry.name });
+        defer allocator.free(file_path);
+
+        const should_include = blk: {
+            if (include_patterns.len == 0) {
+                break :blk std.mem.endsWith(u8, entry.name, ".zig") or
+                    std.mem.endsWith(u8, entry.name, ".c") or
+                    std.mem.endsWith(u8, entry.name, ".cpp") or
+                    std.mem.endsWith(u8, entry.name, ".h") or
+                    std.mem.endsWith(u8, entry.name, ".hpp") or
+                    std.mem.endsWith(u8, entry.name, ".rs") or
+                    std.mem.endsWith(u8, entry.name, ".go") or
+                    std.mem.endsWith(u8, entry.name, ".py") or
+                    std.mem.endsWith(u8, entry.name, ".js") or
+                    std.mem.endsWith(u8, entry.name, ".ts");
+            }
+
+            for (include_patterns) |pattern| {
+                if (std.mem.indexOf(u8, entry.name, pattern) != null) {
+                    break :blk true;
+                } else if (std.mem.startsWith(u8, pattern, "**/*")) {
+                    const extension = pattern[4..];
+                    if (std.mem.endsWith(u8, entry.name, extension)) {
+                        break :blk true;
+                    }
+                }
+            }
+            break :blk false;
+        };
+
+        if (!should_include) continue;
+
+        const should_exclude = blk: {
+            for (exclude_patterns) |pattern| {
+                if (std.mem.indexOf(u8, entry.name, pattern) != null) {
+                    break :blk true;
+                }
+            }
+            break :blk false;
+        };
+
+        if (should_exclude) continue;
+
+        const absolute_path = try allocator.dupe(u8, file_path);
+        try out_paths.append(absolute_path);
     }
 }
 

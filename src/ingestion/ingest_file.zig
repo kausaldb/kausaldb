@@ -52,6 +52,7 @@ pub fn parse_file_to_blocks(
     }
     // Convert to ContextBlock at API boundary
     var blocks = try allocator.alloc(ContextBlock, owned_blocks.len);
+    defer allocator.free(owned_blocks);
     for (owned_blocks, 0..) |owned, i| {
         blocks[i] = owned.extract();
     }
@@ -99,6 +100,14 @@ fn parse_zig_file_to_blocks(
             }
             current_function = try parse_function_declaration(allocator, trimmed_line, line_num);
             errdefer if (current_function) |*func| func.deinit();
+
+            // Check if this is a single-line function (ends on same line)
+            if (brace_depth <= 0 and trimmed_line.len > 0 and trimmed_line[trimmed_line.len - 1] == '}') {
+                const func_block = try create_function_block(allocator, file_content.path, codebase_name, current_function.?, line_num);
+                try blocks.append(func_block);
+                current_function.?.deinit();
+                current_function = null;
+            }
         } else if (current_function != null) {
             if (config.include_function_bodies and
                 current_function.?.body_lines.items.len * 80 < config.max_function_body_size)
@@ -159,7 +168,7 @@ fn parse_text_file_to_blocks(
     const metadata_json = try create_text_metadata_json(allocator, file_content, codebase_name);
     const content = try allocator.dupe(u8, file_content.data);
 
-    const block = IngestionBlock.init(ContextBlock{
+    const block = IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
@@ -257,7 +266,7 @@ fn create_function_block(
         }
     }
 
-    return IngestionBlock.init(ContextBlock{
+    return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
@@ -290,7 +299,7 @@ fn create_import_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return IngestionBlock.init(ContextBlock{
+    return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
@@ -323,7 +332,7 @@ fn create_test_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return IngestionBlock.init(ContextBlock{
+    return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
@@ -356,7 +365,7 @@ fn create_struct_block(
         "}}" ++
         "}}", .{ file_path, line_num, codebase_name, file_path, line_num, line_num });
 
-    return IngestionBlock.init(ContextBlock{
+    return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
         .version = 1,
         .source_uri = source_uri,
