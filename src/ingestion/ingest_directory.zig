@@ -148,7 +148,7 @@ fn collect_git_tracked_files(
     // Git-based implementation doesn't use VFS - suppress unused parameter
     _ = file_system;
     // Use git ls-files to get tracked files, then filter by patterns
-    var git_process = std.ChildProcess.init(&[_][]const u8{ "git", "ls-files", directory_path }, allocator);
+    var git_process = std.process.Child.init(&[_][]const u8{ "git", "ls-files", directory_path }, allocator);
     git_process.stdout_behavior = .Pipe;
     git_process.stderr_behavior = .Pipe;
 

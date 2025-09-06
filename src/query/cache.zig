@@ -22,7 +22,7 @@ const assert_fmt = assert_mod.assert_fmt;
 
 const BlockId = context_block.BlockId;
 const ContextBlock = context_block.ContextBlock;
-const OwnedQueryEngineBlock = ownership.OwnedQueryEngineBlock;
+const OwnedBlock = ownership.OwnedBlock;
 const QueryResult = operations.QueryResult;
 const TraversalResult = traversal.TraversalResult;
 
@@ -123,7 +123,7 @@ const CacheEntry = struct {
 
 /// Union type for different cached result types - focusing on expensive operations
 pub const CacheValue = union(CacheKey.QueryType) {
-    find_blocks: OwnedQueryEngineBlock, // Cache individual blocks with ownership
+    find_blocks: OwnedBlock, // Cache individual blocks with ownership
     traversal: TraversalResult,
     semantic: void, // Placeholder for future semantic query results
     filtered: void, // Placeholder for future filtered query results
@@ -159,7 +159,7 @@ pub const CacheValue = union(CacheKey.QueryType) {
 };
 
 /// Clone a context block for caching or returning from cache
-fn clone_owned_block(allocator: std.mem.Allocator, owned_block: OwnedQueryEngineBlock) !OwnedQueryEngineBlock {
+fn clone_owned_block(allocator: std.mem.Allocator, owned_block: OwnedBlock) !OwnedBlock {
     const block = owned_block.read(.query_engine);
     const cloned_block = ContextBlock{
         .id = block.id,
@@ -168,7 +168,7 @@ fn clone_owned_block(allocator: std.mem.Allocator, owned_block: OwnedQueryEngine
         .metadata_json = try allocator.dupe(u8, block.metadata_json),
         .content = try allocator.dupe(u8, block.content),
     };
-    return OwnedQueryEngineBlock.init(cloned_block);
+    return OwnedBlock.take_ownership(cloned_block, .query_engine);
 }
 
 /// Hash context for CacheKey
@@ -455,7 +455,7 @@ test "cache TTL expiration" {
     }
 
     const cache_key = CacheKey.for_single_block(test_block.id);
-    const cache_value = CacheValue{ .find_blocks = OwnedQueryEngineBlock.init(test_block) };
+    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(test_block, .query_engine) };
 
     // Store in cache
     try query_cache.put(cache_key, cache_value);
@@ -490,7 +490,7 @@ test "cache invalidation" {
     }
 
     const cache_key = CacheKey.for_single_block(test_block.id);
-    const cache_value = CacheValue{ .find_blocks = OwnedQueryEngineBlock.init(test_block) };
+    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(test_block, .query_engine) };
 
     // Store in cache
     try query_cache.put(cache_key, cache_value);

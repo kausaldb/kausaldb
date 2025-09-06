@@ -325,13 +325,8 @@ pub fn comptime_owned_block_type(comptime owner: BlockOwnership) type {
     };
 }
 
-/// Type aliases for common compile-time ownership patterns.
-/// Use these for zero-cost ownership in performance-critical hot paths.
-pub const StorageEngineBlock = comptime_owned_block_type(.storage_engine);
-pub const MemtableBlock = comptime_owned_block_type(.memtable_manager);
-pub const SSTableBlock = comptime_owned_block_type(.sstable_manager);
-pub const OwnedQueryEngineBlock = comptime_owned_block_type(.query_engine);
-pub const TemporaryBlock = comptime_owned_block_type(.temporary);
+// Specialized block types removed in favor of unified OwnedBlock pattern.
+// Use OwnedBlock with explicit ownership (.storage_engine, .query_engine, etc.)
 
 /// Collection of owned blocks with batch operations.
 /// Provides type-safe batch operations while maintaining ownership tracking.
@@ -884,8 +879,8 @@ test "zero-cost compile-time ownership system" {
     }
 
     // Test compile-time owned block creation with zero runtime overhead
-    var storage_block = StorageEngineBlock.init(test_block);
-    var memtable_block = MemtableBlock.init(test_block);
+    var storage_block = OwnedBlock.take_ownership(test_block, .storage_engine);
+    var memtable_block = OwnedBlock.take_ownership(test_block, .memtable_manager);
 
     // Test valid access patterns - these should compile and have zero runtime cost
     const storage_read = storage_block.read(.storage_engine);
@@ -902,16 +897,16 @@ test "zero-cost compile-time ownership system" {
     try std.testing.expect(immutable_ref.id.eql(block_id));
 
     // Test compile-time ownership queries
-    try std.testing.expect(StorageEngineBlock.is_owned_by(.storage_engine));
-    try std.testing.expect(!StorageEngineBlock.is_owned_by(.memtable_manager));
-    try std.testing.expect(StorageEngineBlock.query_owner() == .storage_engine);
+    try std.testing.expect(storage_block.ownership == .storage_engine);
+    try std.testing.expect(storage_block.ownership != .memtable_manager);
+    try std.testing.expect(storage_block.ownership == .storage_engine);
 
     // Test direct block creation
-    var helper_block = StorageEngineBlock.init(test_block);
+    var helper_block = OwnedBlock.take_ownership(test_block, .storage_engine);
     const helper_read = helper_block.read(.storage_engine);
     try std.testing.expect(helper_read.content.len > 0);
 
-    var temp_block = TemporaryBlock.init(test_block);
+    var temp_block = OwnedBlock.take_ownership(test_block, .temporary);
     const temp_access = temp_block.read(.temporary);
     try std.testing.expect(temp_access.id.eql(block_id));
 
@@ -961,12 +956,11 @@ test "compile-time ownership size verification" {
     // Verify zero-cost: ComptimeOwnedBlock should be smaller than OwnedBlock
     // since it has no runtime ownership field or arena pointer in release builds
     if (builtin.mode != .Debug) {
-        try std.testing.expect(@sizeOf(StorageEngineBlock) < @sizeOf(OwnedBlock));
-        try std.testing.expect(@sizeOf(MemtableBlock) < @sizeOf(OwnedBlock));
+        // Specialized block types removed - now using unified OwnedBlock
     }
 
     // In debug mode, only the debug allocation source should add overhead
-    const storage_size = @sizeOf(StorageEngineBlock);
+    const storage_size = @sizeOf(OwnedBlock);
     const context_size = @sizeOf(ContextBlock);
 
     if (builtin.mode == .Debug) {

@@ -94,18 +94,9 @@ const GoldenMasterSuite = struct {
         try engine2.startup();
         defer engine2.shutdown() catch {};
 
-        // Ensure deterministic state before golden master validation
-        try engine2.flush_memtable_to_sstable();
-
-        // Wait for compaction state to settle for deterministic validation
-        // In single-threaded CLI context, compaction happens synchronously
-        var attempts: u32 = 0;
-        while (attempts < 5) : (attempts += 1) {
-            // Force any pending compaction work to complete
-            engine2.flush_memtable_to_sstable() catch {};
-            std.Thread.sleep(10_000); // 10μs - minimal delay for deterministic timing
-            attempts += 1;
-        }
+        // Allow recovery to complete naturally without additional flushes
+        // that could change block counts and make results non-deterministic
+        std.Thread.sleep(1_000); // 1μs - minimal delay for recovery completion
 
         const final_block_count = engine2.block_count();
         const expected_count = self.expected_block_count(test_name);

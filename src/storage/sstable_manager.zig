@@ -188,11 +188,11 @@ pub const SSTableManager = struct {
             if (try sstable_file.find_block(block_id)) |block| {
                 // Clone strings using coordinator's arena allocation methods
                 const cloned_block = ContextBlock{
-                    .id = block.block.id,
-                    .version = block.block.version,
-                    .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.block.source_uri),
-                    .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.block.metadata_json),
-                    .content = try self.arena_coordinator.duplicate_slice(u8, block.block.content),
+                    .id = block.id,
+                    .version = block.version,
+                    .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
+                    .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
+                    .content = try self.arena_coordinator.duplicate_slice(u8, block.content),
                 };
                 // Note: OwnedBlock.init still expects arena pointer for debug tracking
                 // In hierarchical model, this is now coordinator's arena

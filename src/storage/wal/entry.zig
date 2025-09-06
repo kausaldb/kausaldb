@@ -20,7 +20,6 @@ const MAX_PAYLOAD_SIZE = types.MAX_PAYLOAD_SIZE;
 const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const BlockId = context_block.BlockId;
-const StorageEngineBlock = ownership.StorageEngineBlock;
 const OwnedBlock = ownership.OwnedBlock;
 
 /// WAL entry header structure with corruption detection
@@ -131,9 +130,9 @@ pub const WALEntry = struct {
         return create_put_block(allocator, block);
     }
 
-    /// Create WAL entry for a StorageEngineBlock with ownership validation.
+    /// Create WAL entry for an OwnedBlock with storage engine ownership validation.
     /// Reads the block data through the storage engine ownership system.
-    pub fn create_put_block_storage(allocator: std.mem.Allocator, block: StorageEngineBlock) WALError!WALEntry {
+    pub fn create_put_block_storage(allocator: std.mem.Allocator, block: OwnedBlock) WALError!WALEntry {
         const context_block_data = block.read(.storage_engine);
         return create_put_block(allocator, context_block_data);
     }

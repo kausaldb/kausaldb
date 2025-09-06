@@ -21,20 +21,18 @@ const OwnedBlockCollection = ownership.OwnedBlockCollection;
 const TypedArenaType = arena.typed_arena_type;
 
 // Test subsystem simulators
-const MemtableBlock = ownership.comptime_owned_block_type(.memtable_manager);
-const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
-const QueryBlock = ownership.comptime_owned_block_type(.query_engine);
+// Using unified OwnedBlock pattern instead of specialized types
 
 const MemtableSubsystem = struct {
-    arena: TypedArenaType(MemtableBlock, @This()),
-    blocks: std.ArrayListUnmanaged(MemtableBlock),
+    arena: TypedArenaType(OwnedBlock, @This()),
+    blocks: std.ArrayListUnmanaged(OwnedBlock),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .arena = TypedArenaType(MemtableBlock, Self).init(allocator, ArenaOwnership.memtable_manager),
-            .blocks = std.ArrayListUnmanaged(MemtableBlock){},
+            .arena = TypedArenaType(OwnedBlock, Self).init(allocator, ArenaOwnership.memtable_manager),
+            .blocks = std.ArrayListUnmanaged(OwnedBlock){},
         };
     }
 
@@ -44,7 +42,7 @@ const MemtableSubsystem = struct {
     }
 
     pub fn add_block(self: *Self, block: ContextBlock) !void {
-        const owned = MemtableBlock.init(block);
+        const owned = OwnedBlock.take_ownership(block, .memtable_manager);
         try self.blocks.append(self.arena.allocator(), owned);
     }
 

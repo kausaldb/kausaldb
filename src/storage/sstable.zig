@@ -38,7 +38,6 @@ const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const ParsedBlock = context_block.ParsedBlock;
-const SSTableBlock = ownership.SSTableBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const VFS = vfs.VFS;
 const VFile = vfs.VFile;
@@ -283,7 +282,7 @@ pub const SSTable = struct {
         };
 
         if (!supported_block_write) {
-            @compileError("write_blocks() called with unsupported type '" ++ @typeName(BlocksType) ++ "'. Accepts []const ContextBlock, []ContextBlock, []const SSTableBlock, []SSTableBlock, []const OwnedBlock, or []OwnedBlock only");
+            @compileError("write_blocks() called with unsupported type '" ++ @typeName(BlocksType) ++ "'. Accepts []const ContextBlock, []ContextBlock, []const OwnedBlock, or []OwnedBlock only");
         }
         assert_mod.assert_not_empty(blocks, "Cannot write empty blocks array", .{});
         assert_mod.assert_fmt(blocks.len <= 1000000, "Too many blocks for single SSTable: {}", .{blocks.len});
@@ -513,7 +512,7 @@ pub const SSTable = struct {
     ///
     /// Uses the bloom filter for fast negative lookups, then performs binary search
     /// on the index. Returns null if the block is not found in this SSTable.
-    pub fn find_block(self: *SSTable, block_id: BlockId) !?SSTableBlock {
+    pub fn find_block(self: *SSTable, block_id: BlockId) !?ContextBlock {
         // Skip per-operation index validation to prevent read path performance regression
         // Index ordering validation on every find_block call causes significant overhead
 
@@ -557,7 +556,7 @@ pub const SSTable = struct {
         _ = try file.read(buffer);
 
         const block_data = try ContextBlock.deserialize(self.arena_coordinator.allocator(), buffer);
-        return SSTableBlock.init(block_data);
+        return block_data;
     }
 
     /// Find block and return zero-copy view without heap allocations.
@@ -654,7 +653,7 @@ pub const SSTableIterator = struct {
     }
 
     /// Get next block from iterator, opening file if needed
-    pub fn next(self: *SSTableIterator) !?SSTableBlock {
+    pub fn next(self: *SSTableIterator) !?ContextBlock {
         // Safety: Converting pointer to integer for corruption detection
         assert_mod.assert_fmt(@intFromPtr(self.sstable) != 0, "Iterator sstable pointer corrupted", .{});
         assert_mod.assert_index_valid(self.current_index, self.sstable.index.items.len + 1, "Iterator index out of bounds: {} >= {}", .{ self.current_index, self.sstable.index.items.len + 1 });
@@ -678,7 +677,7 @@ pub const SSTableIterator = struct {
         _ = try self.file.?.read(buffer);
 
         const block_data = try ContextBlock.deserialize(self.sstable.arena_coordinator.allocator(), buffer);
-        return SSTableBlock.init(block_data);
+        return block_data;
     }
 };
 
@@ -732,7 +731,7 @@ pub const Compactor = struct {
         var output_table = SSTable.init(self.arena_coordinator, self.backing_allocator, self.filesystem, output_path_copy);
         defer output_table.deinit();
 
-        var all_blocks = std.array_list.Managed(SSTableBlock).init(self.backing_allocator);
+        var all_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
         defer all_blocks.deinit();
 
         var total_capacity: u32 = 0;
@@ -765,18 +764,18 @@ pub const Compactor = struct {
     }
 
     /// Remove duplicate blocks, keeping the one with highest version
-    fn dedup_blocks(self: *Compactor, blocks: []SSTableBlock) ![]SSTableBlock {
+    fn dedup_blocks(self: *Compactor, blocks: []ContextBlock) ![]ContextBlock {
         // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(@intFromPtr(blocks.ptr) != 0 or blocks.len == 0, "Blocks array has null pointer with non-zero length", .{});
 
-        if (blocks.len == 0) return try self.backing_allocator.alloc(SSTableBlock, 0);
+        if (blocks.len == 0) return try self.backing_allocator.alloc(ContextBlock, 0);
 
-        const sorted = try self.backing_allocator.dupe(SSTableBlock, blocks);
-        std.mem.sort(SSTableBlock, sorted, {}, struct {
-            fn less_than(context: void, a: SSTableBlock, b: SSTableBlock) bool {
+        const sorted = try self.backing_allocator.dupe(ContextBlock, blocks);
+        std.mem.sort(ContextBlock, sorted, {}, struct {
+            fn less_than(context: void, a: ContextBlock, b: ContextBlock) bool {
                 _ = context;
-                const a_data = a.read(.sstable_manager);
-                const b_data = b.read(.sstable_manager);
+                const a_data = a;
+                const b_data = b;
                 const order = std.mem.order(u8, &a_data.id.bytes, &b_data.id.bytes);
                 if (order == .eq) {
                     return a_data.version > b_data.version;
@@ -785,14 +784,14 @@ pub const Compactor = struct {
             }
         }.less_than);
 
-        var unique = std.array_list.Managed(SSTableBlock).init(self.backing_allocator);
+        var unique = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
         defer unique.deinit();
 
         try unique.ensureTotalCapacity(sorted.len);
 
         var prev_id: ?BlockId = null;
         for (sorted) |block| {
-            const block_data = block.read(.sstable_manager);
+            const block_data = block;
             if (prev_id == null or !block_data.id.eql(prev_id.?)) {
                 const cloned = ContextBlock{
                     .id = block_data.id,
@@ -801,8 +800,7 @@ pub const Compactor = struct {
                     .metadata_json = try self.arena_coordinator.allocator().dupe(u8, block_data.metadata_json),
                     .content = try self.arena_coordinator.allocator().dupe(u8, block_data.content),
                 };
-                const owned_block = SSTableBlock.init(cloned);
-                try unique.append(owned_block);
+                try unique.append(cloned);
                 prev_id = block_data.id;
             }
         }
@@ -854,8 +852,8 @@ test "SSTable write and read" {
     const retrieved1 = try sstable.find_block(block1.id);
     if (retrieved1) |_| {
         try std.testing.expect(retrieved1 != null);
-        try std.testing.expect(retrieved1.?.block.id.eql(block1.id));
-        try std.testing.expectEqualStrings("test://block1", retrieved1.?.block.source_uri);
+        try std.testing.expect(retrieved1.?.id.eql(block1.id));
+        try std.testing.expectEqualStrings("test://block1", retrieved1.?.source_uri);
     } else {
         try std.testing.expect(retrieved1 != null);
     }
@@ -914,7 +912,7 @@ test "SSTable iterator" {
     const first = try iter.next();
     if (first) |_| {
         try std.testing.expect(first != null);
-        try std.testing.expectEqualStrings("content 1", first.?.block.content);
+        try std.testing.expectEqualStrings("content 1", first.?.content);
     } else {
         try std.testing.expect(first != null);
     }
@@ -922,7 +920,7 @@ test "SSTable iterator" {
     const second = try iter.next();
     if (second) |_| {
         try std.testing.expect(second != null);
-        try std.testing.expectEqualStrings("content 2", second.?.block.content);
+        try std.testing.expectEqualStrings("content 2", second.?.content);
     } else {
         try std.testing.expect(second != null);
     }
@@ -930,7 +928,7 @@ test "SSTable iterator" {
     const third = try iter.next();
     if (third) |_| {
         try std.testing.expect(third != null);
-        try std.testing.expectEqualStrings("content 3", third.?.block.content);
+        try std.testing.expectEqualStrings("content 3", third.?.content);
     } else {
         try std.testing.expect(third != null);
     }
@@ -1001,8 +999,8 @@ test "SSTable compaction" {
     const test_id = try BlockId.from_hex("11111111111111111111111111111111");
     const retrieved = try compacted.find_block(test_id);
     try std.testing.expect(retrieved != null);
-    try std.testing.expectEqual(@as(u64, 2), retrieved.?.block.version);
-    try std.testing.expectEqualStrings("version 2", retrieved.?.block.content);
+    try std.testing.expectEqual(@as(u64, 2), retrieved.?.version);
+    try std.testing.expectEqualStrings("version 2", retrieved.?.content);
 }
 
 test "SSTable checksum validation" {
@@ -1099,7 +1097,7 @@ test "SSTable Bloom filter functionality" {
 
     const retrieved1 = try sstable.find_block(block1.id);
     try std.testing.expect(retrieved1 != null);
-    try std.testing.expect(retrieved1.?.block.id.eql(block1.id));
+    try std.testing.expect(retrieved1.?.id.eql(block1.id));
     if (retrieved1) |_| {}
 
     const non_existent_id = try BlockId.from_hex("11111111111111111111111111111111");
@@ -1287,7 +1285,7 @@ test "SSTable zero-copy ParsedBlock vs traditional deserialization performance" 
     try std.testing.expect(traditional_block != null);
 
     if (traditional_block) |owned_block| {
-        const block = owned_block.read(.temporary);
+        const block = owned_block;
         try std.testing.expect(block.id.eql(test_block.id));
         try std.testing.expectEqual(test_block.version, block.version);
         try std.testing.expectEqualStrings(test_block.source_uri, block.source_uri);
@@ -1348,7 +1346,7 @@ test "SSTable binary search performance" {
     for (blocks.items) |original_block| {
         const found = try sstable.find_block(original_block.id);
         try std.testing.expect(found != null);
-        try std.testing.expect(found.?.block.id.eql(original_block.id));
+        try std.testing.expect(found.?.id.eql(original_block.id));
         if (found) |_| {}
     }
 

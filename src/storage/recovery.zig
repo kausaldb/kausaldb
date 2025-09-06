@@ -19,8 +19,6 @@ const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const wal = @import("wal.zig");
 const assert_mod = @import("../core/assert.zig");
 
-const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
-
 const assert = assert_mod.assert;
 const assert_fmt = assert_mod.assert_fmt;
 const log = std.log.scoped(.storage_recovery);

@@ -36,7 +36,6 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
-const OwnedQueryEngineBlock = ownership.OwnedQueryEngineBlock;
 const QueryState = state_machines.QueryState;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = storage.StorageEngine;
@@ -53,16 +52,16 @@ pub const SemanticQuery = operations.SemanticQuery;
 /// Block reference for allocation-free queries.
 /// Lifetime is tied to the storage engine that created it.
 pub const QueryEngineBlock = struct {
-    /// Direct pointer to block in storage - zero allocation
-    block_ptr: *const ContextBlock,
+    /// Block content with ownership tracking
+    owned_block: OwnedBlock,
 
     /// Block ID for validation
     block_id: BlockId,
 
     /// Access block data without allocation.
-    /// Returns direct reference to storage engine data.
+    /// Returns reference to block data.
     pub fn read_block(self: *const QueryEngineBlock) *const ContextBlock {
-        return self.block_ptr;
+        return &self.owned_block.block;
     }
 
     /// Get block ID without dereferencing full block.
@@ -430,9 +429,9 @@ pub const QueryEngine = struct {
         defer self.record_direct_query(start_time);
 
         // Check memtable first for direct access
-        if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
+        if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
             return QueryEngineBlock{
-                .block_ptr = block_ptr,
+                .owned_block = OwnedBlock.take_ownership(block, .query_engine),
                 .block_id = block_id,
             };
         }
@@ -447,7 +446,7 @@ pub const QueryEngine = struct {
         // Store in query cache and return reference
         const cached_block = try self.cache_block_for_access(owned_block);
         return QueryEngineBlock{
-            .block_ptr = cached_block,
+            .owned_block = OwnedBlock.take_ownership(cached_block.*, .query_engine),
             .block_id = block_id,
         };
     }
@@ -470,8 +469,8 @@ pub const QueryEngine = struct {
         if (!self.state.can_query()) return null;
 
         // Check memtable first for direct access
-        if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return block_ptr.version;
+        if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            return block.version;
         }
 
         // For SSTables, this would require loading metadata only
@@ -480,7 +479,7 @@ pub const QueryEngine = struct {
     }
 
     /// Cache block for direct access - internal method
-    fn cache_block_for_access(self: *QueryEngine, owned_block: OwnedQueryEngineBlock) !*const ContextBlock {
+    fn cache_block_for_access(self: *QueryEngine, owned_block: OwnedBlock) !*const ContextBlock {
         _ = self; // Internal caching not implemented yet
         // For now, return the block pointer directly
         // In future, this should cache in query-specific memory pool
@@ -756,7 +755,7 @@ pub const QueryEngine = struct {
                 matches_found += 1;
 
                 try results.append(SemanticResult{
-                    .block = OwnedQueryEngineBlock.init(block),
+                    .block = OwnedBlock.take_ownership(block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
             }
@@ -800,7 +799,7 @@ pub const QueryEngine = struct {
                 matches_found += 1;
 
                 try results.append(SemanticResult{
-                    .block = OwnedQueryEngineBlock.init(block),
+                    .block = OwnedBlock.take_ownership(block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
             }
@@ -839,7 +838,7 @@ pub const QueryEngine = struct {
     ) !TraversalResult {
         // Use the existing arena from the traversal result for consistency and proper lifecycle
         const arena_allocator = traversal_result.query_arena.allocator();
-        var filtered_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(arena_allocator);
+        var filtered_blocks = std.array_list.Managed(OwnedBlock).init(arena_allocator);
         var filtered_paths = std.array_list.Managed([]const BlockId).init(arena_allocator);
         var filtered_depths = std.array_list.Managed(u32).init(arena_allocator);
 

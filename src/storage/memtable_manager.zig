@@ -29,7 +29,6 @@ const GraphEdge = context_block.GraphEdge;
 const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
-const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 const VFS = vfs.VFS;
 const WAL = wal.WAL;
 const WALEntry = wal.WALEntry;
@@ -227,13 +226,10 @@ pub const MemtableManager = struct {
     }
 
     /// Find a block in the in-memory memtable by ID.
-    /// Returns a pointer to the block if found, null otherwise.
+    /// Returns the block if found, null otherwise.
     /// Used by the storage engine for LSM-tree read path (memtable first).
-    pub fn find_block_in_memtable(self: *const MemtableManager, id: BlockId) ?*const ContextBlock {
-        if (self.block_index.find_block_runtime(id, .memtable_manager)) |owned_block_ptr| {
-            return &owned_block_ptr.block;
-        }
-        return null;
+    pub fn find_block_in_memtable(self: *const MemtableManager, id: BlockId) ?ContextBlock {
+        return self.block_index.find_block(id, .memtable_manager);
     }
 
     /// Find a block in memtable and clone it with specified ownership.

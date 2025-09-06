@@ -21,7 +21,6 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
-const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 
 /// In-memory block index using Arena Coordinator Pattern for efficient bulk operations.
 /// Provides fast writes and reads while maintaining O(1) memory cleanup through

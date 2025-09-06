@@ -20,7 +20,7 @@ const BlockId = context_block.BlockId;
 const ContextBlock = context_block.ContextBlock;
 const EdgeType = context_block.EdgeType;
 const GraphEdge = context_block.GraphEdge;
-const OwnedQueryEngineBlock = ownership.OwnedQueryEngineBlock;
+const OwnedBlock = ownership.OwnedBlock;
 const StorageEngine = storage.StorageEngine;
 
 /// Simple traversal query - only the essential parameters
@@ -45,7 +45,7 @@ pub const TraversalQuery = struct {
 /// Simple traversal result containing found blocks and basic statistics
 pub const TraversalResult = struct {
     /// Blocks found during traversal in breadth-first order
-    blocks: []const OwnedQueryEngineBlock,
+    blocks: []const OwnedBlock,
     /// Simple statistics about the traversal
     stats: TraversalStats,
     /// Arena allocator used for this result - caller must manage lifetime
@@ -93,7 +93,7 @@ pub const TraversalEngine = struct {
         var queue = std.array_list.Managed(QueueItem).init(self.allocator);
         defer queue.deinit();
 
-        var result_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(result_arena);
+        var result_blocks = std.array_list.Managed(OwnedBlock).init(result_arena);
 
         // Statistics tracking
         var stats = TraversalResult.TraversalStats{

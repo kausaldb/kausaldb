@@ -22,7 +22,7 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const Config = storage_config_mod.Config;
 const ContextBlock = context_block.ContextBlock;
-const OwnedQueryEngineBlock = ownership.OwnedQueryEngineBlock;
+const OwnedBlock = ownership.OwnedBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = storage.StorageEngine;
 
@@ -241,7 +241,7 @@ pub const FilteredQueryIterator = struct {
     }
 
     /// Get the next matching block, or null if no more results
-    pub fn next(self: *FilteredQueryIterator) !?OwnedQueryEngineBlock {
+    pub fn next(self: *FilteredQueryIterator) !?OwnedBlock {
         if (self.finished) return null;
 
         while (try self.storage_iterator.next()) |owned_block| {
@@ -263,7 +263,7 @@ pub const FilteredQueryIterator = struct {
                 // Clone block to ensure iterator owns the memory
                 const cloned_block = try clone_block(self.allocator, block.*);
                 self.results_returned += 1;
-                return OwnedQueryEngineBlock.init(cloned_block);
+                return OwnedBlock.take_ownership(cloned_block, .query_engine);
             }
         }
 
@@ -300,14 +300,14 @@ pub const FilteringStats = struct {
 
 /// Legacy result set from a filtered query operation (deprecated - use FilteredQueryIterator)
 pub const FilteredQueryResult = struct {
-    blocks: []OwnedQueryEngineBlock,
+    blocks: []OwnedBlock,
     total_matches: u32,
     has_more: bool,
     allocator: std.mem.Allocator,
 
     pub fn init(
         allocator: std.mem.Allocator,
-        blocks: []OwnedQueryEngineBlock,
+        blocks: []OwnedBlock,
         total_matches: u32,
         has_more: bool,
     ) FilteredQueryResult {
@@ -423,7 +423,7 @@ fn execute_indexed_query(
     query: FilteredQuery,
     candidate_block_ids: []const BlockId,
 ) !FilteredQueryResult {
-    var matched_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(allocator);
+    var matched_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
     errdefer {
         for (matched_blocks.items) |block| {
             const ctx_block = block.read(.query_engine);
@@ -454,7 +454,7 @@ fn execute_indexed_query(
                 if (blocks_collected < max_to_collect) {
                     // Clone block for ownership transfer
                     const cloned_ctx_block = try clone_block(allocator, ctx_block.*);
-                    try matched_blocks.append(OwnedQueryEngineBlock.init(cloned_ctx_block));
+                    try matched_blocks.append(OwnedBlock.take_ownership(cloned_ctx_block, .query_engine));
                     blocks_collected += 1;
                 }
             }
@@ -483,7 +483,7 @@ pub fn execute_filtered_query(
     var blocks_collected: u32 = 0;
     const max_to_collect = query.max_results;
 
-    var matched_blocks = std.array_list.Managed(OwnedQueryEngineBlock).init(allocator);
+    var matched_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
     errdefer {
         for (matched_blocks.items) |block| {
             const ctx_block = block.read(.query_engine);
@@ -508,7 +508,7 @@ pub fn execute_filtered_query(
             if (blocks_collected < max_to_collect) {
                 // Always clone blocks to unify ownership - FilteredQueryResult owns all strings
                 const cloned_ctx_block = try clone_block(allocator, ctx_block);
-                try matched_blocks.append(OwnedQueryEngineBlock.init(cloned_ctx_block));
+                try matched_blocks.append(OwnedBlock.take_ownership(cloned_ctx_block, .query_engine));
                 blocks_collected += 1;
             }
         }
@@ -915,16 +915,16 @@ test "filtered query result operations" {
         },
     };
 
-    var test_blocks = try allocator.alloc(OwnedQueryEngineBlock, test_ctx_blocks.len);
+    var test_blocks = try allocator.alloc(OwnedBlock, test_ctx_blocks.len);
     defer allocator.free(test_blocks);
     for (test_ctx_blocks, 0..) |ctx_block, i| {
-        test_blocks[i] = OwnedQueryEngineBlock.init(ctx_block);
+        test_blocks[i] = OwnedBlock.take_ownership(ctx_block, .query_engine);
     }
 
-    var owned_blocks = try allocator.alloc(OwnedQueryEngineBlock, test_blocks.len);
+    var owned_blocks = try allocator.alloc(OwnedBlock, test_blocks.len);
     for (test_blocks, 0..) |test_block, i| {
         const cloned_block = try clone_block(allocator, test_block.read(.query_engine).*);
-        owned_blocks[i] = OwnedQueryEngineBlock.init(cloned_block);
+        owned_blocks[i] = OwnedBlock.take_ownership(cloned_block, .query_engine);
     }
 
     var result = FilteredQueryResult.init(allocator, owned_blocks, 5, true);

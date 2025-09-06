@@ -47,18 +47,12 @@ const BlockOwnership = ownership.BlockOwnership;
 const ComptimeOwnedBlock = ownership.ComptimeOwnedBlock;
 const ContextBlock = context_block.ContextBlock;
 
-const StorageBlock = ownership.comptime_owned_block_type(.storage_engine);
 const GraphEdge = context_block.GraphEdge;
 const ParsedBlock = context_block.ParsedBlock;
-const MemtableBlock = ownership.MemtableBlock;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
-const OwnedQueryEngineBlock = ownership.OwnedQueryEngineBlock;
-const SSTableBlock = ownership.SSTableBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const StorageEngineBlock = ownership.StorageEngineBlock;
 const StorageState = state_machines.StorageState;
-const TemporaryBlock = ownership.TemporaryBlock;
 const VFS = vfs.VFS;
 
 pub const Config = config_mod.Config;
@@ -674,7 +668,7 @@ pub const StorageEngine = struct {
         self: *StorageEngine,
         block_id: BlockId,
         comptime owner: BlockOwnership,
-    ) !?ownership.comptime_owned_block_type(owner) {
+    ) !?OwnedBlock {
         concurrency.assert_main_thread();
         // Hot path optimizations: minimal validation, direct access
         if (comptime builtin.mode == .Debug) {
@@ -687,15 +681,15 @@ pub const StorageEngine = struct {
         }
 
         // Fast path: check memtable first (most recent data)
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return ownership.comptime_owned_block_type(owner).init(block_ptr.*);
+        if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            return OwnedBlock.take_ownership(block, owner);
         }
 
         // Slower path: check SSTables with zero-copy optimization
         if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
             // Convert to owned block only when ownership transfer is required
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return ownership.comptime_owned_block_type(owner).init(owned_context_block);
+            return OwnedBlock.take_ownership(owned_context_block, owner);
         }
 
         return null;
@@ -706,18 +700,18 @@ pub const StorageEngine = struct {
     pub fn find_storage_block(
         self: *StorageEngine,
         block_id: BlockId,
-    ) !?StorageEngineBlock {
+    ) !?OwnedBlock {
         if (comptime builtin.mode == .Debug) {
             fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
         }
 
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return StorageEngineBlock.init(block_ptr.*);
+            return OwnedBlock.take_ownership(block_ptr.*, .storage_engine);
         }
 
         if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return StorageEngineBlock.init(owned_context_block);
+            return OwnedBlock.take_ownership(owned_context_block, .storage_engine);
         }
 
         return null;
@@ -725,9 +719,9 @@ pub const StorageEngine = struct {
 
     /// Zero-cost memtable block lookup for internal storage operations.
     /// Optimized for memtable-specific operations with compile-time ownership.
-    pub fn find_memtable_block(self: *StorageEngine, block_id: BlockId) ?MemtableBlock {
+    pub fn find_memtable_block(self: *StorageEngine, block_id: BlockId) ?OwnedBlock {
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return MemtableBlock.init(block_ptr.*);
+            return OwnedBlock.take_ownership(block_ptr.*, .memtable_manager);
         }
         return null;
     }
@@ -735,13 +729,13 @@ pub const StorageEngine = struct {
     /// Zero-cost query engine block lookup for cross-subsystem access.
     /// Enables fast block transfer to query engine with compile-time safety.
     /// Find a Context Block by ID with zero-cost ownership for query operations
-    pub fn find_query_block(self: *StorageEngine, block_id: BlockId) !?OwnedQueryEngineBlock {
+    pub fn find_query_block(self: *StorageEngine, block_id: BlockId) !?OwnedBlock {
         if (comptime builtin.mode == .Debug) {
             fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
         }
 
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return OwnedQueryEngineBlock.init(block_ptr.*);
+        if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            return OwnedBlock.take_ownership(block, .query_engine);
         }
 
         const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| switch (err) {
@@ -754,7 +748,7 @@ pub const StorageEngine = struct {
 
         if (parsed_block_result) |parsed_block| {
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return OwnedQueryEngineBlock.init(owned_context_block);
+            return OwnedBlock.take_ownership(owned_context_block, .query_engine);
         }
 
         return null;
@@ -947,7 +941,7 @@ pub const StorageEngine = struct {
 
         /// Iterate through memtable first, then all SSTables in order.
         /// Returns OwnedBlock with storage_engine ownership for safe cross-subsystem usage.
-        pub fn next(self: *BlockIterator) !?StorageEngineBlock {
+        pub fn next(self: *BlockIterator) !?OwnedBlock {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
@@ -955,7 +949,7 @@ pub const StorageEngine = struct {
                 const cloned_block = try owned_block.clone_with_ownership(self.iteration_arena.allocator(), .storage_engine, null);
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
                 self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
-                return StorageEngineBlock.init(cloned_block.read(.storage_engine).*);
+                return cloned_block;
             }
 
             // Then iterate through SSTables
@@ -999,17 +993,16 @@ pub const StorageEngine = struct {
                 self.sstable_manager.arena_coordinator.validate_coordinator();
 
                 if (try self.current_sstable_iterator.?.next()) |sstable_block| {
-                    const block_data = sstable_block.read(.sstable_manager);
                     // Create owned block with storage_engine ownership for iterator return
-                    const storage_block = OwnedBlock.take_ownership(block_data.*, .storage_engine);
+                    const storage_block = OwnedBlock.take_ownership(sstable_block, .storage_engine);
 
                     // Skip if we've already seen this block (deduplication)
-                    const gop = self.seen_blocks.getOrPut(block_data.id) catch {
+                    const gop = self.seen_blocks.getOrPut(sstable_block.id) catch {
                         // If dedup tracking OOM, just return the block anyway
-                        return StorageEngineBlock.init(storage_block.read(.storage_engine).*);
+                        return storage_block;
                     };
                     if (!gop.found_existing) {
-                        return StorageEngineBlock.init(storage_block.read(.storage_engine).*);
+                        return storage_block;
                     }
                     // Continue to next block if duplicate
                     continue;
@@ -1380,7 +1373,7 @@ test "block iterator with empty storage" {
     defer iterator.deinit();
 
     const block = try iterator.next();
-    try testing.expectEqual(@as(?StorageEngineBlock, null), block);
+    try testing.expectEqual(@as(?OwnedBlock, null), block);
 }
 
 test "block iterator with memtable blocks only" {
@@ -1413,11 +1406,11 @@ test "block iterator with memtable blocks only" {
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block);
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1425,7 +1418,7 @@ test "block iterator with memtable blocks only" {
     var found_block1 = false;
     var found_block2 = false;
     for (found_blocks.items) |block| {
-        const raw_block = block.extract();
+        const raw_block = block;
         if (std.mem.eql(u8, &raw_block.id.bytes, &block1.id.bytes)) {
             found_block1 = true;
             try testing.expectEqualStrings("content 1", raw_block.content);
@@ -1473,11 +1466,11 @@ test "block iterator with SSTable blocks" {
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block);
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1518,11 +1511,11 @@ test "block iterator with mixed memtable and SSTable blocks" {
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();
 
-    var found_blocks = std.array_list.Managed(StorageBlock).init(allocator);
+    var found_blocks = std.array_list.Managed(ContextBlock).init(allocator);
     defer found_blocks.deinit();
 
     while (try iterator.next()) |owned_block| {
-        try found_blocks.append(owned_block);
+        try found_blocks.append(owned_block.read(.storage_engine).*);
     }
 
     try testing.expectEqual(@as(usize, 2), found_blocks.items.len);
@@ -1530,7 +1523,7 @@ test "block iterator with mixed memtable and SSTable blocks" {
     var found_sstable_block = false;
     var found_memtable_block = false;
     for (found_blocks.items) |block| {
-        const raw_block = block.extract();
+        const raw_block = block;
         if (std.mem.eql(u8, &raw_block.id.bytes, &sstable_block.id.bytes)) {
             found_sstable_block = true;
             try testing.expectEqualStrings("sstable content", raw_block.content);
@@ -1569,10 +1562,10 @@ test "block iterator handles multiple calls to next after exhaustion" {
     try testing.expect(first != null);
 
     const second = try iterator.next();
-    try testing.expectEqual(@as(?StorageEngineBlock, null), second);
+    try testing.expectEqual(@as(?OwnedBlock, null), second);
 
     const third = try iterator.next();
-    try testing.expectEqual(@as(?StorageEngineBlock, null), third);
+    try testing.expectEqual(@as(?OwnedBlock, null), third);
 }
 
 test "error context logging for storage operations" {
