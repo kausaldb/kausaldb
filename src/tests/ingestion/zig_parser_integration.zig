@@ -8,7 +8,7 @@ const std = @import("std");
 
 const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
-const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
+const zig_parser_mod = @import("../../ingestion/zig/parser.zig");
 
 const testing = std.testing;
 
@@ -65,7 +65,7 @@ test "parser extracts functions and creates call edges" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -149,7 +149,7 @@ test "parser handles malformed code gracefully" {
     };
 
     // Parser should not crash and should extract what it can
-    const units = parser.parser().parse(allocator, content) catch |err| switch (err) {
+    const units = parser.parse(allocator, content) catch |err| switch (err) {
         error.ParsingFailed => {
             // Acceptable failure mode
             return;
@@ -229,7 +229,7 @@ test "parser extracts struct definitions and metadata" {
     };
 
     std.debug.print("DEBUG HANG: About to call parser.parse() in 'extracts struct definitions'\n", .{});
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     std.debug.print("DEBUG HANG: parser.parse() completed in 'extracts struct definitions', got {} units\n", .{units.len});
     defer {
         for (units) |*unit| {
@@ -264,28 +264,17 @@ test "parser extracts struct definitions and metadata" {
     try testing.expect(found_methods >= 1); // is_valid method has self parameter
 }
 
-test "parser content type support" {
+test "parser supports direct interface" {
     const allocator = testing.allocator;
 
     const config = ZigParserConfig{};
     var parser = ZigParser.init(allocator, config);
     defer parser.deinit();
 
-    const parser_interface = parser.parser();
-
-    // Should support Zig content types
-    try testing.expect(parser_interface.supports("text/zig"));
-    try testing.expect(parser_interface.supports("text/x-zig"));
-    try testing.expect(parser_interface.supports("application/x-zig"));
-
-    // Should not support other types
-    try testing.expect(!parser_interface.supports("text/javascript"));
-    try testing.expect(!parser_interface.supports("text/plain"));
-    try testing.expect(!parser_interface.supports("application/json"));
-
-    // Description should be informative
-    const description = parser_interface.describe();
-    try testing.expect(std.mem.containsAtLeast(u8, description, 1, "Zig"));
+    // Parser now works with direct parse() method without content type checking
+    // This is a simplified test to verify the parser can be instantiated
+    try testing.expect(parser.config.include_function_bodies == true);
+    try testing.expect(parser.config.include_private == true);
 }
 
 test "parser preserves source location information" {
@@ -331,7 +320,7 @@ test "parser preserves source location information" {
     };
 
     std.debug.print("DEBUG HANG: About to call parser.parse() in 'preserves source location'\n", .{});
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     std.debug.print("DEBUG HANG: parser.parse() completed in 'preserves source location', got {} units\n", .{units.len});
     defer {
         for (units) |*unit| {
@@ -395,7 +384,7 @@ test "parser handles test declarations" {
         .timestamp_ns = 0,
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -424,7 +413,7 @@ test "parser handles test declarations" {
     var parser_no_tests = ZigParser.init(allocator, config);
     defer parser_no_tests.deinit();
 
-    const units_no_tests = try parser_no_tests.parser().parse(allocator, content);
+    const units_no_tests = try parser_no_tests.parse(allocator, content);
     defer {
         for (units_no_tests) |*unit| {
             unit.deinit(allocator);

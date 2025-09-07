@@ -29,8 +29,6 @@ comptime {
     _ = @import("core/concurrency.zig");
     _ = @import("core/error_context.zig");
     _ = @import("core/file_handle.zig");
-    _ = @import("core/memory_guard.zig");
-    _ = @import("core/memory_integration.zig");
     _ = @import("core/memory.zig");
     _ = @import("core/ownership.zig");
     _ = @import("core/pools.zig");
@@ -61,7 +59,6 @@ comptime {
     _ = @import("query/context/engine.zig");
     _ = @import("query/engine.zig");
     _ = @import("query/filtering.zig");
-    _ = @import("query/traversal_simple.zig");
 
     // Server modules
     _ = @import("server/connection_manager.zig");

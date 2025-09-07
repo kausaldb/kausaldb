@@ -8,7 +8,7 @@ const std = @import("std");
 
 const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
-const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
+const zig_parser_mod = @import("../../ingestion/zig/parser.zig");
 
 const testing = std.testing;
 
@@ -79,15 +79,11 @@ test "parser integration through pipeline interface" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    // Test parser through Pipeline interface
-    const parser_interface = parser.parser();
-
-    // Verify content type support
-    try testing.expect(parser_interface.supports("text/zig"));
-    try testing.expect(!parser_interface.supports("text/javascript"));
+    // Test parser through direct interface
+    // Parser now supports Zig files directly - content type checking removed
 
     // Test parsing
-    const units = try parser_interface.parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -172,7 +168,7 @@ test "parser error handling and resilience" {
     };
 
     // Parser should handle malformed input gracefully
-    const units = parser.parser().parse(allocator, content) catch |err| {
+    const units = parser.parse(allocator, content) catch |err| {
         // Acceptable failure modes
         switch (err) {
             error.ParsingFailed => return, // Parser rejected malformed input
@@ -252,7 +248,7 @@ test "parser metadata extraction and visibility" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -328,7 +324,7 @@ test "parser configuration options work correctly" {
         var parser = ZigParser.init(allocator, config_with_tests);
         defer parser.deinit();
 
-        const units = try parser.parser().parse(allocator, content);
+        const units = try parser.parse(allocator, content);
         defer {
             for (units) |*unit| {
                 unit.deinit(allocator);
@@ -356,7 +352,7 @@ test "parser configuration options work correctly" {
         var parser = ZigParser.init(allocator, config_no_tests);
         defer parser.deinit();
 
-        const units = try parser.parser().parse(allocator, content);
+        const units = try parser.parse(allocator, content);
         defer {
             for (units) |*unit| {
                 unit.deinit(allocator);
@@ -414,7 +410,7 @@ test "parser handles edge cases gracefully" {
 
         // Parser should not crash on any input
         const units = parser
-            .parser().parse(allocator, content) catch |err| {
+            .parse(allocator, content) catch |err| {
             // Acceptable failures for edge cases
             switch (err) {
                 error.ParsingFailed => continue,

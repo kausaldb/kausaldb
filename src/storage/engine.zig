@@ -499,7 +499,7 @@ pub const StorageEngine = struct {
             return error.StorageEngineDeinitialized;
         }
 
-        const block_data = owned_block.read_runtime(.temporary);
+        const block_data = owned_block.read(.temporary);
 
         assert_mod.assert_fmt(block_data.content.len > 0, "Block content cannot be empty", .{});
         assert_mod.assert_fmt(block_data.source_uri.len > 0, "Block source_uri cannot be empty", .{});
@@ -714,15 +714,6 @@ pub const StorageEngine = struct {
             return OwnedBlock.take_ownership(owned_context_block, .storage_engine);
         }
 
-        return null;
-    }
-
-    /// Zero-cost memtable block lookup for internal storage operations.
-    /// Optimized for memtable-specific operations with compile-time ownership.
-    pub fn find_memtable_block(self: *StorageEngine, block_id: BlockId) ?OwnedBlock {
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return OwnedBlock.take_ownership(block_ptr.*, .memtable_manager);
-        }
         return null;
     }
 

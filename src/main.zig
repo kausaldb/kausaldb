@@ -11,12 +11,7 @@
 const std = @import("std");
 
 const cli = @import("cli/mod.zig");
-const natural_cli = @import("cli/natural_commands.zig");
-const natural_executor = @import("cli/natural_executor.zig");
 const concurrency = @import("core/concurrency.zig");
-
-const ExecutionContext = cli.ExecutionContext;
-const NaturalExecutionContext = natural_executor.NaturalExecutionContext;
 
 /// KausalDB main entry point and command-line interface.
 ///
@@ -38,26 +33,26 @@ pub fn main() !void {
     if (args.len >= 2) {
         const first_arg = args[1];
         if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
-            // Convert to help command for natural CLI
+            // Convert to help command
             const help_args = [_][:0]const u8{ args[0], "help" };
-            var help_result = try natural_cli.parse_natural_command(allocator, &help_args);
+            var help_result = try cli.parse_command(allocator, &help_args);
             defer help_result.deinit();
 
-            var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
-            defer natural_context.deinit();
-            try natural_executor.execute_natural_command(&natural_context, help_result.command);
+            var context = try cli.ExecutionContext.init(allocator, ".kausal-data");
+            defer context.deinit();
+            try cli.execute_command(&context, help_result.command);
             return;
         }
 
         if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
-            // Convert to version command for natural CLI
+            // Convert to version command
             const version_args = [_][:0]const u8{ args[0], "version" };
-            var version_result = try natural_cli.parse_natural_command(allocator, &version_args);
+            var version_result = try cli.parse_command(allocator, &version_args);
             defer version_result.deinit();
 
-            var natural_context = try NaturalExecutionContext.init(allocator, ".kausal-data");
-            defer natural_context.deinit();
-            try natural_executor.execute_natural_command(&natural_context, version_result.command);
+            var context = try cli.ExecutionContext.init(allocator, ".kausal-data");
+            defer context.deinit();
+            try cli.execute_command(&context, version_result.command);
             return;
         }
     }
@@ -66,86 +61,27 @@ pub fn main() !void {
     const db_path = std.process.getEnvVarOwned(allocator, "KAUSAL_DB_PATH") catch ".kausal-data";
     defer if (!std.mem.eql(u8, db_path, ".kausal-data")) allocator.free(db_path);
 
-    // Detect natural language commands vs legacy commands
-    const use_natural_cli = detect_natural_command(args);
+    // Parse and execute command using natural language CLI
+    var parse_result = cli.parse_command(allocator, args) catch |err| switch (err) {
+        cli.CommandError.UnknownCommand => {
+            if (args.len >= 2) {
+                std.debug.print("Unknown command: {s}\n", .{args[1]});
+            }
+            var context = try cli.ExecutionContext.init(allocator, db_path);
+            defer context.deinit();
+            try cli.execute_command(&context, .{ .help = .{} });
+            std.process.exit(1);
+        },
+        cli.CommandError.InvalidSyntax, cli.CommandError.MissingRequiredArgument, cli.CommandError.TooManyArguments => {
+            std.debug.print("Error: {}\n", .{err});
+            std.process.exit(1);
+        },
+        else => |e| return e,
+    };
+    defer parse_result.deinit();
 
-    if (use_natural_cli) {
-        // Use new natural language CLI
-        var natural_parse_result = natural_cli.parse_natural_command(allocator, args) catch |err| switch (err) {
-            natural_cli.NaturalCommandError.UnknownCommand => {
-                if (args.len >= 2) {
-                    std.debug.print("Unknown command: {s}\n", .{args[1]});
-                }
-                var natural_context = try NaturalExecutionContext.init(allocator, db_path);
-                defer natural_context.deinit();
-                try natural_executor.execute_natural_command(&natural_context, .{ .help = .{} });
-                std.process.exit(1);
-            },
-            natural_cli.NaturalCommandError.InvalidSyntax, natural_cli.NaturalCommandError.MissingRequiredArgument, natural_cli.NaturalCommandError.TooManyArguments => {
-                std.debug.print("Error: {}\n", .{err});
-                std.process.exit(1);
-            },
-            else => |e| return e,
-        };
-        defer natural_parse_result.deinit();
+    var context = try cli.ExecutionContext.init(allocator, db_path);
+    defer context.deinit();
 
-        var natural_context = try NaturalExecutionContext.init(allocator, db_path);
-        defer natural_context.deinit();
-
-        try natural_executor.execute_natural_command(&natural_context, natural_parse_result.command);
-    } else {
-        // Use legacy CLI for backward compatibility
-        var parse_result = cli.parse_command(allocator, args) catch |err| switch (err) {
-            cli.CommandError.UnknownCommand => {
-                if (args.len >= 2) {
-                    std.debug.print("Unknown command: {s}\n", .{args[1]});
-                }
-                const help_result = cli.ParseResult{
-                    .command = cli.Command{ .help = .{} },
-                    .allocator = allocator,
-                };
-                var context = try ExecutionContext.init(allocator, db_path);
-                defer context.deinit();
-                try cli.execute_command(&context, help_result);
-                std.process.exit(1);
-            },
-            cli.CommandError.InvalidArguments, cli.CommandError.MissingRequiredArgument, cli.CommandError.TooManyArguments => {
-                std.debug.print("Error: {}\n", .{err});
-                std.debug.print("Use 'kausaldb help' for usage information.\n", .{});
-                std.process.exit(1);
-            },
-            else => return err,
-        };
-        defer parse_result.deinit();
-
-        var context = try ExecutionContext.init(allocator, db_path);
-        defer context.deinit();
-
-        try cli.execute_command(&context, parse_result);
-    }
-}
-
-/// Detect whether to use natural language CLI or legacy CLI
-fn detect_natural_command(args: []const [:0]const u8) bool {
-    // Natural CLI provides better user experience for help/exploration workflows
-    if (args.len < 2) return true;
-
-    const command = args[1];
-
-    // Command list drives routing between natural and legacy CLI implementations
-    const natural_commands = &[_][]const u8{ "link", "unlink", "sync", "find", "show", "trace", "status" };
-
-    for (natural_commands) |natural_cmd| {
-        if (std.mem.eql(u8, command, natural_cmd)) {
-            return true;
-        }
-    }
-
-    // System commands available in both
-    if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "version")) {
-        return true; // Prefer natural CLI for these
-    }
-
-    // Legacy commands
-    return false;
+    try cli.execute_command(&context, parse_result.command);
 }

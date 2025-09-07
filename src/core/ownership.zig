@@ -149,17 +149,6 @@ pub const OwnedBlock = struct {
         return &self.block;
     }
 
-    /// Get read access with runtime ownership validation - backward compatibility.
-    /// Use this during transition period when ownership is not compile-time known.
-    /// Prefer read() with comptime ownership for zero-cost hot paths.
-    pub fn read_runtime(self: *const OwnedBlock, accessor: BlockOwnership) *const ContextBlock {
-        fatal_assert(self.state == .valid, "Attempted to read moved-from block {}", .{self.block.id});
-        if (comptime builtin.mode == .Debug) {
-            self.validate_read_access(accessor);
-        }
-        return &self.block;
-    }
-
     /// Clone block with new ownership for transfer between subsystems.
     /// The original block remains valid and owned by the original subsystem.
     pub fn clone_with_ownership(

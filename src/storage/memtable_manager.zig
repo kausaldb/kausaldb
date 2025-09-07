@@ -229,7 +229,7 @@ pub const MemtableManager = struct {
     /// Returns the block if found, null otherwise.
     /// Used by the storage engine for LSM-tree read path (memtable first).
     pub fn find_block_in_memtable(self: *const MemtableManager, id: BlockId) ?ContextBlock {
-        return self.block_index.find_block(id, .memtable_manager);
+        return self.block_index.find_block(id);
     }
 
     /// Find a block in memtable and clone it with specified ownership.
@@ -240,7 +240,7 @@ pub const MemtableManager = struct {
         id: BlockId,
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
-        if (self.block_index.find_block(id, .memtable_manager)) |block_data| {
+        if (self.block_index.find_block(id)) |block_data| {
             // Create temporary owned block for cloning
             const temp_owned = OwnedBlock.take_ownership(block_data, .memtable_manager);
             // Clone with new ownership for safe transfer between subsystems

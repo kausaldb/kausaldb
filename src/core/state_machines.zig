@@ -330,9 +330,6 @@ pub fn state_machine_tracer_type(comptime StateEnum: type) type {
     };
 }
 
-// Backward compatibility alias for gradual migration
-// Provides transition path from convenience name to explicit Type suffix
-
 /// Compile-time validation for state machine exhaustiveness.
 /// Ensures all enum variants are handled in transition logic.
 pub fn validate_transition_exhaustiveness(comptime StateEnum: type) void {

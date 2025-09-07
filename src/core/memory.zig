@@ -270,31 +270,6 @@ pub fn typed_storage_coordinator_type(comptime StorageEngineType: type) type {
     };
 }
 
-/// Legacy StorageCoordinator for backward compatibility.
-/// Use typed_storage_coordinator_type for new code to get full type safety.
-pub const StorageCoordinator = struct {
-    storage_engine: *anyopaque, // StorageEngine type resolved at usage site
-
-    /// Initialize coordinator with storage engine reference.
-    /// Storage engine must outlive all coordinators.
-    pub fn init(storage_engine: anytype) StorageCoordinator {
-        return StorageCoordinator{
-            // Safety: Storage engine pointer cast for generic interface
-            .storage_engine = @ptrCast(storage_engine),
-        };
-    }
-
-    /// Duplicate storage content with runtime type resolution.
-    /// Less efficient than typed_storage_coordinator_type but maintains compatibility.
-    pub fn duplicate_storage_content(self: StorageCoordinator, comptime T: type, slice: []const T) ![]T {
-        // This requires storage engine to have a standard allocator() method
-        const storage_ptr: *anyopaque = self.storage_engine;
-        _ = storage_ptr; // Placeholder - actual implementation needs proper casting
-        _ = slice; // Unused in placeholder implementation
-        return error.NotImplemented;
-    }
-};
-
 /// Debug information structure for coordinator diagnostics.
 pub const ArenaCoordinatorDebugInfo = struct {
     arena_address: usize,

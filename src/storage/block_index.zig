@@ -171,32 +171,11 @@ pub const BlockIndex = struct {
     // REMOVED: put_block_temporary() method to eliminate raw block usage.
     // For legacy callers: use OwnedBlock.take_ownership(block, .temporary) then put_block()
 
-    /// Find a block by ID with ownership validation.
-    /// Returns block data if found and accessor has valid ownership.
-    pub fn find_block(self: *const BlockIndex, block_id: BlockId, accessor: BlockOwnership) ?ContextBlock {
+    /// Find a block by ID.
+    /// Returns block data if found.
+    pub fn find_block(self: *const BlockIndex, block_id: BlockId) ?ContextBlock {
         if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
-            // Validate ownership access through OwnedBlock
-            return owned_block_ptr.read_runtime(accessor).*;
-        }
-        return null;
-    }
-
-    /// Find a block by ID and return the OwnedBlock for ownership operations.
-    /// Returns pointer to the OwnedBlock if found, allowing access to ownership metadata.
-    /// Used during transition from runtime to compile-time ownership validation.
-    pub fn find_block_runtime(self: *const BlockIndex, block_id: BlockId, accessor: BlockOwnership) ?*const OwnedBlock {
-        // Defensive check for HashMap corruption under fault injection
-        if (comptime builtin.mode == .Debug) {
-            if (@intFromPtr(self) == 0) {
-                fatal_assert(false, "BlockIndex self pointer is null - memory corruption", .{});
-            }
-        }
-
-        // HashMap access - can fail under fault injection memory corruption
-        if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
-            // Validate ownership access but return the full OwnedBlock
-            _ = owned_block_ptr.read_runtime(accessor);
-            return owned_block_ptr;
+            return owned_block_ptr.read(.temporary).*;
         }
         return null;
     }
@@ -391,7 +370,7 @@ test "put and find block operations work correctly" {
     try index.put_block(test_block);
     try testing.expectEqual(@as(u32, 1), index.block_count());
 
-    const found_block = index.find_block(block_id, .memtable_manager);
+    const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
     try testing.expect(found_block.?.id.eql(block_id));
     try testing.expectEqualStrings("test content", found_block.?.content);
@@ -420,7 +399,7 @@ test "put block clones strings into arena" {
 
     try index.put_block(test_block);
 
-    const found_block = index.find_block(block_id, .memtable_manager);
+    const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
     try testing.expectEqualStrings("original content", found_block.?.content);
     // Verify it's a different pointer (cloned, not original)
@@ -488,7 +467,7 @@ test "block replacement updates memory accounting correctly" {
     // Memory should have increased due to longer content
     try testing.expect(memory_after_second > memory_after_first);
 
-    const found_block = index.find_block(block_id, .memtable_manager);
+    const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
     try testing.expectEqual(@as(u32, 2), found_block.?.version);
     try testing.expectEqualStrings("much longer content than before", found_block.?.content);
@@ -573,7 +552,7 @@ test "large block content handling" {
 
     try index.put_block(test_block);
 
-    const found_block = index.find_block(block_id, .memtable_manager);
+    const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
     try testing.expectEqual(@as(usize, 1024 * 1024), found_block.?.content.len);
     try testing.expectEqual(@as(u8, 'X'), found_block.?.content[0]);

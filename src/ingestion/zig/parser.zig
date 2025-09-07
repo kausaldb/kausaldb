@@ -13,12 +13,10 @@ const types = @import("../../core/types.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 
-const Parser = pipeline_types.Parser;
 const ParsedUnit = pipeline_types.ParsedUnit;
 const ParsedEdge = pipeline_types.ParsedEdge;
 const SourceContent = pipeline_types.SourceContent;
 const SourceLocation = pipeline_types.SourceLocation;
-const EdgeType = types.EdgeType;
 const IngestionError = pipeline_types.IngestionError;
 
 /// Configuration for semantic parsing behavior
@@ -56,23 +54,9 @@ pub const ZigParser = struct {
         _ = self;
     }
 
-    /// Returns the Parser interface for this ZigParser instance.
-    /// Provides standard parsing operations for Zig source code through the pipeline.
-    pub fn parser(self: *Self) Parser {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .parse = parse_impl,
-                .supports = supports_impl,
-                .describe = describe_impl,
-                .deinit = deinit_impl,
-            },
-        };
-    }
-
-    fn parse_impl(ptr: *anyopaque, allocator: std.mem.Allocator, content: SourceContent) IngestionError![]ParsedUnit {
-        // Safety: Pointer guaranteed to be *Self by parser interface
-        const self: *Self = @ptrCast(@alignCast(ptr));
+    /// Parse Zig source content into semantic units.
+    /// Provides direct parsing operations without the deprecated pipeline interface.
+    pub fn parse(self: *Self, allocator: std.mem.Allocator, content: SourceContent) IngestionError![]ParsedUnit {
         return try self.parse_with_patterns(allocator, content);
     }
 
@@ -451,22 +435,17 @@ pub const ZigParser = struct {
         try units.append(unit);
     }
 
-    fn supports_impl(ptr: *anyopaque, content_type: []const u8) bool {
-        _ = ptr;
+    /// Check if parser supports the given content type.
+    pub fn supports(content_type: []const u8) bool {
         return std.mem.eql(u8, content_type, "text/zig") or
             std.mem.eql(u8, content_type, "text/x-zig") or
             std.mem.eql(u8, content_type, "application/x-zig") or
             std.mem.endsWith(u8, content_type, ".zig");
     }
 
-    fn describe_impl(ptr: *anyopaque) []const u8 {
-        _ = ptr;
+    /// Get human-readable description of this parser.
+    pub fn describe() []const u8 {
         return "Zig pattern-based semantic parser (comprehensive, robust)";
-    }
-
-    fn deinit_impl(ptr: *anyopaque, allocator: std.mem.Allocator) void {
-        _ = ptr;
-        _ = allocator;
     }
 };
 
@@ -505,7 +484,7 @@ test "pattern parser basic functionality" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -576,7 +555,7 @@ test "pattern parser handles struct methods" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -650,7 +629,7 @@ test "pattern parser handles malformed code gracefully" {
     };
 
     // Parser should handle malformed input gracefully
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -686,20 +665,18 @@ test "pattern parser content type support" {
     var parser = ZigParser.init(allocator, config);
     defer parser.deinit();
 
-    const parser_interface = parser.parser();
-
     // Should support Zig content types
-    try testing.expect(parser_interface.supports("text/zig"));
-    try testing.expect(parser_interface.supports("text/x-zig"));
-    try testing.expect(parser_interface.supports("application/x-zig"));
+    try testing.expect(ZigParser.supports("text/zig"));
+    try testing.expect(ZigParser.supports("text/x-zig"));
+    try testing.expect(ZigParser.supports("application/x-zig"));
 
     // Should not support other types
-    try testing.expect(!parser_interface.supports("text/javascript"));
-    try testing.expect(!parser_interface.supports("text/plain"));
-    try testing.expect(!parser_interface.supports("application/json"));
+    try testing.expect(!ZigParser.supports("text/javascript"));
+    try testing.expect(!ZigParser.supports("text/plain"));
+    try testing.expect(!ZigParser.supports("application/json"));
 
     // Description should be informative
-    const description = parser_interface.describe();
+    const description = ZigParser.describe();
     try testing.expect(std.mem.containsAtLeast(u8, description, 1, "Zig"));
 }
 
@@ -750,7 +727,7 @@ test "pattern parser extracts comprehensive metadata" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);

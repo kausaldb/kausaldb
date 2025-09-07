@@ -7,7 +7,7 @@ const std = @import("std");
 
 const pipeline_types = @import("../../ingestion/pipeline_types.zig");
 const types = @import("../../core/types.zig");
-const zig_parser_mod = @import("../../ingestion/zig_parser.zig");
+const zig_parser_mod = @import("../../ingestion/zig/parser.zig");
 
 const testing = std.testing;
 
@@ -95,7 +95,7 @@ test "parser handles realistic zig file structure" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
@@ -135,16 +135,7 @@ test "parser supports content type detection" {
     var parser = ZigParser.init(allocator, config);
     defer parser.deinit();
 
-    const parser_interface = parser.parser();
-
-    // Should support standard Zig content types
-    try testing.expect(parser_interface.supports("text/zig"));
-    try testing.expect(parser_interface.supports("text/x-zig"));
-
-    // Should reject non-Zig types
-    try testing.expect(!parser_interface.supports("text/javascript"));
-    try testing.expect(!parser_interface.supports("application/json"));
-    try testing.expect(!parser_interface.supports("text/plain"));
+    // Parser now supports Zig files directly - content type checking removed
 }
 
 test "parser handles empty and minimal files" {
@@ -177,7 +168,7 @@ test "parser handles empty and minimal files" {
             .timestamp_ns = @intCast(std.time.nanoTimestamp()),
         };
 
-        const units = try parser.parser().parse(allocator, content);
+        const units = try parser.parse(allocator, content);
         defer {
             for (units) |*unit| {
                 unit.deinit(allocator);
@@ -209,7 +200,7 @@ test "parser handles empty and minimal files" {
             .timestamp_ns = @intCast(std.time.nanoTimestamp()),
         };
 
-        const units = try parser.parser().parse(allocator, content);
+        const units = try parser.parse(allocator, content);
         defer {
             for (units) |*unit| {
                 unit.deinit(allocator);
@@ -271,7 +262,7 @@ test "parser extracts metadata correctly" {
         .timestamp_ns = @intCast(std.time.nanoTimestamp()),
     };
 
-    const units = try parser.parser().parse(allocator, content);
+    const units = try parser.parse(allocator, content);
     defer {
         for (units) |*unit| {
             unit.deinit(allocator);
