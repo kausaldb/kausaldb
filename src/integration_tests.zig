@@ -44,14 +44,16 @@ comptime {
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
     _ = @import("tests/query/algorithms_edge_cases.zig");
     _ = @import("tests/query/complex_workloads.zig");
-    _ = @import("tests/query/find_by_name_accuracy_test.zig");
-    _ = @import("tests/query/storage_iterator_deduplication_test.zig");
+    // REMOVED: E2E tests provide superior coverage through real binary execution
+    // _ = @import("tests/query/find_by_name_accuracy_test.zig");          // → e2e/find_function_accuracy_test.zig
+    // _ = @import("tests/query/storage_iterator_deduplication_test.zig"); // → e2e accuracy tests catch duplicates
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/query/traversal_advanced.zig");
     _ = @import("tests/query/traversal_termination.zig");
     _ = @import("tests/recovery/wal.zig");
-    _ = @import("tests/workspace/filtering_test.zig");
-    _ = @import("tests/workspace/ingestion_deduplication_test.zig");
+    // REMOVED: E2E tests provide superior coverage through real binary execution
+    // _ = @import("tests/workspace/filtering_test.zig");             // → e2e/workspace_operations.zig + e2e/query_commands.zig
+    // _ = @import("tests/workspace/ingestion_deduplication_test.zig"); // → E2E accuracy tests would catch failures
     _ = @import("tests/recovery/wal_corruption.zig");
     _ = @import("tests/recovery/wal_corruption_fatal.zig");
     _ = @import("tests/recovery/wal_entry_stream_recovery.zig");
