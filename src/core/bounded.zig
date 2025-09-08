@@ -29,7 +29,7 @@ const fatal_assert = assert_mod.fatal_assert;
 /// - Zero heap allocations (stack-allocated array)
 /// - O(1) append, get, and clear operations
 /// - Debug-mode validation for all operations
-pub fn bounded_array_type(
+pub fn BoundedArrayType(
     comptime T: type,
     comptime max_size: usize,
 ) type {
@@ -228,7 +228,7 @@ pub fn bounded_array_type(
 
 /// Fixed-size hash map with compile-time bounds.
 /// Uses linear probing for collision resolution with compile-time maximum capacity.
-pub fn bounded_hash_map_type(comptime K: type, comptime V: type, comptime max_size: usize) type {
+pub fn BoundedHashMapType(comptime K: type, comptime V: type, comptime max_size: usize) type {
     if (max_size == 0) {
         @compileError("bounded_hash_map_type max_size must be greater than 0");
     }
@@ -483,7 +483,7 @@ pub fn bounded_hash_map_type(comptime K: type, comptime V: type, comptime max_si
 
 /// Fixed-size queue with compile-time bounds.
 /// FIFO queue with O(1) enqueue and dequeue operations.
-pub fn bounded_queue_type(comptime T: type, comptime max_size: usize) type {
+pub fn BoundedQueueType(comptime T: type, comptime max_size: usize) type {
     if (max_size == 0) {
         @compileError("bounded_queue_type max_size must be greater than 0");
     }
@@ -584,7 +584,7 @@ pub fn bounded_queue_type(comptime T: type, comptime max_size: usize) type {
 /// - Compile-time bounds prevent unbounded graph growth
 /// - Arena-compatible for O(1) cleanup
 /// - Deduplication prevents duplicate nodes/edges
-pub fn bounded_graph_builder_type(comptime max_nodes: usize, comptime max_edges: usize) type {
+pub fn BoundedGraphBuilderType(comptime max_nodes: usize, comptime max_edges: usize) type {
     validate_bounded_usage(usize, max_nodes, "BoundedGraphBuilder nodes");
     validate_bounded_usage(usize, max_edges, "BoundedGraphBuilder edges");
 
@@ -592,13 +592,13 @@ pub fn bounded_graph_builder_type(comptime max_nodes: usize, comptime max_edges:
         const Self = @This();
 
         /// Set of unique node IDs in the graph
-        nodes: bounded_hash_map_type([16]u8, void, max_nodes),
+        nodes: BoundedHashMapType([16]u8, void, max_nodes),
 
         /// List of edges between nodes
-        edges: bounded_array_type(GraphEdge, max_edges),
+        edges: BoundedArrayType(GraphEdge, max_edges),
 
         /// Temporary working set for traversal algorithms
-        working_set: bounded_array_type([16]u8, max_nodes),
+        working_set: BoundedArrayType([16]u8, max_nodes),
 
         pub const MAX_NODES = max_nodes;
         pub const MAX_EDGES = max_edges;
@@ -619,9 +619,9 @@ pub fn bounded_graph_builder_type(comptime max_nodes: usize, comptime max_edges:
         /// Initialize empty graph builder
         pub fn init() Self {
             return Self{
-                .nodes = bounded_hash_map_type([16]u8, void, max_nodes).init(),
-                .edges = bounded_array_type(GraphEdge, max_edges).init(),
-                .working_set = bounded_array_type([16]u8, max_nodes).init(),
+                .nodes = BoundedHashMapType([16]u8, void, max_nodes){},
+                .edges = BoundedArrayType(GraphEdge, max_edges){},
+                .working_set = BoundedArrayType([16]u8, max_nodes){},
             };
         }
 
@@ -656,8 +656,8 @@ pub fn bounded_graph_builder_type(comptime max_nodes: usize, comptime max_edges:
         }
 
         /// Find neighbors of a node (outgoing edges)
-        pub fn find_neighbors(self: *const Self, node_id: [16]u8) !bounded_array_type([16]u8, max_nodes) {
-            var neighbors = bounded_array_type([16]u8, max_nodes).init();
+        pub fn find_neighbors(self: *const Self, node_id: [16]u8) !BoundedArrayType([16]u8, max_nodes) {
+            var neighbors = BoundedArrayType([16]u8, max_nodes){};
 
             for (self.edges.slice()) |edge| {
                 if (std.mem.eql(u8, &edge.source, &node_id)) {
@@ -672,8 +672,8 @@ pub fn bounded_graph_builder_type(comptime max_nodes: usize, comptime max_edges:
         }
 
         /// Find incoming edges to a node
-        pub fn find_incoming(self: *const Self, node_id: [16]u8) !bounded_array_type([16]u8, max_nodes) {
-            var incoming = bounded_array_type([16]u8, max_nodes).init();
+        pub fn find_incoming(self: *const Self, node_id: [16]u8) !BoundedArrayType([16]u8, max_nodes) {
+            var incoming = BoundedArrayType([16]u8, max_nodes){};
 
             for (self.edges.slice()) |edge| {
                 if (std.mem.eql(u8, &edge.target, &node_id)) {
@@ -752,9 +752,9 @@ pub fn validate_bounded_usage(comptime T: type, comptime max_size: usize, compti
 // Compile-time validation
 comptime {
     // Validate that our bounded collections work with basic types
-    const TestArray = bounded_array_type(u32, 10);
-    const TestQueue = bounded_queue_type(u8, 20);
-    const TestMap = bounded_hash_map_type(u32, []const u8, 16);
+    const TestArray = BoundedArrayType(u32, 10);
+    const TestQueue = BoundedQueueType(u8, 20);
+    const TestMap = BoundedHashMapType(u32, []const u8, 16);
 
     assert_mod.comptime_assert(@sizeOf(TestArray) > 0, "bounded_array_type must have non-zero size");
     assert_mod.comptime_assert(@sizeOf(TestQueue) > 0, "bounded_queue_type must have non-zero size");
@@ -764,7 +764,7 @@ comptime {
 // Tests
 
 test "bounded_array_type basic operations" {
-    var array = bounded_array_type(u32, 5){};
+    var array = BoundedArrayType(u32, 5){};
 
     try array.append(1);
     try array.append(2);
@@ -784,7 +784,7 @@ test "bounded_array_type basic operations" {
 }
 
 test "bounded_array_type overflow behavior" {
-    var array = bounded_array_type(u8, 3){};
+    var array = BoundedArrayType(u8, 3){};
 
     try array.append(1);
     try array.append(2);
@@ -796,7 +796,7 @@ test "bounded_array_type overflow behavior" {
 }
 
 test "bounded_array_type slice operations" {
-    var array = bounded_array_type(u32, 10){};
+    var array = BoundedArrayType(u32, 10){};
 
     try array.append(10);
     try array.append(20);
@@ -814,7 +814,7 @@ test "bounded_array_type slice operations" {
 }
 
 test "bounded_array_type remove operations" {
-    var array = bounded_array_type(u32, 5){};
+    var array = BoundedArrayType(u32, 5){};
 
     try array.append(1);
     try array.append(2);
@@ -834,7 +834,7 @@ test "bounded_array_type remove operations" {
 }
 
 test "bounded_array_type search operations" {
-    var array = bounded_array_type([]const u8, 5){};
+    var array = BoundedArrayType([]const u8, 5){};
 
     try array.append("hello");
     try array.append("world");
@@ -847,7 +847,7 @@ test "bounded_array_type search operations" {
 }
 
 test "bounded_queue_type basic operations" {
-    var queue = bounded_queue_type(u32, 4){};
+    var queue = BoundedQueueType(u32, 4){};
 
     try queue.enqueue(1);
     try queue.enqueue(2);
@@ -868,7 +868,7 @@ test "bounded_queue_type basic operations" {
 }
 
 test "bounded_queue_type wrap-around" {
-    var queue = bounded_queue_type(u8, 3){};
+    var queue = BoundedQueueType(u8, 3){};
 
     try queue.enqueue(1);
     try queue.enqueue(2);
@@ -884,7 +884,7 @@ test "bounded_queue_type wrap-around" {
 }
 
 test "bounded_hash_map_type basic operations" {
-    var map = bounded_hash_map_type(u32, []const u8, 8){};
+    var map = BoundedHashMapType(u32, []const u8, 8){};
 
     try map.put(1, "one");
     try map.put(2, "two");
@@ -903,7 +903,7 @@ test "bounded_hash_map_type basic operations" {
 }
 
 test "bounded_hash_map_type remove operations" {
-    var map = bounded_hash_map_type(u32, u32, 8){};
+    var map = BoundedHashMapType(u32, u32, 8){};
 
     try map.put(1, 10);
     try map.put(2, 20);
@@ -919,7 +919,7 @@ test "bounded_hash_map_type remove operations" {
 }
 
 test "bounded_hash_map_type iterator" {
-    var map = bounded_hash_map_type(u8, u8, 8){};
+    var map = BoundedHashMapType(u8, u8, 8){};
 
     try map.put(1, 10);
     try map.put(2, 20);
@@ -943,12 +943,12 @@ test "compile-time validation catches oversized collections" {
     // const TooLarge = bounded_array_type(u8, 100000); // Too large
     // const ZeroSize = bounded_array_type(u8, 0); // Zero size not allowed
 
-    const Reasonable = bounded_array_type(u8, 100);
+    const Reasonable = BoundedArrayType(u8, 100);
     try std.testing.expect(Reasonable.max_length() == 100);
 }
 
 test "bounded_array_type extend and copy operations" {
-    var array = bounded_array_type(u32, 10){};
+    var array = BoundedArrayType(u32, 10){};
 
     const data = [_]u32{ 1, 2, 3 };
     try array.extend_from_slice(&data);
@@ -956,7 +956,7 @@ test "bounded_array_type extend and copy operations" {
     try std.testing.expect(array.at(0) == 1);
     try std.testing.expect(array.at(2) == 3);
 
-    var other = bounded_array_type(u32, 10){};
+    var other = BoundedArrayType(u32, 10){};
     try other.copy_from(&array);
     try std.testing.expect(other.length() == 3);
     try std.testing.expect(other.at(1) == 2);
@@ -966,7 +966,7 @@ test "bounded_array_type extend and copy operations" {
 }
 
 test "bounded_array_type iterator functionality" {
-    var array = bounded_array_type(u32, 5){};
+    var array = BoundedArrayType(u32, 5){};
 
     try array.append(10);
     try array.append(20);

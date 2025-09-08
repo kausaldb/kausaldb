@@ -64,9 +64,9 @@ pub const ArenaCoordinator = struct {
 
     /// Allocate generation-tagged slice through coordinator for safe access validation.
     /// Returns GenerationSlice that validates generation before each access.
-    pub fn alloc_generation_slice(self: *const ArenaCoordinator, comptime T: type, n: usize) !generation_slice_type(T) {
+    pub fn alloc_generation_slice(self: *const ArenaCoordinator, comptime T: type, n: usize) !GenerationSliceType(T) {
         const memory = try self.alloc(T, n);
-        return generation_slice_type(T){
+        return GenerationSliceType(T){
             .ptr = memory.ptr,
             .len = memory.len,
             .generation = self.generation,
@@ -90,9 +90,9 @@ pub const ArenaCoordinator = struct {
         self: *const ArenaCoordinator,
         comptime T: type,
         slice: []const T,
-    ) !generation_slice_type(T) {
+    ) !GenerationSliceType(T) {
         const memory = try self.duplicate_slice(T, slice);
-        return generation_slice_type(T){
+        return GenerationSliceType(T){
             .ptr = memory.ptr,
             .len = memory.len,
             .generation = self.generation,
@@ -111,7 +111,7 @@ pub const ArenaCoordinator = struct {
     /// Prevents use-after-reset bugs by checking that the arena hasn't been reset
     /// since the slice was allocated. Provides safe access methods that fail
     /// gracefully if the underlying memory has been invalidated.
-    pub fn generation_slice_type(comptime T: type) type {
+    pub fn GenerationSliceType(comptime T: type) type {
         return struct {
             ptr: [*]T,
             len: usize,
@@ -232,7 +232,7 @@ pub const ArenaCoordinator = struct {
 /// Type-safe storage coordinator interface template.
 /// Replaces *anyopaque patterns with compile-time validated subsystem interactions.
 /// Provides minimal interface for storage operations while maintaining clear dependencies.
-pub fn typed_storage_coordinator_type(comptime StorageEngineType: type) type {
+pub fn TypedStorageCoordinatorType(comptime StorageEngineType: type) type {
     return struct {
         const Self = @This();
 

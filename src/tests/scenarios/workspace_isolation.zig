@@ -28,7 +28,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const ContextQuery = context_query_mod.ContextQuery;
 const ContextResult = context_query_mod.ContextResult;
@@ -56,11 +56,11 @@ pub const WorkspaceIsolationHarness = struct {
     context_engine: *ContextEngine,
 
     /// Test workspaces with known content
-    workspaces: bounded_array_type(TestWorkspace, 8),
+    workspaces: BoundedArrayType(TestWorkspace, 8),
 
     const TestWorkspace = struct {
         name: []const u8,
-        blocks: bounded_array_type(ContextBlock, 100),
+        blocks: BoundedArrayType(ContextBlock, 100),
         expected_block_count: u32,
     };
 
@@ -98,7 +98,7 @@ pub const WorkspaceIsolationHarness = struct {
             .storage_engine = storage_engine,
             .query_engine = query_engine,
             .context_engine = context_engine,
-            .workspaces = bounded_array_type(TestWorkspace, 8){},
+            .workspaces = BoundedArrayType(TestWorkspace, 8){},
         };
     }
 
@@ -145,7 +145,7 @@ pub const WorkspaceIsolationHarness = struct {
 
         var workspace = TestWorkspace{
             .name = workspace_name,
-            .blocks = bounded_array_type(ContextBlock, 100){},
+            .blocks = BoundedArrayType(ContextBlock, 100){},
             .expected_block_count = block_count,
         };
 

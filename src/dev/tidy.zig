@@ -66,7 +66,7 @@ const TidyChecker = struct {
 
             // Rule 2: Functions must use snake_case (critical KausalDB convention)
             if (std.mem.indexOf(u8, line, "fn ") != null) {
-                try self.check_snake_case_function(file_path, line_number, line);
+                try self.check_snake_case_function(file_path, line_number, line, file_content);
             }
 
             // Rule 3: Thread safety - no threading outside of stdx.zig and memory_guard.zig
@@ -185,7 +185,7 @@ const TidyChecker = struct {
         return if (prev_start == 0) 0 else prev_start + 1;
     }
 
-    fn check_snake_case_function(self: *TidyChecker, file_path: []const u8, line: u32, source_line: []const u8) !void {
+    fn check_snake_case_function(self: *TidyChecker, file_path: []const u8, line: u32, source_line: []const u8, file_content: []const u8) !void {
         // Find function declaration: "fn name("
         if (std.mem.indexOf(u8, source_line, "fn ")) |fn_pos| {
             const after_fn = source_line[fn_pos + 3 ..];
@@ -209,6 +209,14 @@ const TidyChecker = struct {
             if (name_end > name_start) {
                 const func_name = after_fn[name_start..name_end];
 
+                // Exception: Type generator functions should use PascalCase
+                // Type generators are functions that return types and end with "_type" or "Type"
+                // Check for "type" return type in the same line or following lines
+                const is_type_generator = (std.mem.endsWith(u8, func_name, "_type") or std.mem.endsWith(u8, func_name, "Type")) and
+                    (std.mem.indexOf(u8, source_line, ") type") != null or
+                        std.mem.indexOf(u8, source_line, ")type") != null or
+                        self.is_multiline_type_generator(file_content, source_line));
+
                 // Check if function name contains camelCase (has uppercase letters that aren't at start)
                 var has_uppercase = false;
                 for (func_name, 0..) |char, i| {
@@ -218,13 +226,41 @@ const TidyChecker = struct {
                     }
                 }
 
-                if (has_uppercase) {
+                if (has_uppercase and !is_type_generator) {
                     const message = try std.fmt.allocPrint(self.allocator, "Function '{s}' must use snake_case, not camelCase - critical KausalDB convention", .{func_name});
                     // Note: We're leaking this message, but for a simple checker that's acceptable
                     try self.add_violation(file_path, line, message);
+                } else if (!has_uppercase and is_type_generator) {
+                    const message = try std.fmt.allocPrint(self.allocator, "Type generator function '{s}' should use PascalCase - convert from snake_case", .{func_name});
+                    // Note: We're leaking this message, but for a simple checker that's acceptable
+                    try self.add_violation(file_path, line, message);
                 }
+                // Note: If is_type_generator and has_uppercase, that's correct PascalCase - no violation
             }
         }
+    }
+
+    fn is_multiline_type_generator(self: *TidyChecker, file_content: []const u8, current_line: []const u8) bool {
+        _ = self;
+
+        // Find the current line position in the file
+        const current_line_ptr = current_line.ptr;
+        const file_ptr = file_content.ptr;
+
+        // Safety: Converting pointers to integers for bounds checking
+        if (@intFromPtr(current_line_ptr) < @intFromPtr(file_ptr) or
+            @intFromPtr(current_line_ptr) >= @intFromPtr(file_ptr) + file_content.len)
+        {
+            return false;
+        }
+
+        const current_offset = @intFromPtr(current_line_ptr) - @intFromPtr(file_ptr);
+
+        // Look forward from current position for ") type {" pattern within next 200 characters
+        const search_end = @min(current_offset + 200, file_content.len);
+        const search_text = file_content[current_offset..search_end];
+
+        return std.mem.indexOf(u8, search_text, ") type") != null;
     }
 
     fn add_violation(self: *TidyChecker, file_path: []const u8, line: u32, message: []const u8) !void {

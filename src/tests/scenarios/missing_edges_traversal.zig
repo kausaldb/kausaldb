@@ -29,7 +29,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const ContextQuery = context_query_mod.ContextQuery;
 const ContextResult = context_query_mod.ContextResult;
@@ -62,15 +62,15 @@ pub const MissingEdgesHarness = struct {
     const Self = @This();
 
     const GraphStructure = struct {
-        nodes: bounded_array_type(ContextBlock, 100),
-        edges: bounded_array_type(GraphEdge, 200),
+        nodes: BoundedArrayType(ContextBlock, 100),
+        edges: BoundedArrayType(GraphEdge, 200),
 
         const StructSelf = @This();
 
         pub fn init() StructSelf {
             return StructSelf{
-                .nodes = bounded_array_type(ContextBlock, 100){},
-                .edges = bounded_array_type(GraphEdge, 200){},
+                .nodes = BoundedArrayType(ContextBlock, 100){},
+                .edges = BoundedArrayType(GraphEdge, 200){},
             };
         }
     };

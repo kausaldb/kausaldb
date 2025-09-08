@@ -249,11 +249,11 @@ pub const DebugAllocator = struct {
     /// Underlying allocator to delegate to
     backing_allocator: std.mem.Allocator,
     /// Allocation tracking table
-    allocations_protected: stdx.protected_type([MAX_TRACKED_ALLOCATIONS]AllocationInfo) = .{ .value = undefined },
+    allocations_protected: stdx.ProtectedType([MAX_TRACKED_ALLOCATIONS]AllocationInfo) = .{ .value = undefined },
     /// Free list for allocation tracker slots
     free_slots: std.bit_set.IntegerBitSet(MAX_TRACKED_ALLOCATIONS),
     /// Statistics
-    stats_protected: stdx.protected_type(DebugAllocatorStats) = .{ .value = undefined },
+    stats_protected: stdx.ProtectedType(DebugAllocatorStats) = .{ .value = undefined },
     /// Enable/disable various debug features
     config: DebugConfig,
 

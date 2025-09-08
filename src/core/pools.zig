@@ -18,7 +18,7 @@ const fatal_assert = assert_mod.fatal_assert;
 const log = std.log.scoped(.pools);
 
 /// Debug tracker for object pools with allocation monitoring and leak detection.
-fn debug_tracker_type(comptime T: type) type {
+fn DebugTrackerType(comptime T: type) type {
     return struct {
         const Self = @This();
 
@@ -97,7 +97,7 @@ fn debug_tracker_type(comptime T: type) type {
 /// Generic fixed-size object pool with debug tracking.
 /// Provides O(1) allocation/deallocation for frequently used objects.
 /// Template parameter T must be the exact type stored in the pool.
-pub fn object_pool_type(comptime T: type) type {
+pub fn ObjectPoolType(comptime T: type) type {
     return struct {
         const Self = @This();
         const PoolNode = struct {
@@ -109,7 +109,7 @@ pub fn object_pool_type(comptime T: type) type {
         free_list: ?*PoolNode,
         total_capacity: u32,
         used_count: u32,
-        debug_tracker: if (builtin.mode == .Debug) debug_tracker_type(T) else void,
+        debug_tracker: if (builtin.mode == .Debug) DebugTrackerType(T) else void,
 
         /// Initialize object pool with pre-allocated capacity.
         /// All objects are allocated upfront to eliminate runtime allocation.
@@ -121,7 +121,7 @@ pub fn object_pool_type(comptime T: type) type {
                 .free_list = null,
                 .total_capacity = pool_capacity,
                 .used_count = 0,
-                .debug_tracker = if (builtin.mode == .Debug) debug_tracker_type(T).init(backing_allocator) else {},
+                .debug_tracker = if (builtin.mode == .Debug) DebugTrackerType(T).init(backing_allocator) else {},
             };
 
             try self.preallocate_nodes();
@@ -299,19 +299,19 @@ pub fn object_pool_type(comptime T: type) type {
 
 /// Generic pool manager template for creating type-specific pool managers.
 /// Avoids circular imports by deferring type resolution to usage sites.
-pub fn pool_manager_type(comptime PoolType1: type, comptime PoolType2: type) type {
+pub fn PoolManagerType(comptime PoolType1: type, comptime PoolType2: type) type {
     return struct {
         const Self = @This();
 
-        pool1: object_pool_type(PoolType1),
-        pool2: object_pool_type(PoolType2),
+        pool1: ObjectPoolType(PoolType1),
+        pool2: ObjectPoolType(PoolType2),
         backing_allocator: std.mem.Allocator,
 
         /// Initialize pools with specified capacities.
         pub fn init(backing_allocator: std.mem.Allocator, capacity1: u32, capacity2: u32) !Self {
             return Self{
-                .pool1 = try object_pool_type(PoolType1).init(backing_allocator, capacity1),
-                .pool2 = try object_pool_type(PoolType2).init(backing_allocator, capacity2),
+                .pool1 = try ObjectPoolType(PoolType1).init(backing_allocator, capacity1),
+                .pool2 = try ObjectPoolType(PoolType2).init(backing_allocator, capacity2),
                 .backing_allocator = backing_allocator,
             };
         }
@@ -352,19 +352,19 @@ pub fn pool_manager_type(comptime PoolType1: type, comptime PoolType2: type) typ
 
 /// Fast stack-based allocator for temporary objects.
 /// Uses pre-allocated stack memory for ultra-fast allocation of small, short-lived objects.
-pub fn stack_pool_type(comptime T: type, comptime capacity: u32) type {
+pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
     return struct {
         const Self = @This();
 
         items: [capacity]T,
-        used_mask: stdx.bit_set_type(capacity),
+        used_mask: stdx.BitSetType(capacity),
         next_hint: u32,
 
         /// Initialize stack pool with all slots available.
         pub fn init() Self {
             return Self{
                 .items = undefined, // Items initialized on first use
-                .used_mask = stdx.bit_set_type(capacity).init_empty(),
+                .used_mask = stdx.BitSetType(capacity).init_empty(),
                 .next_hint = 0,
             };
         }
@@ -419,7 +419,7 @@ pub fn stack_pool_type(comptime T: type, comptime capacity: u32) type {
         /// Reset all slots to available state.
         /// CRITICAL: All active objects become invalid after this call.
         pub fn reset(self: *Self) void {
-            self.used_mask = stdx.bit_set_type(capacity).init_empty();
+            self.used_mask = stdx.BitSetType(capacity).init_empty();
             self.next_hint = 0;
         }
     };
@@ -432,7 +432,7 @@ pub fn stack_pool_type(comptime T: type, comptime capacity: u32) type {
 const testing = std.testing;
 
 test "ObjectPool basic allocation and release" {
-    var pool = try object_pool_type(u64).init(testing.allocator, 4);
+    var pool = try ObjectPoolType(u64).init(testing.allocator, 4);
     defer pool.deinit();
 
     const item1 = pool.acquire() orelse return error.PoolExhausted;
@@ -459,7 +459,7 @@ test "ObjectPool basic allocation and release" {
 }
 
 test "ObjectPool exhaustion handling" {
-    var pool = try object_pool_type(u32).init(testing.allocator, 2);
+    var pool = try ObjectPoolType(u32).init(testing.allocator, 2);
     defer pool.deinit();
 
     const item1 = pool.acquire();
@@ -486,7 +486,7 @@ test "ObjectPool exhaustion handling" {
 }
 
 test "ObjectPool with initialization function" {
-    var pool = try object_pool_type(std.array_list.Managed(u8)).init(testing.allocator, 2);
+    var pool = try ObjectPoolType(std.array_list.Managed(u8)).init(testing.allocator, 2);
     defer pool.deinit();
 
     const init_fn = struct {
@@ -505,7 +505,7 @@ test "ObjectPool with initialization function" {
 }
 
 test "StackPool basic operations" {
-    var pool = stack_pool_type(u32, 8).init();
+    var pool = StackPoolType(u32, 8).init();
 
     const item1 = pool.acquire() orelse return error.StackExhausted;
     const item2 = pool.acquire() orelse return error.StackExhausted;
@@ -527,7 +527,7 @@ test "StackPool basic operations" {
 }
 
 test "StackPool exhaustion and reset" {
-    var pool = stack_pool_type(u32, 2).init();
+    var pool = StackPoolType(u32, 2).init();
 
     // Fill the pool
     const item1 = pool.acquire();
@@ -553,7 +553,7 @@ test "StackPool exhaustion and reset" {
 
 test "PoolManager template functionality" {
     // Test the generic pool manager template with simple types
-    const TestPoolManager = pool_manager_type(u32, u64);
+    const TestPoolManager = PoolManagerType(u32, u64);
 
     var pool_manager = try TestPoolManager.init(testing.allocator, 4, 4);
     defer pool_manager.deinit();
@@ -577,7 +577,7 @@ test "PoolManager template functionality" {
 
 test "pool performance characteristics" {
     const iterations = 1000; // Reduced to prevent pool exhaustion
-    var pool = try object_pool_type(u64).init(testing.allocator, 16);
+    var pool = try ObjectPoolType(u64).init(testing.allocator, 16);
     defer pool.deinit();
 
     // Track items to ensure they're all released

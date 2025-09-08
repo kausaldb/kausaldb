@@ -30,7 +30,7 @@ const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
-const typed_storage_coordinator_type = memory.typed_storage_coordinator_type;
+const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
 const Config = storage_config_mod.Config;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;

@@ -177,9 +177,9 @@ pub const StorageEngine = struct {
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
     // TEMP: Comment out sstable_pool to test if object pools are causing SIGILL
-    // sstable_pool: pools.object_pool_type(SSTable),
+    // sstable_pool: pools.ObjectPoolType(SSTable),
     // TEMP: Comment out iterator_pool to bypass SIGILL crash in object pool initialization
-    // iterator_pool: pools.object_pool_type(StorageEngine.BlockIterator),
+    // iterator_pool: pools.ObjectPoolType(StorageEngine.BlockIterator),
 
     /// Initialize storage engine with default configuration.
     /// Uses Arena Coordinator Pattern to eliminate arena corruption from struct copying.
@@ -233,7 +233,7 @@ pub const StorageEngine = struct {
         // - SSTable pool: 16 objects (handles concurrent reads + compaction)
         // - Iterator pool: 32 objects (query parallelism + background operations)
         // TEMP: Skip sstable_pool initialization to test if object pools are causing SIGILL
-        // const sstable_pool = pools.object_pool_type(SSTable).init(allocator, 16) catch |err| {
+        // const sstable_pool = pools.ObjectPoolType(SSTable).init(allocator, 16) catch |err| {
         //     storage_arena.deinit();
         //     allocator.destroy(storage_arena);
         //     allocator.destroy(arena_coordinator);
@@ -244,7 +244,7 @@ pub const StorageEngine = struct {
         // };
 
         // TEMP: Skip iterator_pool initialization to bypass SIGILL crash
-        // const iterator_pool = pools.object_pool_type(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
+        // const iterator_pool = pools.ObjectPoolType(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
         //     storage_arena.deinit();
         //     allocator.destroy(storage_arena);
         //     allocator.destroy(arena_coordinator);

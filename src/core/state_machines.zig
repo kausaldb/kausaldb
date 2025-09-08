@@ -280,9 +280,9 @@ pub fn validate_state_machine(comptime StateEnum: type) void {
 
 /// State machine debug tracer for development builds.
 /// Tracks state transition history for debugging invalid sequences.
-pub fn state_machine_tracer_type(comptime StateEnum: type) type {
+pub fn StateMachineTracerType(comptime StateEnum: type) type {
     return struct {
-        const Tracer = state_machine_tracer_type(StateEnum);
+        const Tracer = StateMachineTracerType(StateEnum);
         history: if (builtin.mode == .Debug) [32]StateEnum else void,
         history_len: if (builtin.mode == .Debug) usize else void,
         creation_time: if (builtin.mode == .Debug) i64 else void,
@@ -461,7 +461,7 @@ test "StorageState operation coordination" {
 test "state machine tracer in debug mode" {
     if (builtin.mode != .Debug) return;
 
-    var tracer = state_machine_tracer_type(FileState).init();
+    var tracer = StateMachineTracerType(FileState).init();
     var state = FileState.closed;
 
     // Record some transitions

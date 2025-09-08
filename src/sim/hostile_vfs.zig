@@ -29,7 +29,7 @@ const vfs_types = @import("../core/vfs.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const comptime_assert = assert_mod.comptime_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const SimulationVFS = simulation_vfs_mod.SimulationVFS;
 const VFS = vfs_types.VFS;
@@ -107,7 +107,7 @@ pub const HostileVFS = struct {
         memory_pressure_config: MemoryPressureConfig,
 
         /// Active corruption patterns for deterministic behavior
-        active_patterns: bounded_array_type(CorruptionPattern, MAX_CORRUPTION_PATTERNS),
+        active_patterns: BoundedArrayType(CorruptionPattern, MAX_CORRUPTION_PATTERNS),
 
         pub const BitFlipConfig = struct {
             enabled: bool = false,
@@ -171,7 +171,7 @@ pub const HostileVFS = struct {
                 .torn_write_config = .{},
                 .silent_corruption_config = .{},
                 .memory_pressure_config = .{},
-                .active_patterns = bounded_array_type(CorruptionPattern, MAX_CORRUPTION_PATTERNS){},
+                .active_patterns = BoundedArrayType(CorruptionPattern, MAX_CORRUPTION_PATTERNS){},
             };
         }
 

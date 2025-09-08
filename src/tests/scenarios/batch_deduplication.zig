@@ -26,7 +26,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const BatchWriter = batch_writer_mod.BatchWriter;
 const BatchConfig = batch_writer_mod.BatchConfig;
@@ -49,10 +49,10 @@ pub const BatchDeduplicationHarness = struct {
     batch_writer: *BatchWriter,
 
     /// Test batches with known duplicate patterns
-    test_batches: bounded_array_type(TestBatch, 16),
+    test_batches: BoundedArrayType(TestBatch, 16),
 
     const TestBatch = struct {
-        blocks: bounded_array_type(ContextBlock, 1000),
+        blocks: BoundedArrayType(ContextBlock, 1000),
         workspace: []const u8,
         expected_duplicates: u32,
         expected_written: u32,
@@ -87,7 +87,7 @@ pub const BatchDeduplicationHarness = struct {
             .simulation_vfs = simulation_vfs,
             .storage_engine = storage_engine,
             .batch_writer = batch_writer,
-            .test_batches = bounded_array_type(TestBatch, 16){},
+            .test_batches = BoundedArrayType(TestBatch, 16){},
         };
     }
 
@@ -122,7 +122,7 @@ pub const BatchDeduplicationHarness = struct {
         fatal_assert(duplicate_percentage <= 100, "Invalid duplicate percentage: {}", .{duplicate_percentage});
 
         var batch = TestBatch{
-            .blocks = bounded_array_type(ContextBlock, 1000){},
+            .blocks = BoundedArrayType(ContextBlock, 1000){},
             .workspace = workspace,
             .expected_duplicates = (total_blocks * duplicate_percentage) / 100,
             .expected_written = total_blocks - ((total_blocks * duplicate_percentage) / 100),
@@ -183,7 +183,7 @@ pub const BatchDeduplicationHarness = struct {
         fatal_assert(conflict_percentage <= 100, "Invalid conflict percentage: {}", .{conflict_percentage});
 
         var batch = TestBatch{
-            .blocks = bounded_array_type(ContextBlock, 1000){},
+            .blocks = BoundedArrayType(ContextBlock, 1000){},
             .workspace = workspace,
             .expected_duplicates = 0, // No exact duplicates, but version conflicts
             .expected_written = block_count, // All blocks should be processed

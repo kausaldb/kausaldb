@@ -290,7 +290,7 @@ const InputGenerator = struct {
 };
 
 /// Systematic fuzzer with Arena Coordinator Pattern
-pub fn systematic_fuzzer_type(comptime TargetType: type) type {
+pub fn SystematicFuzzerType(comptime TargetType: type) type {
     return struct {
         const Self = @This();
 
@@ -553,7 +553,7 @@ pub fn quick_fuzz(comptime TargetType: type, allocator: std.mem.Allocator, itera
         .seed = std.crypto.random.int(u64),
     };
 
-    var fuzzer = try systematic_fuzzer_type(TargetType).init(allocator, config);
+    var fuzzer = try SystematicFuzzerType(TargetType).init(allocator, config);
     defer fuzzer.deinit();
 
     try fuzzer.run_campaign();
@@ -598,7 +598,7 @@ test "systematic_fuzzing_framework" {
         .seed = 0x12345,
     };
 
-    var fuzzer = try systematic_fuzzer_type(MockTarget).init(std.testing.allocator, config);
+    var fuzzer = try SystematicFuzzerType(MockTarget).init(std.testing.allocator, config);
     defer fuzzer.deinit();
 
     // Just test initialization - full campaign would take too long for tests

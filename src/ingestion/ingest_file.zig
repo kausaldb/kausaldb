@@ -13,7 +13,7 @@ const Allocator = std.mem.Allocator;
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
-const IngestionBlock = ownership.comptime_owned_block_type(.temporary);
+const IngestionBlock = ownership.ComptimeOwnedBlockType(.temporary);
 
 /// Simple file content structure for direct parsing
 /// Compatible with ingest_directory.zig FileContent

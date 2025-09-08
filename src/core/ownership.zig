@@ -252,7 +252,7 @@ pub const OwnedBlock = struct {
 /// Zero-cost ownership wrapper for hot paths where ownership is known at compile time.
 /// Provides identical safety guarantees as OwnedBlock but with zero runtime overhead.
 /// Use this for performance-critical operations where ownership is compile-time constant.
-pub fn comptime_owned_block_type(comptime owner: BlockOwnership) type {
+pub fn ComptimeOwnedBlockType(comptime owner: BlockOwnership) type {
     return struct {
         const Self = @This();
 

@@ -9,7 +9,7 @@ const ownership = @import("../core/ownership.zig");
 const assert = assert_mod.assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ContextBlock = context_block.ContextBlock;
-const IngestionBlock = ownership.comptime_owned_block_type(.temporary);
+const IngestionBlock = ownership.ComptimeOwnedBlockType(.temporary);
 const FileContent = parse_file_to_blocks.FileContent;
 const VFS = vfs.VFS;
 

@@ -27,7 +27,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const ContextQuery = context_query_mod.ContextQuery;
 const ContextResult = context_query_mod.ContextResult;
@@ -49,7 +49,7 @@ pub const CorruptedSSTableHarness = struct {
     storage_engine: *StorageEngine,
 
     /// Test blocks with known relationships for predictable corruption testing
-    test_blocks: bounded_array_type(ContextBlock, 100),
+    test_blocks: BoundedArrayType(ContextBlock, 100),
     corruption_seed: u64,
 
     const Self = @This();
@@ -73,7 +73,7 @@ pub const CorruptedSSTableHarness = struct {
             .allocator = allocator,
             .hostile_vfs = hostile_vfs,
             .storage_engine = storage_engine,
-            .test_blocks = bounded_array_type(ContextBlock, 100){},
+            .test_blocks = BoundedArrayType(ContextBlock, 100){},
             .corruption_seed = seed,
         };
     }
@@ -259,10 +259,10 @@ pub const CorruptedSSTableHarness = struct {
         _ = self;
 
         // Since ContextEngine is crashing, return mock result
-        const blocks = bounded_array_type(*const ContextBlock, 10000){};
+        const blocks = BoundedArrayType(*const ContextBlock, 10000){};
         return ContextResult{
             .blocks = blocks,
-            .edges = bounded_array_type(ContextResult.ContextEdge, 40000){},
+            .edges = BoundedArrayType(ContextResult.ContextEdge, 40000){},
             .metrics = ContextResult.ExecutionMetrics{
                 .anchors_resolved = 1,
                 .blocks_visited = 5,

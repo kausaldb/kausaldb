@@ -22,10 +22,10 @@ const testing = std.testing;
 const validate_no_raw_pointers = arena_mod.validate_no_raw_pointers;
 const validate_ownership_usage = ownership.validate_ownership_usage;
 
-const TypedArenaType = arena_mod.typed_arena_type;
+const TypedArenaType = arena_mod.TypedArenaType;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ArenaOwnership = arena_mod.ArenaOwnership;
-const owned_ptr_type = arena_mod.owned_ptr_type;
+const OwnedPtrType = arena_mod.OwnedPtrType;
 const BlockOwnership = ownership.BlockOwnership;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedBlockCollection = ownership.OwnedBlockCollection;
@@ -36,7 +36,7 @@ const StorageState = state_machines.StorageState;
 const TypedFileHandle = file_handle.TypedFileHandle;
 const FileHandleId = file_handle.FileHandleId;
 const FileAccessMode = file_handle.FileAccessMode;
-const bounded_array_type = bounded.bounded_array_type;
+const BoundedArrayType = bounded.BoundedArrayType;
 const ContextBlock = core_types.ContextBlock;
 const BlockId = core_types.BlockId;
 
@@ -156,7 +156,7 @@ test "CORRUPTION PREVENTION: Bounds checking prevents buffer overflows" {
     // This test demonstrates compile-time bounds checking that prevents
     // runtime buffer overflows that were common with raw arrays
 
-    var bounded_list = bounded_array_type(u32, 3){};
+    var bounded_list = BoundedArrayType(u32, 3){};
 
     // Fill to capacity
     try bounded_list.append(100);

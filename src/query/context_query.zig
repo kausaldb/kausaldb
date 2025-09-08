@@ -21,7 +21,7 @@ const types = @import("../core/types.zig");
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
 const comptime_assert = assert_mod.comptime_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -95,7 +95,7 @@ pub const TraversalRule = struct {
     direction: Direction,
 
     /// Types of edges to follow during traversal
-    edge_types: bounded_array_type(EdgeType, 8),
+    edge_types: BoundedArrayType(EdgeType, 8),
 
     /// Maximum traversal depth from any anchor
     max_depth: u32,
@@ -119,7 +119,7 @@ pub const TraversalRule = struct {
     pub fn create_default(direction: Direction) TraversalRule {
         return TraversalRule{
             .direction = direction,
-            .edge_types = bounded_array_type(EdgeType, 8){},
+            .edge_types = BoundedArrayType(EdgeType, 8){},
             .max_depth = DEFAULT_MAX_DEPTH,
             .max_nodes = DEFAULT_MAX_NODES,
         };
@@ -146,10 +146,10 @@ pub const ContextQuery = struct {
     workspace: []const u8,
 
     /// Starting points for context traversal
-    anchors: bounded_array_type(QueryAnchor, 4),
+    anchors: BoundedArrayType(QueryAnchor, 4),
 
     /// Rules governing graph traversal from anchors
-    rules: bounded_array_type(TraversalRule, 2),
+    rules: BoundedArrayType(TraversalRule, 2),
 
     /// Global limit on total nodes returned across all traversals
     max_total_nodes: u32,
@@ -166,8 +166,8 @@ pub const ContextQuery = struct {
 
         return ContextQuery{
             .workspace = workspace,
-            .anchors = bounded_array_type(QueryAnchor, 4){},
-            .rules = bounded_array_type(TraversalRule, 2){},
+            .anchors = BoundedArrayType(QueryAnchor, 4){},
+            .rules = BoundedArrayType(TraversalRule, 2){},
             .max_total_nodes = DEFAULT_MAX_TOTAL_NODES,
             .timeout_us = DEFAULT_TIMEOUT_US,
         };
@@ -265,10 +265,10 @@ pub const QueryCost = struct {
 /// Result of context query execution with bounded collections
 pub const ContextResult = struct {
     /// All context blocks discovered during traversal
-    blocks: bounded_array_type(*const ContextBlock, 10000),
+    blocks: BoundedArrayType(*const ContextBlock, 10000),
 
     /// Edges between blocks in the result set
-    edges: bounded_array_type(ContextEdge, 40000),
+    edges: BoundedArrayType(ContextEdge, 40000),
 
     /// Query execution metrics
     metrics: ExecutionMetrics,

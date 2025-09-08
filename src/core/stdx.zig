@@ -53,7 +53,7 @@ pub const MetricsCounter = struct {
 
 /// Simple value container - no protection needed in single-threaded KausalDB.
 /// This type exists for API consistency where thread-safety was once considered.
-pub fn protected_type(comptime T: type) type {
+pub fn ProtectedType(comptime T: type) type {
     return struct {
         value: T,
 
@@ -124,7 +124,7 @@ pub fn copy_right(comptime T: type, dest: []T, source: []const T) void {
 /// Use this instead of std.StaticBitSet for consistent snake_case method names
 /// and defensive programming checks. Provides the same functionality with
 /// improved API consistency across the codebase.
-pub fn bit_set_type(comptime size: comptime_int) type {
+pub fn BitSetType(comptime size: comptime_int) type {
     return struct {
         inner: std.StaticBitSet(size),
 

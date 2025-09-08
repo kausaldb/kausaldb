@@ -24,7 +24,7 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const bounded_array_type = bounded_mod.bounded_array_type;
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 const testing = std.testing;
 
 const SimulationVFS = simulation_vfs.SimulationVFS;
@@ -48,7 +48,7 @@ test "wal entry stream recovery maintains order" {
     defer harness.deinit();
 
     // Add blocks in specific sequence to test ordering
-    var sequence_blocks = bounded_array_type(ContextBlock, 50){};
+    var sequence_blocks = BoundedArrayType(ContextBlock, 50){};
     var i: u32 = 0;
     while (i < 25) {
         const content = try std.fmt.allocPrint(allocator, "sequence_{d:0>3}", .{i});
