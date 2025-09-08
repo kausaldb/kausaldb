@@ -58,10 +58,15 @@ test "wal entry stream recovery maintains order" {
         defer allocator.free(filename);
 
         const block = try TestData.create_test_block_with_content(allocator, i, content);
-        defer TestData.cleanup_test_block(allocator, block);
         try sequence_blocks.append(block);
         try harness.storage_engine.put_block(block);
         i += 1;
+    }
+    // Clean up blocks after storing them
+    defer {
+        for (sequence_blocks.slice()) |block| {
+            TestData.cleanup_test_block(allocator, block);
+        }
     }
 
     // Restart to trigger stream recovery

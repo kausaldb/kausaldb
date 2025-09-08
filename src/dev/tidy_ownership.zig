@@ -51,7 +51,7 @@ pub fn main() !void {
         std.process.exit(1);
     }
 
-    log.info("✅ Ownership validation passed", .{});
+    log.info("Ownership validation passed!", .{});
 
     // Report adoption statistics
     try report_ownership_statistics(allocator);

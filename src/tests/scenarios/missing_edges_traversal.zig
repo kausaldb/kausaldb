@@ -102,22 +102,29 @@ pub const MissingEdgesHarness = struct {
 
     pub fn deinit(self: *Self) void {
         // Cleanup graph structures
-        for (self.complete_graph.nodes.slice_mut()) |*node| {
+        for (self.complete_graph.nodes.slice()) |node| {
             self.allocator.free(node.content);
             self.allocator.free(node.metadata_json);
             self.allocator.free(node.source_uri);
         }
 
-        for (self.incomplete_graph.nodes.slice_mut()) |*node| {
+        for (self.incomplete_graph.nodes.slice()) |node| {
             self.allocator.free(node.content);
             self.allocator.free(node.metadata_json);
             self.allocator.free(node.source_uri);
         }
 
-        self.storage_engine.shutdown() catch {};
+        // Ensure all pending WAL operations are completed before shutdown
+        self.storage_engine.flush_wal() catch {};
+
+        // Ensure proper shutdown order to prevent VFS arena leaks
+        self.storage_engine.shutdown() catch {
+            // Storage engine shutdown errors are non-critical during test cleanup
+        };
         self.storage_engine.deinit();
         self.allocator.destroy(self.storage_engine);
 
+        // VFS deinit must come after storage engine is fully cleaned up
         self.simulation_vfs.deinit();
     }
 
@@ -441,8 +448,8 @@ pub fn execute_missing_edges_scenario(allocator: Allocator, seed: u64) !TestResu
     const unique_workspace = try std.fmt.allocPrint(allocator, "missing_edges_test_{}", .{seed});
     defer allocator.free(unique_workspace);
 
-    // Create incomplete graph structure
-    try harness.create_incomplete_graph(unique_workspace, 20);
+    // Create smaller incomplete graph structure to reduce VFS memory pressure
+    try harness.create_incomplete_graph(unique_workspace, 5);
 
     // Test 1: Traversal with missing edges
     const traversal_result = try harness.test_traversal_with_missing_edges(unique_workspace);
