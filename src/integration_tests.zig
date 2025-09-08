@@ -17,11 +17,13 @@ pub const std_options = .{
 comptime {
     _ = @import("tests/cli/command_interface.zig");
     _ = @import("tests/debug/arraylist_corruption.zig");
-    _ = @import("tests/defensive/assertion_validation.zig");
-    _ = @import("tests/defensive/corruption_injection.zig");
-    _ = @import("tests/defensive/fatal_assertion_demo.zig");
-    _ = @import("tests/defensive/fatal_assertion_validation.zig");
-    _ = @import("tests/defensive/performance_impact.zig");
+    // RECLASSIFIED: Unit tests moved to src/core/*_test.zig files
+    // Remaining integration tests that require storage engine/simulation:
+    _ = @import("tests/defensive/assertion_validation.zig"); // Integration tests only
+    _ = @import("tests/defensive/corruption_injection.zig"); // Integration tests only
+    _ = @import("tests/defensive/fatal_assertion_demo.zig"); // Integration tests only
+    _ = @import("tests/defensive/fatal_assertion_validation.zig"); // Integration tests only
+    _ = @import("tests/defensive/performance_impact.zig"); // Integration tests only
     _ = @import("tests/fault_injection/compaction_crashes.zig");
     _ = @import("tests/fault_injection/deserialization_faults.zig");
     _ = @import("tests/fault_injection/ingestion_faults.zig");

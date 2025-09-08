@@ -21,41 +21,7 @@ const EdgeType = types.EdgeType;
 const StorageEngine = storage.StorageEngine;
 const Simulation = simulation.Simulation;
 
-test "assertion framework basic functionality validation" {
-    // Test basic assert functionality
-    assert.assert(true);
-    assert.assert_fmt(true, "This should not fail", .{});
-
-    // Test range assertions
-    assert.assert_range(50, 0, 100, "Value {} not in range 0-100", .{50});
-    assert.assert_range(0, 0, 100, "Value {} not in range 0-100", .{0});
-    assert.assert_range(100, 0, 100, "Value {} not in range 0-100", .{100});
-
-    // Test buffer bounds assertions
-    assert.assert_buffer_bounds(0, 50, 100, "Buffer overflow: {} + {} > {}", .{ 0, 50, 100 });
-    assert.assert_buffer_bounds(50, 50, 100, "Buffer overflow: {} + {} > {}", .{ 50, 50, 100 });
-
-    // Test index validation
-    assert.assert_index_valid(0, 10, "Index out of bounds: {} >= {}", .{ 0, 10 });
-    assert.assert_index_valid(9, 10, "Index out of bounds: {} >= {}", .{ 9, 10 });
-
-    // Test not empty validation
-    const slice = [_]u8{ 1, 2, 3 };
-    assert.assert_not_empty(slice[0..], "Slice cannot be empty", .{});
-
-    // Test equality assertions
-    assert.assert_equal(42, 42, "Values not equal: {} != {}", .{ 42, 42 });
-
-    // Test counter bounds
-    assert.assert_counter_bounds(10, 100, "Counter overflow: {} > {}", .{ 10, 100 });
-
-    // Test state validation
-    assert.assert_state_valid(true, "Invalid state: {}", .{42});
-
-    // Test stride validation
-    assert.assert_stride_positive(1, "Invalid stride: {} must be positive", .{1});
-    assert.assert_stride_positive(100, "Invalid stride: {} must be positive", .{100});
-}
+// MOVED: "assertion framework basic functionality validation" → src/core/assert_test.zig
 
 test "storage engine defensive programming validation" {
     const allocator = testing.allocator;

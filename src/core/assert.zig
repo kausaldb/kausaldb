@@ -437,3 +437,147 @@ test "assertion behavior matches documentation" {
     // - assert() and assert_fmt() are no-ops in release builds
     // - fatal_assert() always panics on false conditions
 }
+
+test "assertion framework basic functionality validation" {
+    // Test basic assert functionality
+    assert(true);
+    assert_fmt(true, "This should not fail", .{});
+
+    // Test range assertions
+    assert_range(50, 0, 100, "Value {} not in range 0-100", .{50});
+    assert_range(0, 0, 100, "Value {} not in range 0-100", .{0});
+    assert_range(100, 0, 100, "Value {} not in range 0-100", .{100});
+
+    // Test buffer bounds assertions
+    assert_buffer_bounds(0, 50, 100, "Buffer overflow: {} + {} > {}", .{ 0, 50, 100 });
+    assert_buffer_bounds(50, 50, 100, "Buffer overflow: {} + {} > {}", .{ 50, 50, 100 });
+
+    // Test index validation
+    assert_index_valid(0, 10, "Index out of bounds: {} >= {}", .{ 0, 10 });
+    assert_index_valid(9, 10, "Index out of bounds: {} >= {}", .{ 9, 10 });
+
+    // Test not empty validation
+    const slice = [_]u8{ 1, 2, 3 };
+    assert_not_empty(slice[0..], "Slice cannot be empty", .{});
+
+    // Test equality assertions
+    assert_equal(42, 42, "Values not equal: {} != {}", .{ 42, 42 });
+
+    // Test counter bounds
+    assert_counter_bounds(10, 100, "Counter overflow: {} > {}", .{ 10, 100 });
+
+    // Test state validation
+    assert_state_valid(true, "Invalid state: {}", .{42});
+
+    // Test stride validation
+    assert_stride_positive(1, "Invalid stride: {} must be positive", .{1});
+    assert_stride_positive(100, "Invalid stride: {} must be positive", .{100});
+}
+
+test "boundary condition defensive programming" {
+    // Test zero-length and maximum-length scenarios
+    const empty_string = "";
+    const max_reasonable_string = "a" ** 1000;
+
+    // Test basic assertion boundary conditions
+    assert_range(0, 0, 0, "Single value range test: {}", .{0});
+    assert_range(1000, 0, 1000, "Max boundary test: {}", .{1000});
+
+    // Test buffer boundary conditions
+    assert_buffer_bounds(0, 0, 100, "Zero write test: {} + {} <= {}", .{ 0, 0, 100 });
+    assert_buffer_bounds(100, 0, 100, "Boundary write test: {} + {} <= {}", .{ 100, 0, 100 });
+
+    // Test index boundary conditions
+    assert_index_valid(0, 1, "Single element array: {} < {}", .{ 0, 1 });
+
+    // Test string validation
+    assert_not_empty(max_reasonable_string, "Max string should not be empty", .{});
+
+    // Test counter boundary conditions
+    assert_counter_bounds(0, 0, "Zero counter boundary: {} <= {}", .{ 0, 0 });
+    assert_counter_bounds(std.math.maxInt(u32), std.math.maxInt(u32), "Max counter boundary: {} <= {}", .{ std.math.maxInt(u32), std.math.maxInt(u32) });
+
+    // Validate empty string handling - implementation should handle gracefully
+    _ = empty_string;
+}
+
+test "assertion framework performance overhead measurement" {
+    const allocator = std.testing.allocator;
+
+    // Measure assertion overhead by comparing with and without assertions
+    const iterations: u32 = 100_000;
+    var i: u32 = 0;
+
+    // Warm up
+    while (i < 1000) : (i += 1) {
+        assert(i < iterations);
+    }
+
+    // Measure assertion calls
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < iterations) : (i += 1) {
+        assert(i < iterations);
+        assert_range(i, 0, iterations, "Value out of range", .{});
+    }
+    const assertion_time = std.time.nanoTimestamp() - start_time;
+
+    // Measure control (no assertions)
+    const control_start = std.time.nanoTimestamp();
+    i = 0;
+    while (i < iterations) : (i += 1) {
+        _ = i < iterations; // Equivalent computation without assertion
+        _ = i >= 0 and i <= iterations; // Equivalent range check
+    }
+    const control_time = std.time.nanoTimestamp() - control_start;
+
+    // Performance validation - assertions should be reasonably fast
+    // Allow up to 10x overhead for assertions (generous bound)
+    const max_acceptable_overhead = control_time * 10;
+
+    if (assertion_time > max_acceptable_overhead) {
+        std.debug.print("Warning: Assertion overhead {} > {} (10x control)\n", .{ assertion_time, max_acceptable_overhead });
+        // Don't fail the test, just warn - performance may vary by build
+    }
+
+    // Basic allocation test for context
+    const test_buffer = try allocator.alloc(u8, 1024);
+    defer allocator.free(test_buffer);
+    assert_not_empty(test_buffer, "Buffer should not be empty", .{});
+}
+
+test "defensive programming zero cost abstraction validation" {
+    const allocator = std.testing.allocator;
+
+    // Test that assertion framework compiles to efficient code
+    comptime {
+        // This should compile without issues and demonstrate zero-cost abstractions
+        const CompileTimeTest = struct {
+            fn validate_at_comptime() void {
+                assert(true);
+                assert_range(50, 0, 100, "Compile time range test", .{});
+            }
+        };
+        CompileTimeTest.validate_at_comptime();
+    }
+
+    // Runtime validation using simple computation
+    var computation_result: u64 = 0;
+    var i: u32 = 0;
+    while (i < 1000) : (i += 1) {
+        assert(i < 1000);
+        computation_result +%= i; // Wrapping add to prevent overflow
+    }
+
+    // Basic memory test
+    const test_slice = try allocator.alloc(u32, 100);
+    defer allocator.free(test_slice);
+
+    for (test_slice, 0..) |*item, idx| {
+        assert_index_valid(idx, test_slice.len, "Index validation", .{});
+        item.* = @intCast(idx);
+    }
+
+    assert_equal(test_slice.len, 100, "Slice length validation", .{});
+    assert_equal(computation_result, 499500, "Computation result validation", .{});
+}

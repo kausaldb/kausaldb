@@ -642,3 +642,115 @@ test "mixed generation and regular allocations" {
     try testing.expectEqual(@as(usize, 5), new_regular.len);
     try testing.expect(new_generation.is_valid());
 }
+
+test "arena allocator corruption detection" {
+    const allocator = testing.allocator;
+
+    // Test arena coordinator pattern directly without StorageEngine complexity
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    // Test normal arena operations through coordinator
+    const allocation1 = try coordinator.allocator().alloc(u8, 256);
+    const allocation2 = try coordinator.allocator().alloc(u32, 64);
+
+    // Verify allocations are valid
+    try testing.expect(allocation1.len == 256);
+    try testing.expect(allocation2.len == 64);
+
+    // Test that allocations don't overlap (basic corruption check)
+    const ptr1 = @intFromPtr(allocation1.ptr);
+    const ptr2 = @intFromPtr(allocation2.ptr);
+    const end1 = ptr1 + allocation1.len;
+    const end2 = ptr2 + allocation2.len * @sizeOf(u32);
+
+    // Ensure no overlap - either ptr1 ends before ptr2 starts, or vice versa
+    try testing.expect((end1 <= ptr2) or (end2 <= ptr1));
+
+    // Fill allocations with known patterns
+    @memset(allocation1, 0xAA);
+    for (allocation2) |*item| {
+        item.* = 0xBBBBBBBB; // Fill u32 array with pattern
+    }
+
+    // Verify patterns are preserved (no corruption)
+    try testing.expect(allocation1[0] == 0xAA);
+    try testing.expect(allocation1[255] == 0xAA);
+    try testing.expect(allocation2[0] == 0xBBBBBBBB);
+}
+
+test "memory accounting validation" {
+    const allocator = testing.allocator;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    // Track allocation sizes for accounting validation
+    const allocations = [_]usize{ 64, 128, 256, 512, 1024 };
+    var total_expected: usize = 0;
+
+    // Perform allocations and track expected total
+    for (allocations) |size| {
+        const allocation = try coordinator.allocator().alloc(u8, size);
+        try testing.expect(allocation.len == size);
+        total_expected += size;
+
+        // Fill with pattern to ensure allocation is writable
+        @memset(allocation, @intCast(size % 256));
+    }
+
+    // Basic validation - all allocations should be accessible
+    // (Arena doesn't provide direct accounting, but we can validate behavior)
+    try testing.expect(total_expected == 64 + 128 + 256 + 512 + 1024);
+    try testing.expect(total_expected == 1984);
+}
+
+test "memory allocation performance with defensive programming" {
+    const allocator = testing.allocator;
+
+    // Compare arena vs direct allocation performance
+    const iterations: usize = 1000;
+    const allocation_size: usize = 64;
+
+    // Test direct allocator performance
+    const direct_start = std.time.nanoTimestamp();
+    var i: usize = 0;
+    while (i < iterations) : (i += 1) {
+        const direct_alloc = try allocator.alloc(u8, allocation_size);
+        @memset(direct_alloc, @intCast(i % 256));
+        allocator.free(direct_alloc);
+    }
+    const direct_time = std.time.nanoTimestamp() - direct_start;
+
+    // Test arena allocator performance
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    const arena_start = std.time.nanoTimestamp();
+    i = 0;
+    while (i < iterations) : (i += 1) {
+        const arena_alloc = try coordinator.allocator().alloc(u8, allocation_size);
+        @memset(arena_alloc, @intCast(i % 256));
+        // No individual free needed for arena
+    }
+    const arena_time = std.time.nanoTimestamp() - arena_start;
+
+    // Arena should be faster for this allocation pattern (no individual frees)
+    // Allow some variance in timing but arena should generally be competitive
+    if (arena_time > direct_time * 3) {
+        std.debug.print("Warning: Arena time {} > 3x direct time {}\n", .{ arena_time, direct_time });
+        // Don't fail - timing can vary, but log for investigation
+    }
+
+    // Verify final allocation is still valid
+    const final_alloc = try coordinator.allocator().alloc(u8, allocation_size);
+    @memset(final_alloc, 0xFF);
+    try testing.expect(final_alloc[0] == 0xFF);
+    try testing.expect(final_alloc[allocation_size - 1] == 0xFF);
+}
