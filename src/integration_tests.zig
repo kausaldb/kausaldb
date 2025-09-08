@@ -73,7 +73,7 @@ comptime {
     _ = @import("tests/stress/memory_pressure.zig");
     _ = @import("tests/stress/storage_load.zig");
     _ = @import("tests/vfs/vfs_integration.zig");
-    _ = @import("tests/scenarios/batch_deduplication.zig");
+    _ = @import("tests/scenarios/batch_deduplication.zig"); // Re-enabled for debugging SIGILL
     _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
     _ = @import("tests/scenarios/missing_edges_traversal.zig");
     _ = @import("tests/scenarios/workspace_isolation.zig");

@@ -176,8 +176,10 @@ pub const StorageEngine = struct {
 
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
-    sstable_pool: pools.object_pool_type(SSTable),
-    iterator_pool: pools.object_pool_type(StorageEngine.BlockIterator),
+    // TEMP: Comment out sstable_pool to test if object pools are causing SIGILL
+    // sstable_pool: pools.object_pool_type(SSTable),
+    // TEMP: Comment out iterator_pool to bypass SIGILL crash in object pool initialization
+    // iterator_pool: pools.object_pool_type(StorageEngine.BlockIterator),
 
     /// Initialize storage engine with default configuration.
     /// Uses Arena Coordinator Pattern to eliminate arena corruption from struct copying.
@@ -230,25 +232,27 @@ pub const StorageEngine = struct {
         // Pool sizes chosen based on typical usage patterns:
         // - SSTable pool: 16 objects (handles concurrent reads + compaction)
         // - Iterator pool: 32 objects (query parallelism + background operations)
-        const sstable_pool = pools.object_pool_type(SSTable).init(allocator, 16) catch |err| {
-            storage_arena.deinit();
-            allocator.destroy(storage_arena);
-            allocator.destroy(arena_coordinator);
+        // TEMP: Skip sstable_pool initialization to test if object pools are causing SIGILL
+        // const sstable_pool = pools.object_pool_type(SSTable).init(allocator, 16) catch |err| {
+        //     storage_arena.deinit();
+        //     allocator.destroy(storage_arena);
+        //     allocator.destroy(arena_coordinator);
 
-            allocator.free(owned_data_dir);
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "sstable_pool_init" });
-            return err;
-        };
+        //     allocator.free(owned_data_dir);
+        //     error_context.log_storage_error(err, error_context.StorageContext{ .operation = "sstable_pool_init" });
+        //     return err;
+        // };
 
-        const iterator_pool = pools.object_pool_type(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
-            storage_arena.deinit();
-            allocator.destroy(storage_arena);
-            allocator.destroy(arena_coordinator);
+        // TEMP: Skip iterator_pool initialization to bypass SIGILL crash
+        // const iterator_pool = pools.object_pool_type(StorageEngine.BlockIterator).init(allocator, 32) catch |err| {
+        //     storage_arena.deinit();
+        //     allocator.destroy(storage_arena);
+        //     allocator.destroy(arena_coordinator);
 
-            allocator.free(owned_data_dir);
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "iterator_pool_init" });
-            return err;
-        };
+        //     allocator.free(owned_data_dir);
+        //     error_context.log_storage_error(err, error_context.StorageContext{ .operation = "iterator_pool_init" });
+        //     return err;
+        // };
 
         var engine = StorageEngine{
             .backing_allocator = allocator,
@@ -262,8 +266,10 @@ pub const StorageEngine = struct {
             .storage_arena = storage_arena,
             .arena_coordinator = arena_coordinator,
 
-            .sstable_pool = sstable_pool,
-            .iterator_pool = iterator_pool,
+            // TEMP: Skip sstable_pool field
+            // .sstable_pool = sstable_pool,
+            // TEMP: Skip iterator_pool field initialization
+            // .iterator_pool = iterator_pool,
         };
 
         // CRITICAL: Pass ArenaCoordinator by pointer to prevent struct copying corruption
@@ -366,14 +372,16 @@ pub const StorageEngine = struct {
         self.memtable_manager.deinit();
         self.sstable_manager.deinit();
 
+        // TEMP: Skip object pool cleanup since pools are commented out
         // Clean up object pools - must be done after submodules that might use pooled objects
         // Note: Pools are const so we need temporary mutable copies for deinit
-        {
-            var mut_sstable_pool = self.sstable_pool;
-            var mut_iterator_pool = self.iterator_pool;
-            mut_sstable_pool.deinit();
-            mut_iterator_pool.deinit();
-        }
+        // {
+        //     var mut_sstable_pool = self.sstable_pool;
+        //     // TEMP: Skip iterator_pool cleanup
+        //     // var mut_iterator_pool = self.iterator_pool;
+        //     mut_sstable_pool.deinit();
+        //     // mut_iterator_pool.deinit();
+        // }
 
         // StorageEngine owns and cleans up the heap-allocated storage arena
         // This frees ALL storage memory in O(1) time

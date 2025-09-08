@@ -37,6 +37,15 @@ const StorageEngine = storage_mod.StorageEngine;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
+/// Maximum blocks per batch - controls stack-allocated bounded collection capacity.
+///
+/// Stack allocation: ~21KB total (BatchEntry ~64B + ValidatedBlock ~153B) * 100 elements.
+/// Previous value of 10,000 caused ~1.5MB stack allocation and SIGILL crashes.
+///
+/// Increasing this value raises SIGILL risk from stack overflow during struct initialization.
+/// For larger batches, migrate to heap-allocated HashMap/ArrayList with arena coordination.
+pub const BATCH_CAPACITY: u32 = 100;
+
 pub const BatchWriterError = error{
     StorageNotRunning,
     BatchTooLarge,
@@ -115,7 +124,7 @@ pub const BatchConfig = struct {
     timeout_us: u32,
 
     pub const DEFAULT = BatchConfig{
-        .max_batch_size = 10000,
+        .max_batch_size = BATCH_CAPACITY,
         .conflict_resolution = .skip_older_versions,
         .enforce_workspace_isolation = true,
         .timeout_us = 30_000_000, // 30 seconds
@@ -125,7 +134,7 @@ pub const BatchConfig = struct {
     /// Ensures max_batch_size prevents memory exhaustion and timeout prevents hanging.
     pub fn validate(self: @This()) !void {
         fatal_assert(self.max_batch_size > 0, "BatchConfig requires positive max_batch_size", .{});
-        fatal_assert(self.max_batch_size <= 100000, "BatchConfig max_batch_size too large: {}", .{self.max_batch_size});
+        fatal_assert(self.max_batch_size <= BATCH_CAPACITY, "BatchConfig max_batch_size exceeds BATCH_CAPACITY: {}", .{self.max_batch_size});
         fatal_assert(self.timeout_us > 0, "BatchConfig requires positive timeout", .{});
     }
 };
@@ -140,10 +149,10 @@ pub const BatchWriter = struct {
     batch_arena: ArenaAllocator,
 
     /// Deduplication map for current batch
-    dedup_map: bounded_hash_map_type(BlockId, BatchEntry, 10000),
+    dedup_map: bounded_hash_map_type(BlockId, BatchEntry, 100),
 
     /// Staging area for validated blocks ready for commit
-    staging_blocks: bounded_array_type(ValidatedBlock, 10000),
+    staging_blocks: bounded_array_type(ValidatedBlock, 100),
 
     /// Performance metrics for current batch
     current_stats: BatchStatistics,
@@ -195,8 +204,8 @@ pub const BatchWriter = struct {
             .storage_engine = storage_engine,
             .config = config,
             .batch_arena = ArenaAllocator.init(allocator),
-            .dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 10000){},
-            .staging_blocks = bounded_array_type(ValidatedBlock, 10000){},
+            .dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 100){},
+            .staging_blocks = bounded_array_type(ValidatedBlock, 100){},
             .current_stats = BatchStatistics.init(),
             .lifetime_stats = LifetimeStatistics.init(),
         };
@@ -421,8 +430,8 @@ pub const BatchWriter = struct {
         self.batch_arena = ArenaAllocator.init(self.allocator);
 
         // Arena reset is insufficient - bounded collections need explicit reinitialization
-        self.dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 10000){};
-        self.staging_blocks = bounded_array_type(ValidatedBlock, 10000){};
+        self.dedup_map = bounded_hash_map_type(BlockId, BatchEntry, 100){};
+        self.staging_blocks = bounded_array_type(ValidatedBlock, 100){};
 
         // Fresh statistics prevent contamination from previous batch metrics
         self.current_stats = BatchStatistics.init();

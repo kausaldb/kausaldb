@@ -367,7 +367,6 @@ pub fn build(b: *std.Build) void {
     const ci_full_step = b.step("ci-full", "Complete CI pipeline (all tiers)");
     ci_full_step.dependOn(ci_smoke_step);
     ci_full_step.dependOn(ci_perf_step);
-    // Re-enabled: ci_stress_step with improved isolation
     ci_full_step.dependOn(ci_stress_step);
     ci_full_step.dependOn(ci_security_step);
     ci_full_step.dependOn(ci_setup_step);
