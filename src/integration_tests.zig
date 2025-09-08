@@ -30,8 +30,9 @@ comptime {
     _ = @import("tests/fault_injection/server_faults.zig");
     _ = @import("tests/fault_injection/storage_faults.zig");
     _ = @import("tests/fault_injection/traversal_faults.zig");
-    _ = @import("tests/fault_injection/wal_cleanup_faults.zig");
-    _ = @import("tests/fault_injection/wal_durability_faults.zig");
+    // CONSOLIDATED: WAL fault injection moved to wal_streaming_advanced.zig
+    // _ = @import("tests/fault_injection/wal_cleanup_faults.zig");     // → wal_streaming_advanced.zig
+    // _ = @import("tests/fault_injection/wal_durability_faults.zig"); // → wal_streaming_advanced.zig
     _ = @import("tests/golden_masters_test.zig");
     _ = @import("tests/harness.zig");
     _ = @import("tests/ingestion/cross_file_resolution_test.zig");
@@ -50,18 +51,13 @@ comptime {
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/query/traversal_advanced.zig");
     _ = @import("tests/query/traversal_termination.zig");
-    _ = @import("tests/recovery/wal.zig");
+    // CONSOLIDATED: WAL recovery tests consolidated from 11 fragmented files into 3 focused files
+    _ = @import("tests/recovery/wal_core_recovery.zig"); // Basic recovery, operations, segmentation
+    _ = @import("tests/recovery/wal_corruption_scenarios.zig"); // All corruption types and fatal scenarios
+    _ = @import("tests/recovery/wal_streaming_advanced.zig"); // Streaming, memory safety, durability
     // REMOVED: E2E tests provide superior coverage through real binary execution
     // _ = @import("tests/workspace/filtering_test.zig");             // → e2e/workspace_operations.zig + e2e/query_commands.zig
     // _ = @import("tests/workspace/ingestion_deduplication_test.zig"); // → E2E accuracy tests would catch failures
-    _ = @import("tests/recovery/wal_corruption.zig");
-    _ = @import("tests/recovery/wal_corruption_fatal.zig");
-    _ = @import("tests/recovery/wal_entry_stream_recovery.zig");
-    _ = @import("tests/recovery/wal_memory_safety.zig");
-    _ = @import("tests/recovery/wal_operations_recovery.zig");
-    _ = @import("tests/recovery/wal_segment_corruption.zig");
-    _ = @import("tests/recovery/wal_segmentation.zig");
-    _ = @import("tests/recovery/wal_streaming_recovery.zig");
     _ = @import("tests/safety/fatal_safety_violations.zig");
     _ = @import("tests/safety/memory_corruption.zig");
     _ = @import("tests/safety/ownership_safety.zig");
@@ -91,7 +87,8 @@ comptime {
     // _ = @import("tests/scenarios/batch_deduplication.zig");
     _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
     _ = @import("tests/scenarios/missing_edges_traversal.zig");
-    _ = @import("tests/scenarios/torn_wal_recovery.zig");
+    // CONSOLIDATED: Torn WAL recovery moved to wal_corruption_scenarios.zig
+    // _ = @import("tests/scenarios/torn_wal_recovery.zig"); // → wal_corruption_scenarios.zig
     _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 

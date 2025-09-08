@@ -468,6 +468,11 @@ pub const StorageEngine = struct {
 
     /// Transition from initialized to running state with I/O operations.
     pub fn startup(self: *StorageEngine) !void {
+        // Handle restart case: transition from stopped back to initialized
+        if (self.state == .stopped) {
+            self.state.transition(.initialized);
+        }
+
         self.create_storage_directories() catch |err| {
             error_context.log_storage_error(err, error_context.file_context("create_storage_directories", self.data_dir));
             return err;

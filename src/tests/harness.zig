@@ -125,6 +125,11 @@ pub const StorageHarness = struct {
         return &self.vfs_instance;
     }
 
+    /// Get simulation VFS for direct access (e.g., fault injection)
+    pub fn simulation_vfs(self: *Self) *SimulationVFS {
+        return self.sim_vfs;
+    }
+
     /// Phase 1 initialization: memory allocation only, no I/O operations
     pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
         // Use backing allocator consistently - components manage their own arenas
@@ -148,6 +153,22 @@ pub const StorageHarness = struct {
     /// Phase 2 initialization: perform all I/O operations to complete startup
     pub fn startup(self: *Self) !void {
         try self.storage_engine.startup();
+    }
+
+    /// Shutdown storage engine while keeping harness structure intact
+    pub fn shutdown_storage_engine(self: *Self) !void {
+        try self.storage_engine.shutdown();
+    }
+
+    /// Startup storage engine (used after shutdown for restart scenarios)
+    pub fn startup_storage_engine(self: *Self) !void {
+        try self.storage_engine.startup();
+    }
+
+    /// Restart storage engine (shutdown followed by startup)
+    pub fn restart_storage_engine(self: *Self) !void {
+        try self.shutdown_storage_engine();
+        try self.startup_storage_engine();
     }
 
     /// Clean up all harness resources

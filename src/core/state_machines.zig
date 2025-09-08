@@ -172,7 +172,7 @@ pub const StorageState = enum {
             .compacting => next == .running or next == .stopping,
             .flushing => next == .running or next == .stopping,
             .stopping => next == .stopped,
-            .stopped => false, // Terminal state
+            .stopped => next == .initialized, // Allow restart from stopped state
         };
     }
 
