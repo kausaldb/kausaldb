@@ -17,13 +17,11 @@ pub const std_options = .{
 comptime {
     _ = @import("tests/cli/command_interface.zig");
     _ = @import("tests/debug/arraylist_corruption.zig");
-    // RECLASSIFIED: Unit tests moved to src/core/*_test.zig files
-    // Remaining integration tests that require storage engine/simulation:
-    _ = @import("tests/defensive/assertion_validation.zig"); // Integration tests only
-    _ = @import("tests/defensive/corruption_injection.zig"); // Integration tests only
-    _ = @import("tests/defensive/fatal_assertion_demo.zig"); // Integration tests only
-    _ = @import("tests/defensive/fatal_assertion_validation.zig"); // Integration tests only
-    _ = @import("tests/defensive/performance_impact.zig"); // Integration tests only
+    _ = @import("tests/defensive/assertion_validation.zig");
+    _ = @import("tests/defensive/corruption_injection.zig");
+    _ = @import("tests/defensive/fatal_assertion_demo.zig");
+    _ = @import("tests/defensive/fatal_assertion_validation.zig");
+    _ = @import("tests/defensive/performance_impact.zig");
     _ = @import("tests/fault_injection/compaction_crashes.zig");
     _ = @import("tests/fault_injection/deserialization_faults.zig");
     _ = @import("tests/fault_injection/ingestion_faults.zig");
@@ -32,9 +30,6 @@ comptime {
     _ = @import("tests/fault_injection/server_faults.zig");
     _ = @import("tests/fault_injection/storage_faults.zig");
     _ = @import("tests/fault_injection/traversal_faults.zig");
-    // CONSOLIDATED: WAL fault injection moved to wal_streaming_advanced.zig
-    // _ = @import("tests/fault_injection/wal_cleanup_faults.zig");     // → wal_streaming_advanced.zig
-    // _ = @import("tests/fault_injection/wal_durability_faults.zig"); // → wal_streaming_advanced.zig
     _ = @import("tests/golden_masters_test.zig");
     _ = @import("tests/harness.zig");
     _ = @import("tests/ingestion/cross_file_resolution_test.zig");
@@ -47,19 +42,12 @@ comptime {
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
     _ = @import("tests/query/algorithms_edge_cases.zig");
     _ = @import("tests/query/complex_workloads.zig");
-    // REMOVED: E2E tests provide superior coverage through real binary execution
-    // _ = @import("tests/query/find_by_name_accuracy_test.zig");          // → e2e/find_function_accuracy_test.zig
-    // _ = @import("tests/query/storage_iterator_deduplication_test.zig"); // → e2e accuracy tests catch duplicates
     _ = @import("tests/query/streaming_optimizations.zig");
     _ = @import("tests/query/traversal_advanced.zig");
     _ = @import("tests/query/traversal_termination.zig");
-    // CONSOLIDATED: WAL recovery tests consolidated from 11 fragmented files into 3 focused files
-    _ = @import("tests/recovery/wal_core_recovery.zig"); // Basic recovery, operations, segmentation
-    _ = @import("tests/recovery/wal_corruption_scenarios.zig"); // All corruption types and fatal scenarios
-    _ = @import("tests/recovery/wal_streaming_advanced.zig"); // Streaming, memory safety, durability
-    // REMOVED: E2E tests provide superior coverage through real binary execution
-    // _ = @import("tests/workspace/filtering_test.zig");             // → e2e/workspace_operations.zig + e2e/query_commands.zig
-    // _ = @import("tests/workspace/ingestion_deduplication_test.zig"); // → E2E accuracy tests would catch failures
+    _ = @import("tests/recovery/wal_core_recovery.zig");
+    _ = @import("tests/recovery/wal_corruption_scenarios.zig");
+    _ = @import("tests/recovery/wal_streaming_advanced.zig");
     _ = @import("tests/safety/fatal_safety_violations.zig");
     _ = @import("tests/safety/memory_corruption.zig");
     _ = @import("tests/safety/ownership_safety.zig");
@@ -85,12 +73,8 @@ comptime {
     _ = @import("tests/stress/memory_pressure.zig");
     _ = @import("tests/stress/storage_load.zig");
     _ = @import("tests/vfs/vfs_integration.zig");
-    // TEMPORARILY DISABLED: Signal 4 crash during refactor - will re-enable after investigation
-    // _ = @import("tests/scenarios/batch_deduplication.zig");
     _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
     _ = @import("tests/scenarios/missing_edges_traversal.zig");
-    // CONSOLIDATED: Torn WAL recovery moved to wal_corruption_scenarios.zig
-    // _ = @import("tests/scenarios/torn_wal_recovery.zig"); // → wal_corruption_scenarios.zig
     _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 
@@ -108,10 +92,7 @@ test "integration test discovery - informational scan for new test files" {
         std.testing.allocator.free(expected_files);
     }
 
-    // Files that are intentionally excluded because they're covered by centralized frameworks
-    const excluded_files = &[_][]const u8{
-        "tests/storage/mock_vfs_helper.zig", // Removed: redundant with SimulationHarness
-    };
+    const excluded_files = &[_][]const u8{};
 
     const is_valid = git_discovery.validate_imports_with_exclusions(std.testing.allocator, "src/integration_tests.zig", expected_files, excluded_files) catch |err| {
         std.debug.print("Import validation failed ({}), skipping\n", .{err});

@@ -27,7 +27,7 @@ comptime {
     _ = @import("e2e/core_commands.zig");
     _ = @import("e2e/workspace_operations.zig");
 
-    // Query functionality (placeholder until implementation complete)
+    // Query functionality
     _ = @import("e2e/query_commands.zig");
 
     // Find function accuracy tests
@@ -36,7 +36,7 @@ comptime {
     // Shell integration scenarios
     _ = @import("e2e/shell_scenarios.zig");
 
-    // Comprehensive CLI testing coverage for robustness validation
+    // CLI testing coverage for robustness validation
     _ = @import("e2e/cli_flag_validation.zig");
     _ = @import("e2e/relationship_commands_safety.zig");
     _ = @import("e2e/entity_type_validation.zig");

@@ -41,7 +41,6 @@ comptime {
     // Dev modules
     _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
-    // _ = @import("dev/fuzz/common.zig"); // Excluded to avoid module conflicts - fuzz tests run separately
     _ = @import("dev/git_test_discovery.zig");
     _ = @import("dev/shell.zig");
     _ = @import("dev/tidy.zig");
