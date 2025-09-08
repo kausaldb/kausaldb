@@ -497,8 +497,16 @@ test "ProductionVFS global filesystem sync" {
     defer prod_vfs.deinit();
     const vfs_interface = prod_vfs.vfs();
 
-    const test_path = "/tmp/kausaldb_sync_test_file";
+    // Create unique test file path to avoid conflicts between test runs
+    const timestamp = std.time.milliTimestamp();
+    const random_id = std.crypto.random.int(u32);
+    const test_path = try std.fmt.allocPrint(allocator, "/tmp/kausaldb_sync_test_{}_{}", .{ timestamp, random_id });
+    defer allocator.free(test_path);
+
     const test_data = "Sync test data";
+
+    // Clean up any existing file (defensive)
+    vfs_interface.remove(test_path) catch {};
 
     {
         var test_file = try vfs_interface.create(test_path);
