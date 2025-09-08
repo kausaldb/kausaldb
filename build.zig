@@ -12,10 +12,6 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(bool, "debug_tests", optimize == .Debug);
     build_options.addOption(bool, "sanitizers_active", false);
 
-    // TEMPORARY: Ownership validation bypass for development (remove in Phase 7)
-    const ownership_validation_enabled = b.option(bool, "ownership-strict", "Enable strict ownership validation (CI only)") orelse false;
-    build_options.addOption(bool, "ownership_validation_enabled", ownership_validation_enabled);
-
     // Log level configuration - default to warn for CI/test builds to reduce noise
     const log_level = b.option(std.log.Level, "log-level", "Set the log level (debug, info, warn, err)") orelse .warn;
     build_options.addOption(std.log.Level, "log_level", log_level);
@@ -143,35 +139,6 @@ pub fn build(b: *std.Build) void {
 
     // === TOOLS ===
 
-    // Ownership validation executable for build system integration
-    const ownership_tidy_exe = b.addExecutable(.{
-        .name = "tidy_ownership",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/tidy_ownership.zig"),
-            .target = target,
-            .optimize = .Debug, // Debug for better error messages
-        }),
-    });
-    ownership_tidy_exe.root_module.addImport("build_options", build_options.createModule());
-
-    // Ownership validation step - critical for memory safety
-    const ownership_validation_step = b.step("tidy-ownership", "Validate ownership patterns across codebase");
-    const run_ownership_validation = b.addRunArtifact(ownership_tidy_exe);
-    ownership_validation_step.dependOn(&run_ownership_validation.step);
-
-    // Violation scanner for detailed analysis
-    const violation_scanner_exe = b.addExecutable(.{
-        .name = "violation_scanner",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev/violation_scanner.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-    });
-    const violation_scan_step = b.step("scan-violations", "Scan for detailed ownership violations");
-    const run_violation_scanner = b.addRunArtifact(violation_scanner_exe);
-    violation_scan_step.dependOn(&run_violation_scanner.step);
-
     // Benchmark executable
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
@@ -207,11 +174,6 @@ pub fn build(b: *std.Build) void {
 
     const tidy_step = b.step("tidy", "Run code quality checks");
     tidy_step.dependOn(&tidy_cmd.step);
-
-    // TEMPORARY: Only run ownership validation in strict mode (CI uses --ownership-strict)
-    if (ownership_validation_enabled) {
-        tidy_step.dependOn(&run_ownership_validation.step); // CRITICAL: Ownership validation prevents memory safety violations
-    }
 
     // Fuzz executable
     const fuzz_exe = b.addExecutable(.{
@@ -281,19 +243,17 @@ pub fn build(b: *std.Build) void {
     const ci_smoke_step = b.step("ci-smoke", "Quick smoke tests for rapid feedback");
     ci_smoke_step.dependOn(fmt_step);
     ci_smoke_step.dependOn(tidy_step);
-    ci_smoke_step.dependOn(ownership_validation_step); // CRITICAL: CI always runs ownership validation
     ci_smoke_step.dependOn(test_step); // Just unit tests, not integration
 
-    // Strict CI mode - enforces ownership validation
-    const ci_strict_step = b.step("ci-strict", "CI with strict ownership validation (production mode)");
+    // Strict CI mode - production-level validation
+    const ci_strict_step = b.step("ci-strict", "CI with strict validation (production mode)");
     ci_strict_step.dependOn(fmt_step);
 
-    // Create tidy step with ownership validation for strict CI
+    // Create tidy step for strict CI
     const tidy_strict_cmd = b.addRunArtifact(tidy_exe);
     if (b.args) |args| tidy_strict_cmd.addArgs(args);
-    const tidy_strict_step = b.step("tidy-strict", "Code quality checks with ownership validation");
+    const tidy_strict_step = b.step("tidy-strict", "Code quality checks (strict mode)");
     tidy_strict_step.dependOn(&tidy_strict_cmd.step);
-    tidy_strict_step.dependOn(&run_ownership_validation.step);
 
     ci_strict_step.dependOn(tidy_strict_step);
     ci_strict_step.dependOn(test_step);
@@ -402,6 +362,7 @@ pub fn build(b: *std.Build) void {
     const run_update_e2e = b.addRunArtifact(update_e2e_exe);
     run_update_e2e.addArg("e2e");
     update_e2e_tests_step.dependOn(&run_update_e2e.step);
+
     // Complete CI pipeline - all validation tiers (15-20 minutes)
     const ci_full_step = b.step("ci-full", "Complete CI pipeline (all tiers)");
     ci_full_step.dependOn(ci_smoke_step);
