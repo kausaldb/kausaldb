@@ -125,8 +125,8 @@ pub const WorkspaceIsolationHarness = struct {
 
         std.debug.print("[DEBUG] Cleaning up workspace data\n", .{});
         // Cleanup workspace data
-        for (self.workspaces.slice_mut()) |*workspace| {
-            for (workspace.blocks.slice_mut()) |*block| {
+        for (self.workspaces.slice()) |workspace| {
+            for (workspace.blocks.slice()) |block| {
                 self.allocator.free(block.content);
                 self.allocator.free(block.metadata_json);
                 self.allocator.free(block.source_uri);

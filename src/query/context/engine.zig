@@ -507,20 +507,47 @@ test "QueryExecutionContext timeout checking" {
 }
 
 test "ResolvedAnchor bounded collections" {
+    // This test validates bounded array behavior for ResolvedAnchor
+    // It's a pure unit test but may run in integration test environment with fault injection
+
+    // Test 1: Basic bounded array operations (no allocations)
+    var block_storage = bounded_array_type(BlockId, 16){};
+    try testing.expectEqual(@as(usize, 0), block_storage.len);
+    try testing.expect(block_storage.is_empty());
+
+    // Test 2: BlockId creation and storage (stack only)
+    const test_bytes = [_]u8{1} ** 16;
+    const test_block_id = BlockId.from_bytes(test_bytes);
+    try block_storage.append(test_block_id);
+    try testing.expectEqual(@as(usize, 1), block_storage.len);
+
+    // Test 3: ResolvedAnchor struct operations (no heap, no VFS)
+    const anchor_bytes = [_]u8{0} ** 16;
     var resolved = ContextEngine.ResolvedAnchor{
-        .original = QueryAnchor{ .block_id = BlockId.from_bytes([_]u8{0} ** 16) },
+        .original = QueryAnchor{ .block_id = BlockId.from_bytes(anchor_bytes) },
         .resolved_blocks = bounded_array_type(BlockId, 16){},
-        .resolution_time_us = 0,
+        .resolution_time_us = 100,
     };
 
-    // Test bounded capacity
-    var i: u8 = 0;
+    // Test 4: Validate ResolvedAnchor properties
+    try testing.expectEqual(@as(u32, 100), resolved.resolution_time_us);
+    try testing.expectEqual(@as(usize, 0), resolved.resolved_blocks.len);
+
+    // Test 5: Add block to resolved anchor's bounded collection
+    try resolved.resolved_blocks.append(test_block_id);
+    try testing.expectEqual(@as(usize, 1), resolved.resolved_blocks.len);
+
+    // Test 6: Verify bounded capacity (fill remaining slots)
+    var i: u8 = 1;
     while (i < 16) : (i += 1) {
-        const block_id = BlockId.from_bytes([_]u8{i} ** 16);
+        const block_bytes = [_]u8{i} ** 16;
+        const block_id = BlockId.from_bytes(block_bytes);
         try resolved.resolved_blocks.append(block_id);
     }
+    try testing.expectEqual(@as(usize, 16), resolved.resolved_blocks.len);
 
-    // Adding 17th block should fail
-    const overflow_block = BlockId.from_bytes([_]u8{17} ** 16);
+    // Test 7: Verify overflow protection
+    const overflow_bytes = [_]u8{99} ** 16;
+    const overflow_block = BlockId.from_bytes(overflow_bytes);
     try testing.expectError(error.Overflow, resolved.resolved_blocks.append(overflow_block));
 }

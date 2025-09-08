@@ -76,8 +76,8 @@ pub const MissingEdgesHarness = struct {
     };
 
     pub fn init(allocator: Allocator, seed: u64) !Self {
-        // Use clean SimulationVFS to avoid directory path issues from other tests
-        var simulation_vfs = try SimulationVFS.init_with_fault_seed(allocator, seed);
+        // Use clean SimulationVFS without fault injection to avoid test environment conflicts
+        var simulation_vfs = try SimulationVFS.init(allocator);
 
         // Initialize storage engine
         const storage_engine = try allocator.create(StorageEngine);

@@ -421,13 +421,23 @@ pub fn execute_batch_deduplication_scenario(allocator: Allocator, seed: u64) !Te
 //
 
 test "batch deduplication scenario - basic functionality" {
-    // Temporarily skip this test to isolate the SIGILL crash
+    // Skip this test temporarily due to SIGILL crash - needs deeper investigation
+    // The crash appears to be in the underlying VFS or memory management
+    std.debug.print("Batch deduplication test temporarily skipped due to SIGILL crash\n", .{});
     return error.SkipZigTest;
 }
 
 test "batch deduplication harness initialization" {
-    // Temporarily skip this test to isolate the SIGILL crash
-    return error.SkipZigTest;
+    // Re-enabled: test just the harness initialization to isolate SIGILL
+    var harness = BatchDeduplicationHarness.init(testing.allocator, 55555) catch |err| {
+        std.debug.print("Harness initialization failed: {}\n", .{err});
+        return err;
+    };
+    defer harness.deinit();
+
+    // Basic validation that harness is properly initialized
+    try testing.expect(harness.allocator.ptr == testing.allocator.ptr);
+    try testing.expect(harness.test_batches.is_empty()); // Should start with no test batches
 }
 
 test "deterministic block ID generation for deduplication" {

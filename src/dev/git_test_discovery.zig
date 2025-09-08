@@ -204,7 +204,16 @@ test "git test discovery basic functionality" {
     // Test that we can run git commands (may be empty but shouldn't fail)
     const unit_files = find_unit_test_files(allocator) catch |err| {
         if (err == error.FileNotFound) {
-            // Git not available, skip test
+            // Git not available - validate that we can at least handle this gracefully
+            std.debug.print("Git not available, validating graceful handling\n", .{});
+
+            // Test should still validate error handling paths work correctly
+            const empty_files: [][]const u8 = &.{};
+            const validation_result = validate_imports_with_exclusions(allocator, "test", empty_files, &.{}) catch |validation_err| {
+                // This should succeed even without Git
+                return validation_err;
+            };
+            try std.testing.expect(validation_result); // Empty validation should pass
             return;
         }
         return err;
