@@ -73,17 +73,17 @@ comptime {
     _ = @import("tests/stress/memory_pressure.zig");
     _ = @import("tests/stress/storage_load.zig");
     _ = @import("tests/vfs/vfs_integration.zig");
-    _ = @import("tests/scenarios/batch_deduplication.zig"); // Re-enabled for debugging SIGILL
+    _ = @import("tests/scenarios/batch_deduplication.zig");
     _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
     _ = @import("tests/scenarios/missing_edges_traversal.zig");
     _ = @import("tests/scenarios/workspace_isolation.zig");
 }
 
-test "integration test discovery - informational scan for new test files" {
-    const git_discovery = @import("dev/git_test_discovery.zig");
+test "integration test discovery validation" {
+    const test_discovery = @import("dev/test_discovery.zig");
 
-    const expected_files = git_discovery.find_integration_test_files(std.testing.allocator) catch |err| {
-        std.debug.print("Git discovery failed ({}), skipping scan\n", .{err});
+    const expected_files = test_discovery.find_integration_test_files(std.testing.allocator) catch |err| {
+        std.debug.print("Git discovery failed ({}), skipping validation\n", .{err});
         return;
     };
     defer {
@@ -93,20 +93,12 @@ test "integration test discovery - informational scan for new test files" {
         std.testing.allocator.free(expected_files);
     }
 
-    const excluded_files = &[_][]const u8{};
-
-    const is_valid = git_discovery.validate_imports_with_exclusions(std.testing.allocator, "src/integration_tests.zig", expected_files, excluded_files) catch |err| {
-        std.debug.print("Import validation failed ({}), skipping\n", .{err});
+    const is_valid = test_discovery.validate_imports(std.testing.allocator, "src/integration_tests.zig", expected_files) catch |err| {
+        std.debug.print("Import validation failed ({})\n", .{err});
         return;
     };
 
     if (!is_valid) {
-        std.debug.print("\n[INFO] New integration test files detected (may need manual review):\n", .{});
-        for (expected_files) |file| {
-            std.debug.print("  Candidate: {s}\n", .{file});
-        }
-        std.debug.print("Review files for compilation errors before adding to integration_tests.zig\n", .{});
-    } else {
-        std.debug.print("Integration test discovery: {d} files validated\n", .{expected_files.len});
+        std.debug.print("Integration test files missing imports - check src/integration_tests.zig\n", .{});
     }
 }
