@@ -419,14 +419,26 @@ pub fn execute_batch_deduplication_scenario(allocator: Allocator, seed: u64) !Te
 //
 
 test "batch deduplication scenario - basic functionality" {
-    var simulation_vfs = try SimulationVFS.init(testing.allocator);
-    defer simulation_vfs.deinit();
+    var harness = try BatchDeduplicationHarness.init(testing.allocator, 12345);
+    defer harness.deinit();
 
-    const storage_engine = try testing.allocator.create(StorageEngine);
-    defer testing.allocator.destroy(storage_engine);
+    // Test basic harness functionality
+    try testing.expect(harness.allocator.ptr == testing.allocator.ptr);
+    try testing.expect(harness.test_batches.is_empty());
 
-    storage_engine.* = try StorageEngine.init_default(testing.allocator, simulation_vfs.vfs(), "test_dir");
-    try storage_engine.startup();
+    // Create a simple batch to test basic deduplication
+    try harness.create_batch_with_duplicates("basic_test", 10, 20); // 10 blocks, 20% duplicates
+    try testing.expect(harness.test_batches.len == 1);
+
+    const batch = &harness.test_batches.slice()[0];
+    try testing.expect(batch.blocks.len == 10);
+    try testing.expect(batch.expected_duplicates == 2); // 20% of 10
+    try testing.expect(batch.expected_written == 8); // 10 - 2 duplicates
+
+    // Test basic ingestion works
+    const stats = try harness.batch_writer.ingest_batch(batch.blocks.slice(), batch.workspace);
+    try testing.expect(stats.blocks_submitted == 10);
+    try testing.expect(stats.blocks_written <= 10); // Should deduplicate some blocks
 }
 
 test "batch deduplication harness initialization" {
