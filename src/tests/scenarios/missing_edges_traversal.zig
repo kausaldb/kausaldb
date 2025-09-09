@@ -19,6 +19,7 @@ const builtin = @import("builtin");
 const assert_mod = @import("../../core/assert.zig");
 const bounded_mod = @import("../../core/bounded.zig");
 const context_query_mod = @import("../../query/context_query.zig");
+const harness_mod = @import("../harness.zig");
 const hostile_vfs_mod = @import("../../sim/hostile_vfs.zig");
 const simulation_vfs_mod = @import("../../sim/simulation_vfs.zig");
 const memory_mod = @import("../../core/memory.zig");
@@ -29,15 +30,12 @@ const types = @import("../../core/types.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const BoundedArrayType = bounded_mod.BoundedArrayType;
 
+const BoundedArrayType = bounded_mod.BoundedArrayType;
 const ContextQuery = context_query_mod.ContextQuery;
-const ContextResult = context_query_mod.ContextResult;
 const QueryAnchor = context_query_mod.QueryAnchor;
 const TraversalRule = context_query_mod.TraversalRule;
-const HostileVFS = hostile_vfs_mod.HostileVFS;
-const SimulationVFS = simulation_vfs_mod.SimulationVFS;
-const StorageEngine = storage_mod.StorageEngine;
+const StorageHarness = harness_mod.StorageHarness;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -50,8 +48,7 @@ const testing = std.testing;
 /// Test harness for missing edges traversal scenarios
 pub const MissingEdgesHarness = struct {
     allocator: Allocator,
-    simulation_vfs: SimulationVFS,
-    storage_engine: *StorageEngine,
+    storage_harness: StorageHarness,
 
     /// Complete graph structure (with all edges)
     complete_graph: GraphStructure,
@@ -76,24 +73,16 @@ pub const MissingEdgesHarness = struct {
     };
 
     pub fn init(allocator: Allocator, seed: u64) !Self {
-        // Use clean SimulationVFS without fault injection to avoid test environment conflicts
-        var simulation_vfs = try SimulationVFS.init(allocator);
-
-        // Initialize storage engine
-        const storage_engine = try allocator.create(StorageEngine);
-        errdefer allocator.destroy(storage_engine);
-
-        // Create unique workspace name to avoid directory conflicts with other tests
+        // Use proper test harness for cross-platform compatibility
         const unique_workspace = try std.fmt.allocPrint(allocator, "missing_edges_test_{}", .{seed});
         defer allocator.free(unique_workspace);
 
-        storage_engine.* = try StorageEngine.init_default(allocator, simulation_vfs.vfs(), unique_workspace);
-        try storage_engine.startup();
+        var storage_harness = try StorageHarness.init(allocator, unique_workspace);
+        try storage_harness.startup();
 
         return Self{
             .allocator = allocator,
-            .simulation_vfs = simulation_vfs,
-            .storage_engine = storage_engine,
+            .storage_harness = storage_harness,
             .complete_graph = GraphStructure.init(),
             .incomplete_graph = GraphStructure.init(),
             .traversal_seed = seed,
@@ -114,18 +103,8 @@ pub const MissingEdgesHarness = struct {
             self.allocator.free(node.source_uri);
         }
 
-        // Ensure all pending WAL operations are completed before shutdown
-        self.storage_engine.flush_wal() catch {};
-
-        // Ensure proper shutdown order to prevent VFS arena leaks
-        self.storage_engine.shutdown() catch {
-            // Storage engine shutdown errors are non-critical during test cleanup
-        };
-        self.storage_engine.deinit();
-        self.allocator.destroy(self.storage_engine);
-
-        // VFS deinit must come after storage engine is fully cleaned up
-        self.simulation_vfs.deinit();
+        // Use proper harness cleanup for cross-platform compatibility
+        self.storage_harness.deinit();
     }
 
     /// Create intentionally incomplete graph structure
@@ -144,10 +123,6 @@ pub const MissingEdgesHarness = struct {
 
     /// Test Context Engine traversal with missing edges
     pub fn test_traversal_with_missing_edges(self: *Self, workspace: []const u8) !TestResult {
-        // Hostile scenario disabled for clean testing - using SimulationVFS instead
-        // In the future, we should implement proper test isolation for HostileVFS
-
-        // Create traversal query that should encounter missing edges
         var query = ContextQuery.create_for_workspace(workspace);
 
         const anchor = QueryAnchor{ .entity_name = .{
@@ -295,7 +270,7 @@ pub const MissingEdgesHarness = struct {
         // Store incomplete graph (the one that will be queried)
         for (self.incomplete_graph.nodes.slice()) |node| {
             // Convert ContextBlock to storage using proper ownership
-            try self.storage_engine.put_block(node);
+            try self.storage_harness.storage_engine.put_block(node);
         }
 
         // Store edges - edges are typically stored as metadata or separate entries

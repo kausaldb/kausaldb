@@ -19,10 +19,7 @@ const assert_mod = @import("../../core/assert.zig");
 const bounded_mod = @import("../../core/bounded.zig");
 const context_query_mod = @import("../../query/context_query.zig");
 const context_engine_mod = @import("../../query/context/engine.zig");
-const hostile_vfs_mod = @import("../../sim/hostile_vfs.zig");
-const simulation_vfs_mod = @import("../../sim/simulation_vfs.zig");
-const simulation_mod = @import("../../sim/simulation.zig");
-const storage_mod = @import("../../storage/engine.zig");
+const harness_mod = @import("../harness.zig");
 const query_mod = @import("../../query/engine.zig");
 const types = @import("../../core/types.zig");
 
@@ -35,10 +32,7 @@ const ContextResult = context_query_mod.ContextResult;
 const QueryAnchor = context_query_mod.QueryAnchor;
 const TraversalRule = context_query_mod.TraversalRule;
 const ContextEngine = context_engine_mod.ContextEngine;
-const HostileVFS = hostile_vfs_mod.HostileVFS;
-const SimulationVFS = simulation_vfs_mod.SimulationVFS;
-const StorageEngine = storage_mod.StorageEngine;
-const QueryEngine = query_mod.QueryEngine;
+const QueryHarness = harness_mod.QueryHarness;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -50,12 +44,8 @@ const testing = std.testing;
 /// Test harness for workspace isolation scenarios
 pub const WorkspaceIsolationHarness = struct {
     allocator: Allocator,
-    simulation_vfs: SimulationVFS,
-    storage_engine: *StorageEngine,
-    query_engine: *QueryEngine,
+    query_harness: QueryHarness,
     context_engine: *ContextEngine,
-
-    /// Test workspaces with known content
     workspaces: BoundedArrayType(TestWorkspace, 8),
 
     const TestWorkspace = struct {
@@ -65,66 +55,29 @@ pub const WorkspaceIsolationHarness = struct {
     };
 
     pub fn init(allocator: Allocator, seed: u64) !WorkspaceIsolationHarness {
-        // Use clean SimulationVFS to isolate the enum validation issue
-        var simulation_vfs = try SimulationVFS.init_with_fault_seed(allocator, seed);
-
-        // Initialize storage engine with simulation VFS
-        const storage_engine = try allocator.create(StorageEngine);
-        errdefer allocator.destroy(storage_engine);
-
-        // Create unique workspace name to avoid directory conflicts with other tests
         const unique_workspace = try std.fmt.allocPrint(allocator, "workspace_isolation_test_{}", .{seed});
         defer allocator.free(unique_workspace);
 
-        storage_engine.* = try StorageEngine.init_default(allocator, simulation_vfs.vfs(), unique_workspace);
-        try storage_engine.startup();
+        var query_harness = try QueryHarness.init(allocator, unique_workspace);
+        try query_harness.startup();
 
-        // Initialize query engine
-        const query_engine = try allocator.create(QueryEngine);
-        errdefer allocator.destroy(query_engine);
-
-        query_engine.* = QueryEngine.init(allocator, storage_engine);
-        query_engine.startup();
-
-        // Initialize context engine
         const context_engine = try allocator.create(ContextEngine);
         errdefer allocator.destroy(context_engine);
 
-        context_engine.* = ContextEngine.init(allocator, storage_engine, query_engine);
+        context_engine.* = ContextEngine.init(allocator, query_harness.storage(), query_harness.query_engine);
 
         return WorkspaceIsolationHarness{
             .allocator = allocator,
-            .simulation_vfs = simulation_vfs,
-            .storage_engine = storage_engine,
-            .query_engine = query_engine,
+            .query_harness = query_harness,
             .context_engine = context_engine,
             .workspaces = BoundedArrayType(TestWorkspace, 8){},
         };
     }
 
     pub fn deinit(self: *WorkspaceIsolationHarness) void {
-        std.debug.print("[DEBUG] Starting deinit\n", .{});
-
-        // Shutdown in reverse dependency order: context -> query -> storage
-        std.debug.print("[DEBUG] Deiniting context engine\n", .{});
         self.context_engine.deinit();
         self.allocator.destroy(self.context_engine);
 
-        std.debug.print("[DEBUG] Shutting down query engine\n", .{});
-        self.query_engine.shutdown();
-        self.query_engine.deinit();
-        self.allocator.destroy(self.query_engine);
-
-        std.debug.print("[DEBUG] Shutting down storage engine\n", .{});
-        self.storage_engine.shutdown() catch {};
-        self.storage_engine.deinit();
-        self.allocator.destroy(self.storage_engine);
-
-        std.debug.print("[DEBUG] Deiniting simulation VFS\n", .{});
-        self.simulation_vfs.deinit();
-
-        std.debug.print("[DEBUG] Cleaning up workspace data\n", .{});
-        // Cleanup workspace data
         for (self.workspaces.slice()) |workspace| {
             for (workspace.blocks.slice()) |block| {
                 self.allocator.free(block.content);
@@ -132,7 +85,8 @@ pub const WorkspaceIsolationHarness = struct {
                 self.allocator.free(block.source_uri);
             }
         }
-        std.debug.print("[DEBUG] Deinit completed successfully\n", .{});
+
+        self.query_harness.deinit();
     }
 
     /// Create test workspace with identical content in different workspaces
@@ -175,7 +129,7 @@ pub const WorkspaceIsolationHarness = struct {
             try workspace.blocks.append(block);
 
             // Write to storage
-            try self.storage_engine.put_block(block);
+            try self.query_harness.storage().put_block(block);
         }
 
         try self.workspaces.append(workspace);

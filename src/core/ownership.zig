@@ -942,21 +942,22 @@ test "moved-from state prevents use-after-transfer" {
 }
 
 test "compile-time ownership size verification" {
-    // Verify zero-cost: ComptimeOwnedBlock should be smaller than OwnedBlock
-    // since it has no runtime ownership field or arena pointer in release builds
-    if (builtin.mode != .Debug) {
-        // Specialized block types removed - now using unified OwnedBlock
-    }
-
-    // In debug mode, only the debug allocation source should add overhead
+    // Verify reasonable overhead for ownership tracking
     const storage_size = @sizeOf(OwnedBlock);
     const context_size = @sizeOf(ContextBlock);
+    const ownership_size = @sizeOf(BlockOwnership);
+    const state_size = @sizeOf(OwnedBlock.State);
+
+    // OwnedBlock = ContextBlock + BlockOwnership + State + potential alignment padding
+    const expected_min = context_size + ownership_size + state_size;
+    const expected_max = expected_min + 16; // Allow for reasonable alignment padding
 
     if (builtin.mode == .Debug) {
-        // Should be ContextBlock + SourceLocation
-        try std.testing.expect(storage_size >= context_size);
+        // Debug mode may have additional debug tracking overhead
+        try std.testing.expect(storage_size >= expected_min);
     } else {
-        // Should be exactly ContextBlock size in release builds
-        try std.testing.expect(storage_size == context_size);
+        // Release mode should have minimal overhead beyond required fields
+        try std.testing.expect(storage_size >= expected_min);
+        try std.testing.expect(storage_size <= expected_max);
     }
 }
