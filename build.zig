@@ -127,6 +127,12 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(test_fast_step);
     test_all_step.dependOn(e2e_step);
 
+    const unit_only_step = b.step("test-unit-only", "Run only unit tests (fast)");
+    unit_only_step.dependOn(test_step);
+
+    const integration_only_step = b.step("test-integration-only", "Run only integration tests");
+    integration_only_step.dependOn(integration_step);
+
     const benchmark_exe = create_tool_executable(b, "benchmark", "src/dev/benchmark.zig", options, .ReleaseFast);
     benchmark_exe.root_module.addImport("internal", internal_module);
     b.installArtifact(benchmark_exe);
@@ -185,12 +191,56 @@ pub fn build(b: *std.Build) void {
     ci_smoke_step.dependOn(test_step);
 
     const ci_perf_step = b.step("ci-perf", "Performance regression validation");
-    ci_perf_step.dependOn(benchmark_step);
+    const ci_perf_cmd = b.addRunArtifact(benchmark_exe);
+    ci_perf_cmd.addArg("all"); // Run all benchmarks for CI validation
+    ci_perf_step.dependOn(&ci_perf_cmd.step);
 
     const ci_full_step = b.step("ci-full", "Complete CI pipeline");
     ci_full_step.dependOn(ci_smoke_step);
     ci_full_step.dependOn(ci_perf_step);
     ci_full_step.dependOn(test_all_step);
+
+    const ci_stress_step = b.step("ci-stress", "Stress testing with extended scenarios");
+    const stress_test_exe = create_tool_executable(
+        b,
+        "ci-stress",
+        "src/dev/ci/stress_runner.zig",
+        options,
+        options.optimize,
+    );
+    const run_stress_test = b.addRunArtifact(stress_test_exe);
+    if (b.args) |args| run_stress_test.addArgs(args);
+    ci_stress_step.dependOn(&run_stress_test.step);
+
+    const ci_security_step = b.step("ci-security", "Security analysis and memory safety checks");
+    ci_security_step.dependOn(tidy_step);
+    const security_scan_exe = create_tool_executable(
+        b,
+        "ci-security",
+        "src/dev/ci/security_scanner.zig",
+        options,
+        options.optimize,
+    );
+    const run_security_scan = b.addRunArtifact(security_scan_exe);
+    if (b.args) |args| run_security_scan.addArgs(args);
+    ci_security_step.dependOn(&run_security_scan.step);
+
+    const ci_matrix_step = b.step("ci-matrix", "Cross-platform matrix testing");
+    ci_matrix_step.dependOn(fmt_step);
+    ci_matrix_step.dependOn(tidy_step);
+    ci_matrix_step.dependOn(test_all_step);
+
+    const ci_setup_step = b.step("ci-setup", "Development environment setup");
+    const setup_exe = create_tool_executable(
+        b,
+        "ci-setup",
+        "src/dev/ci/setup_runner.zig",
+        options,
+        options.optimize,
+    );
+    const run_setup = b.addRunArtifact(setup_exe);
+    if (b.args) |args| run_setup.addArgs(args);
+    ci_setup_step.dependOn(&run_setup.step);
 
     const hooks_install_step = b.step("hooks-install", "Install git hooks");
     const hooks_install_cmd = b.addSystemCommand(
