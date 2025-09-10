@@ -192,13 +192,6 @@ pub const StorageEngine = struct {
         return init(allocator, filesystem, data_dir, Config{});
     }
 
-    /// Get arena coordinator interface for stable allocation access.
-    /// Coordinator remains valid even after arena reset operations.
-    /// Used by submodules for safe memory allocation patterns.
-    pub fn coordinator(self: *const StorageEngine) *ArenaCoordinator {
-        return self.arena_coordinator;
-    }
-
     /// Phase 1 initialization: Create storage engine with Arena Coordinator Pattern.
     /// Creates stable arena coordinator interface that eliminates arena corruption.
     /// Coordinator remains valid even when struct is copied, fixing segmentation faults.
@@ -314,7 +307,7 @@ pub const StorageEngine = struct {
 
         // Only attempt flush operations if engine is in a running state
         if (self.state.can_write()) {
-            if (self.memtable_manager.block_count() > 0) {
+            if (self.memtable_manager.block_index.blocks.count() > 0) {
                 try self.coordinate_memtable_flush();
             }
 
@@ -828,23 +821,13 @@ pub const StorageEngine = struct {
         };
     }
 
-    /// Get current block count across all storage layers.
-    pub fn block_count(self: *const StorageEngine) u32 {
-        return self.memtable_manager.block_count();
-    }
-
-    /// Get current edge count in graph index.
-    pub fn edge_count(self: *const StorageEngine) u32 {
-        return self.memtable_manager.edge_count();
-    }
-
     /// Get current memory usage information for testing and monitoring.
     /// Returns basic memory statistics useful for tests and debugging.
     pub fn memory_usage(self: *const StorageEngine) MemoryUsage {
         return MemoryUsage{
-            .total_bytes = self.memtable_manager.memory_usage(),
-            .block_count = self.block_count(),
-            .edge_count = self.edge_count(),
+            .total_bytes = self.memtable_manager.block_index.memory_used,
+            .block_count = @as(u32, @intCast(self.memtable_manager.block_index.blocks.count())),
+            .edge_count = self.memtable_manager.graph_index.edge_count(),
         };
     }
 
@@ -921,10 +904,10 @@ pub const StorageEngine = struct {
         self: *StorageEngine,
         config: StorageMetrics.MemoryPressureConfig,
     ) StorageMetrics.MemoryPressure {
-        const memtable_bytes = self.memtable_manager.memory_usage();
+        const memtable_bytes = self.memtable_manager.block_index.memory_used;
         self.storage_metrics.memtable_memory_bytes.store(memtable_bytes);
 
-        const queue_size = self.sstable_manager.pending_compaction_count();
+        const queue_size = @as(u64, @intCast(self.sstable_manager.sstable_paths.items.len));
         self.storage_metrics.compaction_queue_size.store(queue_size);
 
         return self.storage_metrics.calculate_memory_pressure(config);
@@ -957,7 +940,7 @@ pub const StorageEngine = struct {
             }
 
             // Then iterate through SSTables
-            while (self.current_sstable_index < self.sstable_manager.sstable_count()) {
+            while (self.current_sstable_index < @as(u32, @intCast(self.sstable_manager.sstable_paths.items.len))) {
                 // Lazy SSTable opening: avoids file handles for SSTables we might skip
                 // due to early termination or empty tables
                 if (self.current_sstable_iterator == null) {
@@ -1090,14 +1073,15 @@ pub const StorageEngine = struct {
     fn validate_subsystem_coherence(self: *const StorageEngine) void {
         assert_fmt(builtin.mode == .Debug, "Subsystem coherence validation should only run in debug builds", .{});
 
-        const memtable_memory = self.memtable_manager.memory_usage();
+        const memtable_memory = self.memtable_manager.block_index.memory_used;
+        const memtable_block_count = @as(u32, @intCast(self.memtable_manager.block_index.blocks.count()));
 
-        if (self.memtable_manager.block_count() > 0) {
-            const avg_block_size = memtable_memory / self.memtable_manager.block_count();
+        if (memtable_block_count > 0) {
+            const avg_block_size = memtable_memory / memtable_block_count;
             assert_fmt(avg_block_size > 0 and avg_block_size < 500 * 1024 * 1024, "Average block size {} indicates memory corruption", .{avg_block_size});
         }
 
-        const memtable_blocks = self.memtable_manager.block_count();
+        const memtable_blocks = memtable_block_count;
         const sstable_blocks = self.sstable_manager.total_block_count();
         assert_fmt(memtable_blocks < 1000000 and sstable_blocks < 10000000, "Block counts indicate potential corruption: memtable={} sstable={}", .{ memtable_blocks, sstable_blocks });
     }
@@ -1195,7 +1179,7 @@ test "storage engine initialization and cleanup" {
     defer engine.deinit();
 
     try testing.expect(engine.state == .initialized);
-    try testing.expectEqual(@as(u32, 0), engine.block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 }
 
 test "storage engine startup and basic operations" {
@@ -1220,14 +1204,14 @@ test "storage engine startup and basic operations" {
     };
 
     try engine.put_block(block);
-    try testing.expectEqual(@as(u32, 1), engine.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 
     const found_block = try engine.find_block(block_id, .query_engine);
     try testing.expect(found_block != null);
     try testing.expectEqualStrings("test content", found_block.?.read(.query_engine).content);
 
     try engine.delete_block(block_id);
-    try testing.expectEqual(@as(u32, 0), engine.block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 }
 
 test "memtable flush triggers at size threshold" {
@@ -1257,7 +1241,7 @@ test "memtable flush triggers at size threshold" {
         try engine.put_block(block);
 
         if (i >= 3) { // After ~1MB of data
-            try testing.expect(engine.memtable_manager.memory_usage() < config.memtable_max_size);
+            try testing.expect(engine.memtable_manager.block_index.memory_used < config.memtable_max_size);
         }
     }
 
@@ -1294,7 +1278,7 @@ test "WAL recovery restores storage state" {
         defer engine.deinit();
 
         try engine.startup();
-        try testing.expectEqual(@as(u32, 1), engine.block_count());
+        try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 
         const recovered_block = try engine.find_block(block_id, .query_engine);
         try testing.expect(recovered_block != null);
@@ -1322,7 +1306,7 @@ test "graph edge operations work correctly" {
     };
 
     try engine.put_edge(edge);
-    try testing.expectEqual(@as(u32, 1), engine.edge_count());
+    try testing.expectEqual(@as(u32, 1), engine.memtable_manager.graph_index.edge_count());
 
     const outgoing = engine.find_outgoing_edges(source_id);
     try testing.expect(outgoing.len > 0);
@@ -1465,7 +1449,7 @@ test "block iterator with SSTable blocks" {
 
     try engine.flush_memtable_to_sstable();
 
-    try testing.expectEqual(@as(u32, 0), engine.block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 
     var iterator = engine.iterate_all_blocks();
     defer iterator.deinit();

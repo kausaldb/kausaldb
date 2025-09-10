@@ -300,16 +300,6 @@ pub const ConnectionManager = struct {
         }
     }
 
-    /// Get current operational statistics for monitoring and debugging
-    pub fn statistics(self: *const ConnectionManager) ConnectionManagerStats {
-        return self.stats;
-    }
-
-    /// Get count of currently active connections
-    pub fn active_connection_count(self: *const ConnectionManager) u32 {
-        return @intCast(self.connections.items.len);
-    }
-
     /// Check if any connection has a complete request ready for processing.
     /// Used by Server coordinator to determine if request processing is needed.
     pub fn has_ready_requests(self: *const ConnectionManager) bool {
@@ -372,7 +362,7 @@ test "connection manager initialization follows two-phase pattern" {
     defer manager.deinit();
 
     // Verify initial state - no I/O resources allocated
-    try testing.expectEqual(@as(u32, 0), manager.active_connection_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.connections.items.len)));
     try testing.expectEqual(@as(u32, 1), manager.next_connection_id);
     try testing.expectEqual(@as(usize, 0), manager.poll_fds.len);
 
@@ -398,7 +388,7 @@ test "connection statistics track operations correctly" {
     try manager.startup();
 
     // Initial statistics should be zero
-    const initial_stats = manager.statistics();
+    const initial_stats = manager.stats;
     try testing.expectEqual(@as(u64, 0), initial_stats.connections_accepted);
     try testing.expectEqual(@as(u32, 0), initial_stats.connections_active);
     try testing.expectEqual(@as(u64, 0), initial_stats.connections_closed);
@@ -421,7 +411,7 @@ test "arena cleanup handles connection memory automatically" {
 
     // Arena will automatically clean up all allocations in deinit()
     // No explicit cleanup needed - this is the key benefit
-    const stats = manager.statistics();
+    const stats = manager.stats;
     try testing.expectEqual(@as(u64, 0), stats.connections_closed);
 }
 

@@ -208,10 +208,6 @@ pub const StateMachine = struct {
     }
 
     /// Get current state for validation
-    pub fn state(self: *const Self) u32 {
-        return self.current_state;
-    }
-
     /// Validate current state is in expected set
     pub fn validate_state_in(self: *const Self, expected_states: []const u32, comptime context: []const u8) void {
         if (!defense_config.state_validation) return;

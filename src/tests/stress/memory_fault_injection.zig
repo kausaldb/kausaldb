@@ -152,7 +152,7 @@ test "allocation failure during memtable operations" {
 
         // Verify memtable can be safely cleaned up even after failures
         memtable.clear();
-        try testing.expectEqual(@as(usize, 0), memtable.memory_usage());
+        try testing.expectEqual(@as(usize, 0), memtable.block_index.memory_used);
 
         log.debug("Allocation failure test completed: fail_after={}, blocks_added={}, failures={}", .{ fail_after, block_count, failing_alloc.failure_count });
     }
@@ -255,11 +255,11 @@ test "arena corruption detection" {
     }
 
     // Verify normal operation
-    try testing.expect(memtable.memory_usage() > 0); // Memory should be used
+    try testing.expect(memtable.block_index.memory_used > 0); // Memory should be used
 
     // Test arena reset under various conditions
     memtable.clear();
-    try testing.expectEqual(@as(u64, 0), memtable.memory_usage());
+    try testing.expectEqual(@as(u64, 0), memtable.block_index.memory_used);
 
     // Add data again to test arena reuse after reset
     const reuse_block = ContextBlock{
@@ -271,7 +271,7 @@ test "arena corruption detection" {
     };
 
     try memtable.put_block(reuse_block);
-    try testing.expect(memtable.memory_usage() > 0); // Should have some memory usage
+    try testing.expect(memtable.block_index.memory_used > 0); // Should have some memory usage
 }
 
 test "error path cleanup validation" {
@@ -423,12 +423,12 @@ test "sustained operations under memory pressure" {
 
         if (cycle_successful) {
             successful_cycles += 1;
-            try testing.expect(memtable.memory_usage() > 0); // Should have memory usage
+            try testing.expect(memtable.block_index.memory_used > 0); // Should have memory usage
         }
 
         // Always clear memtable to test arena reset under pressure
         memtable.clear();
-        try testing.expectEqual(@as(u64, 0), memtable.memory_usage());
+        try testing.expectEqual(@as(u64, 0), memtable.block_index.memory_used);
 
         // Log progress
         if (cycle % 10 == 0) {

@@ -260,7 +260,7 @@ pub const MemtableManager = struct {
 
         // P0.5: WAL-before-memtable ordering assertions
         // Durability ordering: WAL MUST be persistent before memtable update
-        const wal_entries_before = self.wal.statistics().entries_written;
+        const wal_entries_before = self.wal.stats.entries_written;
 
         // Streaming writes eliminate WALEntry buffer allocation for multi-MB blocks
         if (block.content.len >= 512 * 1024) {
@@ -273,7 +273,7 @@ pub const MemtableManager = struct {
 
         // P0.5: Verify WAL write completed before memtable update
         // This ordering is CRITICAL for durability guarantees
-        const wal_entries_after = self.wal.statistics().entries_written;
+        const wal_entries_after = self.wal.stats.entries_written;
         assert_fmt(wal_entries_after > wal_entries_before, "WAL entry count must increase before memtable update: {} -> {}", .{ wal_entries_before, wal_entries_after });
 
         // Only update memtable AFTER WAL persistence is confirmed
@@ -283,18 +283,11 @@ pub const MemtableManager = struct {
         // P0.5 validation is expensive and should only run during specific tests
     }
 
-    /// Get total memory usage of all data stored in the memtable.
-    /// Used by storage engine to determine when memtable flush is needed.
-    /// Accounts for string content only, not HashMap overhead.
-    pub fn memory_usage(self: *const MemtableManager) u64 {
-        return self.block_index.memory_usage();
-    }
-
     /// Encapsulates flush decision within memtable ownership boundary.
     /// Prevents StorageEngine from needing knowledge of internal memory thresholds,
     /// maintaining clear separation between coordination and state management.
     pub fn should_flush(self: *const MemtableManager) bool {
-        return self.memory_usage() >= self.memtable_max_size;
+        return self.block_index.memory_used >= self.memtable_max_size;
     }
 
     /// Atomically clear all in-memory data with O(1) arena reset.
@@ -329,22 +322,12 @@ pub const MemtableManager = struct {
         return self.block_index.blocks.iterator();
     }
 
-    /// Get count of blocks currently in the memtable.
-    /// Used for metrics and debugging. O(1) operation.
-    pub fn block_count(self: *const MemtableManager) u32 {
-        return @intCast(self.block_index.blocks.count());
-    }
-
     pub fn find_outgoing_edges(self: *const MemtableManager, source_id: BlockId) []const OwnedGraphEdge {
         return self.graph_index.find_outgoing_edges_with_ownership(source_id, .memtable_manager) orelse &[_]OwnedGraphEdge{};
     }
 
     pub fn find_incoming_edges(self: *const MemtableManager, target_id: BlockId) []const OwnedGraphEdge {
         return self.graph_index.find_incoming_edges_with_ownership(target_id, .memtable_manager) orelse &[_]OwnedGraphEdge{};
-    }
-
-    pub fn edge_count(self: *const MemtableManager) u32 {
-        return self.graph_index.edge_count();
     }
 
     /// Recover memtable state from WAL files.
@@ -395,7 +378,7 @@ pub const MemtableManager = struct {
         assert_fmt(builtin.mode == .Debug, "WAL ordering validation should only run in debug builds", .{});
 
         // WAL entry count should reflect all memtable blocks in durable form
-        const memtable_blocks = self.block_count();
+        const memtable_blocks = @as(u32, @intCast(self.block_index.blocks.count()));
         const wal_entries = self.wal.statistics().entries_written;
 
         // In normal operation, WAL should have at least as many entries as memtable blocks
@@ -446,14 +429,14 @@ pub const MemtableManager = struct {
         assert_fmt(builtin.mode == .Debug, "Memory accounting validation should only run in debug builds", .{});
 
         // Validate BlockIndex memory accounting (delegated to BlockIndex.validate_invariants)
-        const block_index_memory = self.block_index.memory_usage();
-        const total_memory = self.memory_usage();
+        const block_index_memory = self.block_index.memory_used;
+        const total_memory = self.block_index.memory_used;
 
         // MemtableManager memory should equal BlockIndex memory (main consumer)
         assert_fmt(total_memory == block_index_memory, "MemtableManager memory accounting inconsistency: total={} block_index={}", .{ total_memory, block_index_memory });
 
         // Validate memory usage is reasonable given block count
-        const current_block_count = self.block_count();
+        const current_block_count = @as(u32, @intCast(self.block_index.blocks.count()));
         if (current_block_count > 0) {
             const avg_block_size = total_memory / current_block_count;
             assert_fmt(avg_block_size > 0 and avg_block_size < 100 * 1024 * 1024, "Average block size {} indicates memory corruption", .{avg_block_size});
@@ -474,7 +457,7 @@ pub const MemtableManager = struct {
         assert_fmt(self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024, "Memtable max size {} is unreasonable - indicates corruption", .{self.memtable_max_size});
 
         // Validate current usage doesn't exceed configured maximum (with small buffer for overhead)
-        const current_usage = self.memory_usage();
+        const current_usage = self.block_index.memory_used;
         assert_fmt(current_usage <= self.memtable_max_size * 2, "Memory usage {} exceeds 2x max size {} - indicates accounting corruption", .{ current_usage, self.memtable_max_size });
     }
 
@@ -492,7 +475,7 @@ pub const MemtableManager = struct {
     pub fn flush_to_sstable(self: *MemtableManager, sstable_manager: anytype) !void {
         concurrency.assert_main_thread();
 
-        if (self.block_count() == 0) return;
+        if (self.block_index.blocks.count() == 0) return;
 
         var owned_blocks = std.array_list.Managed(OwnedBlock).init(self.backing_allocator);
         defer owned_blocks.deinit();
@@ -581,9 +564,9 @@ test "MemtableManager basic lifecycle" {
     var manager = try MemtableManager.init(&coordinator, allocator, sim_vfs.vfs(), "/test/data", 1024 * 1024);
     defer manager.deinit();
 
-    try testing.expectEqual(@as(u32, 0), manager.block_count());
-    try testing.expectEqual(@as(u32, 0), manager.edge_count());
-    try testing.expectEqual(@as(u64, 0), manager.memory_usage());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.block_index.blocks.count())));
+    try testing.expectEqual(@as(u32, 0), manager.graph_index.edge_count());
+    try testing.expectEqual(@as(u64, 0), manager.block_index.memory_used);
 }
 
 test "MemtableManager with WAL operations" {
@@ -605,7 +588,7 @@ test "MemtableManager with WAL operations" {
     const test_block = create_test_block(block_id, "test content");
 
     try manager.put_block_durable(test_block);
-    try testing.expectEqual(@as(u32, 1), manager.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(manager.block_index.blocks.count())));
 
     const found_block = manager.find_block_in_memtable(block_id);
     try testing.expect(found_block != null);
@@ -635,7 +618,7 @@ test "MemtableManager multiple blocks" {
     try manager.put_block_durable(block1);
     try manager.put_block_durable(block2);
 
-    try testing.expectEqual(@as(u32, 2), manager.block_count());
+    try testing.expectEqual(@as(u32, 2), @as(u32, @intCast(manager.block_index.blocks.count())));
     try testing.expect(manager.find_block_in_memtable(block1_id) != null);
     try testing.expect(manager.find_block_in_memtable(block2_id) != null);
 }
@@ -660,7 +643,7 @@ test "MemtableManager edge operations" {
     const test_edge = create_test_edge(source_id, target_id, .imports);
 
     try manager.put_edge_durable(test_edge);
-    try testing.expectEqual(@as(u32, 1), manager.edge_count());
+    try testing.expectEqual(@as(u32, 1), manager.graph_index.edge_count());
 
     const outgoing = manager.find_outgoing_edges(source_id);
     try testing.expectEqual(@as(usize, 1), outgoing.len);
@@ -686,11 +669,11 @@ test "MemtableManager clear operation" {
     const test_block = create_test_block(block_id, "clear test");
     try manager.put_block_durable(test_block);
 
-    try testing.expectEqual(@as(u32, 1), manager.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(manager.block_index.blocks.count())));
 
     // O(1) arena cleanup
     manager.clear();
 
-    try testing.expectEqual(@as(u32, 0), manager.block_count());
-    try testing.expectEqual(@as(u64, 0), manager.memory_usage());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.block_index.blocks.count())));
+    try testing.expectEqual(@as(u64, 0), manager.block_index.memory_used);
 }

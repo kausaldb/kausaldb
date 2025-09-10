@@ -87,12 +87,12 @@ test "server coordinator pattern basic functionality" {
     }
 
     // Test server follows coordinator pattern
-    try testing.expectEqual(@as(u32, 0), test_env.server.connection_manager.active_connection_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(test_env.server.connection_manager.connections.items.len)));
 
     // Test statistics aggregation from coordinator
     test_env.server.update_aggregated_statistics();
-    const server_stats = test_env.server.statistics();
-    const manager_stats = test_env.server.connection_manager.statistics();
+    const server_stats = test_env.server.stats;
+    const manager_stats = test_env.server.connection_manager.stats;
 
     try testing.expectEqual(manager_stats.connections_accepted, server_stats.connections_accepted);
     try testing.expectEqual(manager_stats.connections_active, server_stats.connections_active);
@@ -168,8 +168,8 @@ test "server coordination delegates properly to connection manager" {
     try testing.expect(test_env.server.connection_manager.find_connection_with_ready_request() == null);
 
     // Verify statistics delegation
-    const initial_server_stats = test_env.server.statistics();
-    const initial_manager_stats = test_env.server.connection_manager.statistics();
+    const initial_server_stats = test_env.server.stats;
+    const initial_manager_stats = test_env.server.connection_manager.stats;
 
     try testing.expectEqual(initial_manager_stats.connections_accepted, initial_server_stats.connections_accepted);
     try testing.expectEqual(initial_manager_stats.connections_active, initial_server_stats.connections_active);
@@ -269,14 +269,14 @@ test "connection manager handles I/O failures gracefully" {
     try manager.startup();
 
     // Manager should handle faults gracefully and maintain valid state
-    const stats = manager.statistics();
+    const stats = manager.stats;
     try testing.expect(stats.poll_cycles_completed >= 0);
     try testing.expectEqual(@as(u32, 0), stats.connections_active);
 
     // Test cleanup operations work under fault injection
     try manager.cleanup_timed_out_connections();
 
-    const post_cleanup_stats = manager.statistics();
+    const post_cleanup_stats = manager.stats;
     try testing.expectEqual(stats.connections_active, post_cleanup_stats.connections_active);
 }
 
@@ -306,7 +306,7 @@ test "connection manager overhead characteristics" {
     // Measure statistics collection overhead
     const stats_start = std.time.nanoTimestamp();
     for (0..1000) |_| {
-        _ = manager.statistics();
+        _ = manager.stats;
     }
     const stats_time = std.time.nanoTimestamp() - stats_start;
     const avg_stats_time = @divTrunc(stats_time, 1000);
@@ -331,7 +331,7 @@ test "server statistics aggregation accuracy" {
 
     // Test initial state
     test_env.server.update_aggregated_statistics();
-    const initial_stats = test_env.server.statistics();
+    const initial_stats = test_env.server.stats;
     try testing.expectEqual(@as(u64, 0), initial_stats.connections_accepted);
     try testing.expectEqual(@as(u32, 0), initial_stats.connections_active);
     try testing.expectEqual(@as(u64, 0), initial_stats.requests_processed);
@@ -347,7 +347,7 @@ test "server statistics aggregation accuracy" {
     test_env.server.stats.errors_encountered += 1;
 
     test_env.server.update_aggregated_statistics();
-    const updated_stats = test_env.server.statistics();
+    const updated_stats = test_env.server.stats;
 
     // Connection stats should come from manager (still 0)
     try testing.expectEqual(@as(u64, 0), updated_stats.connections_accepted);
@@ -421,7 +421,7 @@ test "connection manager resource cleanup under various failure modes" {
 
         // Perform operations that might fail
         try manager.cleanup_timed_out_connections();
-        const stats = manager.statistics();
+        const stats = manager.stats;
 
         // Verify manager maintains consistency regardless of faults
         try testing.expect(stats.connections_active >= 0);

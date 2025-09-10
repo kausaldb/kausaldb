@@ -301,10 +301,6 @@ pub fn OwnedPtrType(comptime T: type) type {
         }
 
         /// Get const access to the underlying value.
-        pub fn get(self: *const Ptr) *const T {
-            return self.ptr;
-        }
-
         /// Transfer ownership to another subsystem.
         /// The original owner must not access this pointer after transfer.
         pub fn transfer_ownership(self: *Ptr, new_ownership: ArenaOwnership) void {
@@ -410,7 +406,7 @@ test "OwnedPtr ownership validation" {
     try std.testing.expect(accessed.* == 42);
 
     // Const access
-    const const_accessed = owned.get();
+    const const_accessed = owned.ptr;
     try std.testing.expect(const_accessed.* == 42);
 }
 

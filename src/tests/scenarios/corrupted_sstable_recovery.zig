@@ -66,7 +66,7 @@ pub const CorruptedSSTableHarness = struct {
         const storage_engine = try allocator.create(StorageEngine);
         errdefer allocator.destroy(storage_engine);
 
-        storage_engine.* = try StorageEngine.init_default(allocator, hostile_vfs.vfs(), "corrupted_sstable_test");
+        storage_engine.* = try StorageEngine.init_default(allocator, hostile_vfs.base_vfs.vfs(), "corrupted_sstable_test");
         try storage_engine.startup();
 
         return Self{

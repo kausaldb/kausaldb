@@ -98,8 +98,8 @@ test "A* search integration with storage engine" {
     defer result.deinit();
 
     // Verify A* found optimal paths
-    try testing.expect(result.count() > 0);
-    try testing.expect(result.blocks_traversed >= result.count());
+    try testing.expect(result.blocks.len > 0);
+    try testing.expect(result.blocks_traversed >= result.blocks.len);
     try testing.expect(result.max_depth_reached <= 4);
 
     // Verify all found blocks are valid
@@ -112,7 +112,7 @@ test "A* search integration with storage engine" {
     }
     try testing.expect(found_main);
 
-    std.debug.print("A* search found {} blocks, traversed {} nodes\n", .{ result.count(), result.blocks_traversed });
+    std.debug.print("A* search found {} blocks, traversed {} nodes\n", .{ result.blocks.len, result.blocks_traversed });
 }
 
 test "bidirectional search integration and performance" {
@@ -172,14 +172,14 @@ test "bidirectional search integration and performance" {
     const execution_time_us = @divTrunc(execution_time_ns, 1000);
 
     // Verify bidirectional search results
-    try testing.expect(result.count() > 0);
+    try testing.expect(result.blocks.len > 0);
     try testing.expect(result.blocks_traversed > 0);
 
     // Performance check - should be fast for this graph size
     const max_time_us = 5000; // 5ms for 20 nodes should be plenty
     try testing.expect(execution_time_us < max_time_us);
 
-    std.debug.print("Bidirectional search: {} blocks found, {} traversed, {}μs execution time\n", .{ result.count(), result.blocks_traversed, execution_time_us });
+    std.debug.print("Bidirectional search: {} blocks found, {} traversed, {}μs execution time\n", .{ result.blocks.len, result.blocks_traversed, execution_time_us });
 }
 
 test "algorithm comparison BFS vs DFS vs A* vs Bidirectional" {
@@ -245,14 +245,14 @@ test "algorithm comparison BFS vs DFS vs A* vs Bidirectional" {
         const execution_time_us = @divTrunc(execution_time_ns, 1000);
 
         // All algorithms should find results
-        try testing.expect(result.count() > 0);
+        try testing.expect(result.blocks.len > 0);
         try testing.expect(result.blocks_traversed > 0);
         // In optimized builds, timing can be unreliable in CI environments
         if (builtin.mode == .Debug) {
             try testing.expect(execution_time_us < 10000); // All should be under 10ms
         }
 
-        std.debug.print("{s}: {} blocks, {} traversed, {}μs\n", .{ name, result.count(), result.blocks_traversed, execution_time_us });
+        std.debug.print("{s}: {} blocks, {} traversed, {}μs\n", .{ name, result.blocks.len, result.blocks_traversed, execution_time_us });
     }
 }
 
@@ -315,17 +315,17 @@ test "large graph traversal with new algorithms" {
     const execution_time_ms = @divTrunc(execution_time_ns, 1_000_000);
 
     // Performance validation
-    try testing.expect(result.count() > 0);
+    try testing.expect(result.blocks.len > 0);
     // In optimized builds, timing can be unreliable in CI environments
     if (builtin.mode == .Debug) {
         try testing.expect(execution_time_ms < 50); // Should complete within 50ms
     }
 
     // Memory efficiency check - should handle large graphs without issues
-    try testing.expect(result.count() <= 100); // Respects max_results
+    try testing.expect(result.blocks.len <= 100); // Respects max_results
     try testing.expect(result.max_depth_reached <= 6); // Respects max_depth
 
-    std.debug.print("Large graph A* search: {} blocks found in {}ms\n", .{ result.count(), execution_time_ms });
+    std.debug.print("Large graph A* search: {} blocks found in {}ms\n", .{ result.blocks.len, execution_time_ms });
 }
 
 test "edge type filtering integration" {
@@ -378,7 +378,7 @@ test "edge type filtering integration" {
     defer calls_result.deinit();
 
     // Should find blocks 1, 2, 4 (connected by calls edges)
-    try testing.expect(calls_result.count() >= 3);
+    try testing.expect(calls_result.blocks.len >= 3);
 
     // Test filtering for 'imports' edges only
     const imports_query = TraversalQuery{
@@ -394,9 +394,9 @@ test "edge type filtering integration" {
     defer imports_result.deinit();
 
     // Should find blocks 1, 3, 6 (connected by imports edges)
-    try testing.expect(imports_result.count() >= 3);
+    try testing.expect(imports_result.blocks.len >= 3);
 
-    std.debug.print("Edge filtering: {} calls-filtered, {} imports-filtered\n", .{ calls_result.count(), imports_result.count() });
+    std.debug.print("Edge filtering: {} calls-filtered, {} imports-filtered\n", .{ calls_result.blocks.len, imports_result.blocks.len });
 }
 
 test "memory safety under stress with new algorithms" {
@@ -462,7 +462,7 @@ test "memory safety under stress with new algorithms" {
             defer result.deinit();
 
             // Verify results are valid
-            try testing.expect(result.count() > 0);
+            try testing.expect(result.blocks.len > 0);
             for (result.blocks) |block| {
                 try testing.expect(block.read(.query_engine).content.len > 0);
                 try testing.expect(block.read(.query_engine).source_uri.len > 0);

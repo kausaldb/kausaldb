@@ -81,7 +81,7 @@ test "wal entry stream recovery maintains order" {
         try testing.expectEqualStrings(expected_block.content, recovered_data.content);
     }
 
-    const total_recovered = harness.storage_engine.block_count();
+    const total_recovered = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(total_recovered == sequence_blocks.len);
 }
 
@@ -127,7 +127,7 @@ test "wal entry stream handles memory pressure during recovery" {
     };
 
     // If recovery succeeded, verify what we can
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count <= memory_test_blocks); // Can't exceed what was added
 }
 
@@ -160,7 +160,7 @@ test "wal streaming recovery validates entry boundaries" {
     // Recovery should handle all boundary sizes correctly
     try harness.restart_storage_engine();
 
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == boundary_test_sizes.len);
 }
 
@@ -175,7 +175,7 @@ test "wal durability under I/O failure simulation" {
     defer harness.deinit();
 
     // Enable I/O failures in simulation VFS
-    harness.simulation_vfs().enable_io_failures(20, .{ .write = true }); // 20‰ failure rate for write operations
+    harness.sim_vfs.enable_io_failures(20, .{ .write = true }); // 20‰ failure rate for write operations
 
     // Add blocks under hostile I/O conditions
     var durable_blocks_added: u32 = 0;
@@ -204,11 +204,11 @@ test "wal durability under I/O failure simulation" {
     }
 
     // Disable I/O failures and restart
-    harness.simulation_vfs().disable_all_fault_injection();
+    harness.sim_vfs.disable_all_fault_injection();
     try harness.restart_storage_engine();
 
     // Successfully written blocks should be durable
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count <= durable_blocks_added);
     try testing.expect(recovered_count > 0); // At least some should survive
 }
@@ -244,7 +244,7 @@ test "wal streaming handles concurrent-like access patterns" {
     // Recovery should handle the complex WAL pattern
     try harness.restart_storage_engine();
 
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == pattern_blocks);
 }
 
@@ -284,7 +284,7 @@ test "wal recovery prevents buffer overflows during stream processing" {
     // Recovery with buffer overflow protection should succeed
     try harness.restart_storage_engine();
 
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == edge_case_content_sizes.len - 1); // -1 for skipped size 0
 }
 
@@ -324,7 +324,7 @@ test "wal recovery cleanup prevents memory leaks" {
         try harness.restart_storage_engine();
 
         // Verify data integrity after each restart
-        const count = harness.storage_engine.block_count();
+        const count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
         try testing.expect(count == leak_test_blocks);
 
         restart_cycles += 1;

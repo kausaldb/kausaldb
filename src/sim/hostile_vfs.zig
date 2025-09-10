@@ -455,11 +455,6 @@ pub const HostileVFS = struct {
         multi_phase_attack,
     };
 
-    /// Get VFS interface for compatibility with existing code
-    pub fn vfs(self: *HostileVFS) VFS {
-        return self.base_vfs.vfs();
-    }
-
     /// Disable all corruption for clean testing phases
     pub fn disable_all_corruption(self: *HostileVFS) void {
         self.corruption_engine.bit_flip_config.enabled = false;

@@ -300,13 +300,6 @@ pub fn ComptimeOwnedBlockType(comptime owner: BlockOwnership) type {
             };
         }
 
-        /// Extract the underlying ContextBlock for cleaner access patterns.
-        /// Use this when you need to work with the actual block data.
-        /// Example: const block = owned_block.extract();
-        pub fn extract(self: *const Self) ContextBlock {
-            return self.block;
-        }
-
         /// Check if this block is owned by the specified ownership at compile time.
         pub fn is_owned_by(comptime check_owner: BlockOwnership) bool {
             return owner == check_owner;
@@ -389,11 +382,6 @@ pub const OwnedBlockCollection = struct {
             owned_block.state = .moved;
         }
         self.blocks.clearAndFree();
-    }
-
-    /// Get collection length.
-    pub fn length(self: *const OwnedBlockCollection) usize {
-        return self.blocks.items.len;
     }
 
     /// Check if collection is empty.
@@ -784,7 +772,7 @@ test "OwnedBlockCollection management" {
     try collection.add_block(&owned1);
     try collection.add_block(&owned2);
 
-    try std.testing.expect(collection.length() == 2);
+    try std.testing.expect(collection.blocks.items.len == 2);
     try std.testing.expect(!collection.is_empty());
 
     const found = collection.find_block(block1.id, .storage_engine);

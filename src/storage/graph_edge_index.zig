@@ -34,11 +34,6 @@ pub const OwnedGraphEdge = struct {
         }
         return &self.edge;
     }
-
-    /// Get underlying GraphEdge for query operations (returns by value, no pointer access)
-    pub fn as_edge(self: *const OwnedGraphEdge) GraphEdge {
-        return self.edge;
-    }
 };
 
 /// Arena refresh pattern: GraphEdgeIndex only uses backing allocator for HashMap and ArrayList
@@ -320,15 +315,7 @@ pub const GraphEdgeIndex = struct {
     }
 
     /// Get number of blocks that have outgoing edges.
-    pub fn source_block_count(self: *const GraphEdgeIndex) u32 {
-        return @intCast(self.outgoing_edges.count());
-    }
-
     /// Get number of blocks that have incoming edges.
-    pub fn target_block_count(self: *const GraphEdgeIndex) u32 {
-        return @intCast(self.incoming_edges.count());
-    }
-
     /// Clear all edges and reset arena for O(1) bulk deallocation.
     /// Retains HashMap capacity for efficient reuse after clearing.
     pub fn clear(self: *GraphEdgeIndex) void {
@@ -356,8 +343,8 @@ test "graph edge index initialization creates empty index" {
     defer index.deinit();
 
     try testing.expectEqual(@as(u32, 0), index.edge_count());
-    try testing.expectEqual(@as(u32, 0), index.source_block_count());
-    try testing.expectEqual(@as(u32, 0), index.target_block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.outgoing_edges.count())));
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.incoming_edges.count())));
 }
 
 test "put and find edge operations work correctly" {
@@ -501,8 +488,8 @@ test "clear operation resets index to empty state" {
     index.clear();
 
     try testing.expectEqual(@as(u32, 0), index.edge_count());
-    try testing.expectEqual(@as(u32, 0), index.source_block_count());
-    try testing.expectEqual(@as(u32, 0), index.target_block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.outgoing_edges.count())));
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.incoming_edges.count())));
 }
 
 test "bidirectional index consistency" {
@@ -573,6 +560,6 @@ test "edge count accuracy with complex graph" {
     }
 
     try testing.expectEqual(@as(u32, 5), index.edge_count());
-    try testing.expect(index.source_block_count() <= 4);
-    try testing.expect(index.target_block_count() <= 4);
+    try testing.expect(@as(u32, @intCast(index.outgoing_edges.count())) <= 4);
+    try testing.expect(@as(u32, @intCast(index.incoming_edges.count())) <= 4);
 }

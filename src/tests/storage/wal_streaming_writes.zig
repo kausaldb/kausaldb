@@ -110,7 +110,7 @@ test "streaming recovery basic" {
 
     // Validate recovery results by checking storage engine state
     // Should have 2 blocks remaining (3 created, 1 deleted)
-    try testing.expectEqual(@as(u32, 2), harness.storage_engine.block_count());
+    try testing.expectEqual(@as(u32, 2), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Verify specific blocks exist
     const recovered_block1 = try harness.storage_engine.find_block(test_block1.id, .query_engine);
@@ -172,7 +172,7 @@ test "streaming recovery large entries" {
     harness.query_engine = try harness.allocator.create(QueryEngine);
     harness.query_engine.* = QueryEngine.init(harness.allocator, harness.storage_engine);
 
-    try testing.expectEqual(@as(u32, 3), harness.storage_engine.block_count());
+    try testing.expectEqual(@as(u32, 3), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 }
 
 test "streaming recovery memory efficiency" {
@@ -214,7 +214,7 @@ test "streaming recovery memory efficiency" {
     harness.query_engine = try harness.allocator.create(QueryEngine);
     harness.query_engine.* = QueryEngine.init(harness.allocator, harness.storage_engine);
 
-    try testing.expectEqual(@as(u32, 100), harness.storage_engine.block_count());
+    try testing.expectEqual(@as(u32, 100), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 }
 
 test "streaming recovery empty WAL" {
@@ -239,6 +239,6 @@ test "streaming recovery empty WAL" {
     harness.query_engine = try harness.allocator.create(QueryEngine);
     harness.query_engine.* = QueryEngine.init(harness.allocator, harness.storage_engine);
 
-    try testing.expectEqual(@as(u32, 0), harness.storage_engine.block_count());
-    try testing.expectEqual(@as(u32, 0), harness.storage_engine.edge_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
+    try testing.expectEqual(@as(u32, 0), harness.storage_engine.memtable_manager.graph_index.edge_count());
 }

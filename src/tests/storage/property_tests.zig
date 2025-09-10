@@ -182,7 +182,7 @@ test "property: block count consistency" {
     defer engine.shutdown() catch {};
 
     // Property: Block count should accurately reflect memtable blocks (not total blocks)
-    const initial_count = engine.block_count();
+    const initial_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try expectEqual(@as(u32, 0), initial_count);
 
     const test_iterations = 30;
@@ -201,14 +201,14 @@ test "property: block count consistency" {
         memtable_count += 1;
 
         // Property: Block count should match memtable count before flush
-        const current_count = engine.block_count();
+        const current_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         try expectEqual(memtable_count, current_count);
 
         // Property: Flush resets memtable count but preserves blocks in SSTables
         if (i % 10 == 9) {
             try flush_with_backpressure(&engine);
             memtable_count = 0; // Reset after flush
-            const post_flush_count = engine.block_count();
+            const post_flush_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
             try expectEqual(@as(u32, 0), post_flush_count);
         }
     }
@@ -315,7 +315,7 @@ test "property: flush operation invariants" {
 
     // Property: Flush moves blocks from memtable to SSTables
     try flush_with_backpressure(&engine);
-    const post_flush_count = engine.block_count();
+    const post_flush_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     // After flush, memtable count should be 0 (blocks moved to SSTables)
     try expectEqual(@as(u32, 0), post_flush_count);
 
@@ -330,9 +330,9 @@ test "property: flush operation invariants" {
     }
 
     // Property: Multiple flushes should be idempotent (both should result in 0 memtable blocks)
-    const count_before_second_flush = engine.block_count();
+    const count_before_second_flush = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try engine.flush_memtable_to_sstable();
-    const count_after_second_flush = engine.block_count();
+    const count_after_second_flush = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try expectEqual(@as(u32, 0), count_before_second_flush);
     try expectEqual(@as(u32, 0), count_after_second_flush);
 }
@@ -381,7 +381,7 @@ test "property: concurrent-like access patterns" {
         }
 
         // Property: Block count should equal number of stored blocks
-        const current_count = engine.block_count();
+        const current_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         // Safety: Block count bounded by test data size and fits in u32
         try expectEqual(@as(u32, @intCast(stored_blocks.items.len)), current_count);
     }

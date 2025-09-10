@@ -132,7 +132,7 @@ pub fn ingest_directory_to_blocks(
     const owned_blocks = try all_blocks.toOwnedSlice();
     var blocks = try coordinator.allocator().alloc(ContextBlock, owned_blocks.len);
     for (owned_blocks, 0..) |owned, i| {
-        blocks[i] = owned.extract();
+        blocks[i] = owned.block;
     }
     return .{
         .blocks = blocks,

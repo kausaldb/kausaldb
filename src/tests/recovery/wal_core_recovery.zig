@@ -41,7 +41,7 @@ test "wal recovery with empty directory" {
     defer harness.deinit();
 
     // Empty directory should start cleanly
-    const initial_block_count = harness.storage_engine.block_count();
+    const initial_block_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(initial_block_count == 0);
 }
 
@@ -95,7 +95,7 @@ test "wal recovery handles multiple operations correctly" {
     try testing.expect((try harness.storage_engine.find_block(block2.id, .query_engine)) != null);
     try testing.expect((try harness.storage_engine.find_block(block3.id, .query_engine)) != null);
 
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == 3);
 }
 
@@ -128,7 +128,7 @@ test "wal recovery across segment boundaries" {
     try harness.restart_storage_engine();
 
     // Verify all blocks recovered
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == added_blocks);
 }
 
@@ -209,6 +209,6 @@ test "wal recovery performance under load" {
     try testing.expect(recovery_time < write_time * 10);
 
     // Verify all data recovered
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count == i);
 }

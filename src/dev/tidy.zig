@@ -61,7 +61,7 @@ const TidyChecker = struct {
                 (std.mem.indexOf(u8, line, "fn get_") != null or
                     std.mem.indexOf(u8, line, "fn set_") != null))
             {
-                try self.add_violation(file_path, line_number, "Function names must not use get_/set_ prefixes - use direct field access or descriptive verbs");
+                try self.add_violation(file_path, line_number, "KausalDB Policy: No get_/set_ prefixes - use direct field access (.field) for data, descriptive verbs for actions");
             }
 
             // Rule 2: Functions must use snake_case (critical KausalDB convention)

@@ -233,7 +233,7 @@ pub const Server = struct {
     /// Update server statistics by aggregating from ConnectionManager.
     /// Server owns no connection state, delegates to manager for statistics.
     pub fn update_aggregated_statistics(self: *Server) void {
-        const conn_stats = self.connection_manager.statistics();
+        const conn_stats = self.connection_manager.stats;
 
         self.stats.connections_accepted = conn_stats.connections_accepted;
         self.stats.connections_active = conn_stats.connections_active;
@@ -519,11 +519,6 @@ pub const Server = struct {
         assert(offset == total_size);
         return buffer;
     }
-
-    /// Get current server statistics
-    pub fn statistics(self: *const Server) ServerStats {
-        return self.stats;
-    }
 };
 
 test "message header encode/decode" {
@@ -556,6 +551,6 @@ test "server initialization" {
     var server = Server.init(allocator, config, &mock_storage, &mock_query);
     defer server.deinit();
 
-    try testing.expectEqual(@as(u32, 0), server.statistics().connections_active);
-    try testing.expectEqual(@as(u64, 0), server.statistics().requests_processed);
+    try testing.expectEqual(@as(u32, 0), server.stats.connections_active);
+    try testing.expectEqual(@as(u64, 0), server.stats.requests_processed);
 }

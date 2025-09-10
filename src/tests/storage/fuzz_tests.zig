@@ -326,7 +326,7 @@ test "fuzz: rapid operations under memory pressure" {
 
         // Occasionally check system state
         if (i % 50 == 0) {
-            const block_count = engine.block_count();
+            const block_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
             // System should remain functional
             try expect(block_count < 10000); // Sanity check
         }
@@ -372,7 +372,7 @@ test "fuzz: error recovery and consistency" {
         try engine.put_block(valid_block);
     }
 
-    const valid_count_before_fuzz = engine.block_count();
+    const valid_count_before_fuzz = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
 
     // Now attempt many potentially failing operations
     const error_fuzz_iterations = 100;
@@ -424,7 +424,7 @@ test "fuzz: error recovery and consistency" {
         }
 
         // After each potentially problematic operation, verify system consistency
-        const current_count = engine.block_count();
+        const current_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         // Allow for some block loss due to missing SSTable files during aggressive testing
         // This is expected behavior when SSTable files are compacted or missing
         if (current_count < valid_blocks_count) {
@@ -445,7 +445,7 @@ test "fuzz: error recovery and consistency" {
     }
 
     // Final consistency check
-    const final_count = engine.block_count();
+    const final_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try expect(final_count >= valid_count_before_fuzz);
 
     // All originally valid blocks should still be accessible
@@ -582,12 +582,12 @@ test "fuzz: concurrent-like operation patterns" {
 
         // Periodic consistency check
         if (i % 30 == 0) {
-            const current_count = engine.block_count();
+            const current_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
             try expect(current_count <= active_blocks.items.len + 100); // Sanity bound
         }
     }
 
-    const final_count = engine.block_count();
+    const final_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     std.debug.print("Concurrent-like pattern test completed: {} total blocks\n", .{final_count});
 }
 
@@ -660,7 +660,7 @@ test "fuzz: resource exhaustion scenarios" {
         }
 
         // System should remain functional even under resource pressure
-        const current_count = engine.block_count();
+        const current_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         try expect(current_count < 1000); // Reasonable upper bound
     }
 

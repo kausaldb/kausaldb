@@ -185,21 +185,6 @@ pub const TypedFileHandle = struct {
         self.position = 0;
     }
 
-    /// Query current file position.
-    pub fn query_position(self: *const TypedFileHandle) u64 {
-        return self.position;
-    }
-
-    /// Query file size.
-    pub fn query_size(self: *const TypedFileHandle) u64 {
-        return self.file_size;
-    }
-
-    /// Query file path.
-    pub fn query_path(self: *const TypedFileHandle) []const u8 {
-        return self.path;
-    }
-
     /// Check if file is open for reading.
     pub fn can_read_now(self: *const TypedFileHandle) bool {
         return self.state.can_read() and self.access_mode.can_read();
@@ -326,11 +311,6 @@ pub const FileHandleRegistry = struct {
         if (builtin.mode == .Debug) {
             log.debug("Closed all file handles", .{});
         }
-    }
-
-    /// Get count of open handles.
-    pub fn handle_count(self: *const FileHandleRegistry) u32 {
-        return @intCast(self.handles.count());
     }
 
     /// Check if registry has handles open.
@@ -577,21 +557,21 @@ test "TypedFileHandle lifecycle" {
     try std.testing.expect(handle.is_open());
     try std.testing.expect(handle.can_read_now());
     try std.testing.expect(handle.can_write_now());
-    try std.testing.expect(handle.query_position() == 0);
-    try std.testing.expect(handle.query_size() == 0);
+    try std.testing.expect(handle.position == 0);
+    try std.testing.expect(handle.file_size == 0);
 
     try handle.write("hello");
-    try std.testing.expect(handle.query_position() == 5);
-    try std.testing.expect(handle.query_size() == 5);
+    try std.testing.expect(handle.position == 5);
+    try std.testing.expect(handle.file_size == 5);
 
     // Seek and read
     try handle.seek(0);
-    try std.testing.expect(handle.query_position() == 0);
+    try std.testing.expect(handle.position == 0);
 
     var buffer: [10]u8 = undefined;
     const bytes_read = try handle.read(&buffer);
     try std.testing.expect(bytes_read == 5);
-    try std.testing.expect(handle.query_position() == 5);
+    try std.testing.expect(handle.position == 5);
 
     handle.close();
     try std.testing.expect(!handle.is_open());
@@ -605,7 +585,7 @@ test "FileHandleRegistry management" {
     const handle1 = try registry.register_handle("/test1.txt", .read_only);
     const handle2 = try registry.register_handle("/test2.txt", .write_only);
 
-    try std.testing.expect(registry.handle_count() == 2);
+    try std.testing.expect(@as(u32, @intCast(registry.handles.count())) == 2);
     try std.testing.expect(registry.has_open_handles());
 
     // Access handles
@@ -620,7 +600,7 @@ test "FileHandleRegistry management" {
     try std.testing.expect(h2.?.can_write_now());
 
     try std.testing.expect(registry.close_handle(handle1));
-    try std.testing.expect(registry.handle_count() == 1);
+    try std.testing.expect(@as(u32, @intCast(registry.handles.count())) == 1);
 
     // Invalid handle
     const invalid = FileHandleId.init(999, 999);

@@ -141,11 +141,6 @@ pub fn BoundedArrayType(
             return self.len == MAX_SIZE;
         }
 
-        /// Get current length.
-        pub fn length(self: *const BoundedArray) usize {
-            return self.len;
-        }
-
         /// Get compile-time maximum size.
         pub fn max_length() usize {
             return MAX_SIZE;
@@ -362,11 +357,6 @@ pub fn BoundedHashMapType(comptime K: type, comptime V: type, comptime max_size:
             self.len = 0;
         }
 
-        /// Get current number of entries.
-        pub fn length(self: *const BoundedHashMap) usize {
-            return self.len;
-        }
-
         /// Check if map is empty.
         pub fn is_empty(self: *const BoundedHashMap) bool {
             return self.len == 0;
@@ -549,11 +539,6 @@ pub fn BoundedQueueType(comptime T: type, comptime max_size: usize) type {
             self.head = 0;
             self.tail = 0;
             self.len = 0;
-        }
-
-        /// Get current number of elements.
-        pub fn length(self: *const BoundedQueue) usize {
-            return self.len;
         }
 
         /// Check if queue is empty.
@@ -770,7 +755,7 @@ test "bounded_array_type basic operations" {
     try array.append(2);
     try array.append(3);
 
-    try std.testing.expect(array.length() == 3);
+    try std.testing.expect(array.len == 3);
     try std.testing.expect(!array.is_empty());
     try std.testing.expect(!array.is_full());
 
@@ -823,14 +808,14 @@ test "bounded_array_type remove operations" {
 
     const removed = try array.remove_at(1);
     try std.testing.expect(removed == 2);
-    try std.testing.expect(array.length() == 3);
+    try std.testing.expect(array.len == 3);
     try std.testing.expect(array.at(0) == 1);
     try std.testing.expect(array.at(1) == 3); // Shifted left
     try std.testing.expect(array.at(2) == 4);
 
     const popped = array.pop();
     try std.testing.expect(popped == 4);
-    try std.testing.expect(array.length() == 2);
+    try std.testing.expect(array.len == 2);
 }
 
 test "bounded_array_type search operations" {
@@ -853,7 +838,7 @@ test "bounded_queue_type basic operations" {
     try queue.enqueue(2);
     try queue.enqueue(3);
 
-    try std.testing.expect(queue.length() == 3);
+    try std.testing.expect(queue.len == 3);
     try std.testing.expect(!queue.is_empty());
     try std.testing.expect(!queue.is_full());
 
@@ -862,7 +847,7 @@ test "bounded_queue_type basic operations" {
 
     try std.testing.expect(queue.dequeue() == 1);
     try std.testing.expect(queue.dequeue() == 2);
-    try std.testing.expect(queue.length() == 1);
+    try std.testing.expect(queue.len == 1);
 
     try std.testing.expect(queue.peek() == 3);
 }
@@ -890,7 +875,7 @@ test "bounded_hash_map_type basic operations" {
     try map.put(2, "two");
     try map.put(3, "three");
 
-    try std.testing.expect(map.length() == 3);
+    try std.testing.expect(map.len == 3);
 
     try std.testing.expectEqualStrings("one", map.get(1).?);
     try std.testing.expectEqualStrings("two", map.get(2).?);
@@ -899,7 +884,7 @@ test "bounded_hash_map_type basic operations" {
 
     try map.put(2, "TWO");
     try std.testing.expectEqualStrings("TWO", map.get(2).?);
-    try std.testing.expect(map.length() == 3); // Should not increase
+    try std.testing.expect(map.len == 3); // Should not increase
 }
 
 test "bounded_hash_map_type remove operations" {
@@ -910,12 +895,12 @@ test "bounded_hash_map_type remove operations" {
     try map.put(3, 30);
 
     try std.testing.expect(map.remove(2));
-    try std.testing.expect(map.length() == 2);
+    try std.testing.expect(map.len == 2);
     try std.testing.expect(map.get(2) == null);
     try std.testing.expect(map.get(1) == 10); // Others remain
 
     try std.testing.expect(!map.remove(999));
-    try std.testing.expect(map.length() == 2);
+    try std.testing.expect(map.len == 2);
 }
 
 test "bounded_hash_map_type iterator" {
@@ -952,13 +937,13 @@ test "bounded_array_type extend and copy operations" {
 
     const data = [_]u32{ 1, 2, 3 };
     try array.extend_from_slice(&data);
-    try std.testing.expect(array.length() == 3);
+    try std.testing.expect(array.len == 3);
     try std.testing.expect(array.at(0) == 1);
     try std.testing.expect(array.at(2) == 3);
 
     var other = BoundedArrayType(u32, 10){};
     try other.copy_from(&array);
-    try std.testing.expect(other.length() == 3);
+    try std.testing.expect(other.len == 3);
     try std.testing.expect(other.at(1) == 2);
 
     const big_data = [_]u32{ 4, 5, 6, 7, 8, 9, 10, 11 }; // 8 more items, total would be 11

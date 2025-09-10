@@ -141,11 +141,6 @@ pub const ArenaCoordinator = struct {
                 return self.ptr[index];
             }
 
-            /// Get slice length (always safe, doesn't access memory).
-            pub fn length(self: *const Self) usize {
-                return self.len;
-            }
-
             /// Check if this slice is still valid (generation matches).
             pub fn is_valid(self: *const Self) bool {
                 return self.generation == self.coordinator.generation;
@@ -539,7 +534,7 @@ test "generation counter prevents use-after-reset" {
     // Test 1: Basic generation slice allocation
     var generation_slice = try coordinator.alloc_generation_slice(u8, 10);
     try testing.expect(generation_slice.is_valid());
-    try testing.expectEqual(@as(usize, 10), generation_slice.length());
+    try testing.expectEqual(@as(usize, 10), generation_slice.len);
 
     // Test 2: Valid access before reset
     const slice = try generation_slice.access_slice();

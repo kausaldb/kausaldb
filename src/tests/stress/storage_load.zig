@@ -80,7 +80,7 @@ test "high volume writes during network partition" {
 
     // Verify blocks were stored (at least some under stress conditions)
     try std.testing.expect(successful_writes > 0);
-    try std.testing.expectEqual(successful_writes, harness.storage_engine.block_count());
+    try std.testing.expectEqual(successful_writes, @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     harness.simulation.heal_partition(harness.node_id, node2);
     harness.simulation.heal_partition(harness.node_id, node3);
@@ -124,7 +124,7 @@ test "recovery from WAL corruption simulation" {
         try harness.storage_engine.put_block(block);
     }
 
-    try std.testing.expectEqual(@as(u32, 10), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 10), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Phase 2: Simulate restart by reinitializing storage engine with same VFS
     const node_ptr = harness.simulation.find_node(harness.node_id);
@@ -148,7 +148,7 @@ test "recovery from WAL corruption simulation" {
     harness.query_engine = new_query_engine;
 
     // Phase 3: Verify recovery
-    try std.testing.expectEqual(@as(u32, 10), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 10), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Verify we can retrieve the recovered blocks
     for (1..11) |j| {
@@ -198,7 +198,7 @@ test "large block handling limits" {
 
     // Test storing large block
     try harness.storage_engine.put_block(large_block);
-    try std.testing.expectEqual(@as(u32, 1), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 1), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Test retrieving large block
     const retrieved = (try harness.storage_engine.find_block(block_id, .query_engine)) orelse {
@@ -281,7 +281,7 @@ test "duplicate block handling integrity" {
     const block_id = original_block.id;
 
     try harness.storage_engine.put_block(original_block);
-    try std.testing.expectEqual(@as(u32, 1), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 1), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Try to store duplicate (should overwrite)
     const duplicate_block = ContextBlock{
@@ -293,7 +293,7 @@ test "duplicate block handling integrity" {
     };
 
     try harness.storage_engine.put_block(duplicate_block);
-    try std.testing.expectEqual(@as(u32, 1), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 1), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Verify the updated version is stored
     const retrieved = (try harness.storage_engine.find_block(block_id, .query_engine)) orelse {
@@ -365,7 +365,7 @@ test "graph relationship persistence" {
     try harness.storage_engine.put_edge(calls_edge);
     try harness.storage_engine.put_edge(test_edge);
 
-    try std.testing.expectEqual(@as(u32, 3), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 3), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     const retrieved_main = (try harness.storage_engine.find_block(main_id, .query_engine)) orelse {
         try testing.expect(false); // Block should exist
@@ -436,7 +436,7 @@ test "batch operations under load" {
     }
 
     // Verify some blocks were stored (stress test may hit disk limits)
-    const stored_count = harness.storage_engine.block_count();
+    const stored_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try std.testing.expect(stored_count > 0);
     try std.testing.expect(stored_count <= batch_size * total_batches);
 
@@ -479,7 +479,7 @@ test "invalid data handling robustness" {
     try std.testing.expectError(error.InvalidMetadataJson, harness.storage_engine.put_block(invalid_block));
 
     // Verify no blocks were stored
-    try std.testing.expectEqual(@as(u32, 0), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 0), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 
     // Test valid block after invalid one
     const valid_block = ContextBlock{
@@ -491,5 +491,5 @@ test "invalid data handling robustness" {
     };
 
     try harness.storage_engine.put_block(valid_block);
-    try std.testing.expectEqual(@as(u32, 1), harness.storage_engine.block_count());
+    try std.testing.expectEqual(@as(u32, 1), @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())));
 }

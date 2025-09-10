@@ -173,7 +173,7 @@ test "CORRUPTION PREVENTION: Bounds checking prevents buffer overflows" {
     try testing.expect(bounded_list.at(0) == 100);
     try testing.expect(bounded_list.at(1) == 200);
     try testing.expect(bounded_list.at(2) == 300);
-    try testing.expect(bounded_list.length() == 3);
+    try testing.expect(bounded_list.len == 3);
 }
 
 test "CORRUPTION PREVENTION: File handle validation prevents use-after-close" {
@@ -187,7 +187,7 @@ test "CORRUPTION PREVENTION: File handle validation prevents use-after-close" {
 
     // Normal operation
     try test_file_handle.write("test data");
-    try testing.expect(test_file_handle.query_size() == 9);
+    try testing.expect(test_file_handle.file_size == 9);
 
     // Close file
     test_file_handle.close();

@@ -115,21 +115,6 @@ pub const StorageHarness = struct {
 
     const Self = @This();
 
-    /// Get VFS interface for components that need direct VFS access
-    pub fn vfs(self: *Self) *SimulationVFS {
-        return self.sim_vfs;
-    }
-
-    /// Get VFS pointer for components that need *VFS parameter
-    pub fn vfs_ptr(self: *Self) *VFS {
-        return &self.vfs_instance;
-    }
-
-    /// Get simulation VFS for direct access (e.g., fault injection)
-    pub fn simulation_vfs(self: *Self) *SimulationVFS {
-        return self.sim_vfs;
-    }
-
     /// Phase 1 initialization: memory allocation only, no I/O operations
     pub fn init(allocator: std.mem.Allocator, db_name: []const u8) !Self {
         // Use backing allocator consistently - components manage their own arenas
@@ -589,11 +574,6 @@ pub const FaultInjectionHarness = struct {
         const node = self.simulation_harness.node();
         const node_vfs = node.filesystem;
         node_vfs.disable_torn_writes();
-    }
-
-    /// Access VFS for pipeline initialization compatibility
-    pub fn vfs_ptr(self: *Self) *VFS {
-        return &self.simulation_harness.vfs_instance;
     }
 
     /// Access simulation VFS for direct fault injection control

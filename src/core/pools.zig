@@ -210,16 +210,6 @@ pub fn ObjectPoolType(comptime T: type) type {
             return self.free_list == null;
         }
 
-        /// Get number of objects currently in use.
-        pub fn active_count(self: *const Self) u32 {
-            return self.used_count;
-        }
-
-        /// Get total pool capacity.
-        pub fn capacity(self: *const Self) u32 {
-            return self.total_capacity;
-        }
-
         /// Validate object belongs to this pool (debug builds only).
         /// Prevents releasing objects from other pools or non-pool memory.
         fn validate_pool_ownership(self: *const Self, item: *T) void {
@@ -406,11 +396,6 @@ pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
             self.next_hint = @intCast(index); // Prefer recently freed slots
         }
 
-        /// Get current utilization as count of used slots.
-        pub fn active_count(self: *const Self) u32 {
-            return @intCast(self.used_mask.count());
-        }
-
         /// Check if stack pool is at capacity.
         pub fn is_exhausted(self: *const Self) bool {
             return self.used_mask.count() == capacity;
@@ -443,19 +428,19 @@ test "ObjectPool basic allocation and release" {
 
     try testing.expect(item1.* == 42);
     try testing.expect(item2.* == 84);
-    try testing.expect(pool.active_count() == 2);
+    try testing.expect(pool.used_count == 2);
 
     pool.release(item1);
-    try testing.expect(pool.active_count() == 1);
+    try testing.expect(pool.used_count == 1);
 
     const item3 = pool.acquire() orelse return error.PoolExhausted;
     item3.* = 126;
     try testing.expect(item3.* == 126);
-    try testing.expect(pool.active_count() == 2);
+    try testing.expect(pool.used_count == 2);
 
     pool.release(item2);
     pool.release(item3);
-    try testing.expect(pool.active_count() == 0);
+    try testing.expect(pool.used_count == 0);
 }
 
 test "ObjectPool exhaustion handling" {
@@ -482,7 +467,7 @@ test "ObjectPool exhaustion handling" {
 
     pool.release(item2.?);
     pool.release(item4.?);
-    try testing.expect(pool.active_count() == 0);
+    try testing.expect(pool.used_count == 0);
 }
 
 test "ObjectPool with initialization function" {
@@ -515,10 +500,10 @@ test "StackPool basic operations" {
 
     try testing.expect(item1.* == 100);
     try testing.expect(item2.* == 200);
-    try testing.expect(pool.active_count() == 2);
+    try testing.expect(@as(u32, @intCast(pool.used_mask.count())) == 2);
 
     pool.release(item1);
-    try testing.expect(pool.active_count() == 1);
+    try testing.expect(@as(u32, @intCast(pool.used_mask.count())) == 1);
 
     // Test reacquisition should prefer recently freed slot
     const item3 = pool.acquire() orelse return error.StackExhausted;
@@ -543,7 +528,7 @@ test "StackPool exhaustion and reset" {
 
     // Reset should make all slots available
     pool.reset();
-    try testing.expect(pool.active_count() == 0);
+    try testing.expect(@as(u32, @intCast(pool.used_mask.count())) == 0);
     try testing.expect(!pool.is_exhausted());
 
     // Should be able to acquire again
@@ -619,6 +604,6 @@ test "pool performance characteristics" {
     }
 
     // Verify pool statistics - all items should be back in pool
-    try testing.expect(pool.active_count() == 0);
-    try testing.expect(pool.capacity() == 16);
+    try testing.expect(pool.used_count == 0);
+    try testing.expect(pool.total_capacity == 16);
 }

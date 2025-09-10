@@ -474,16 +474,6 @@ pub const BatchWriter = struct {
             (current_dedup_weight + historical_weight);
     }
 
-    /// Query current batch statistics
-    pub fn query_batch_statistics(self: *const BatchWriter) BatchStatistics {
-        return self.current_stats;
-    }
-
-    /// Query lifetime performance statistics
-    pub fn query_lifetime_statistics(self: *const BatchWriter) LifetimeStatistics {
-        return self.lifetime_stats;
-    }
-
     /// Reset lifetime statistics for monitoring periods
     pub fn reset_lifetime_statistics(self: *BatchWriter) void {
         self.lifetime_stats = LifetimeStatistics.init();

@@ -192,17 +192,6 @@ pub const BlockIndex = struct {
         _ = self.blocks.remove(block_id);
     }
 
-    /// Get current number of blocks in the index.
-    pub fn block_count(self: *const BlockIndex) u32 {
-        return @intCast(self.blocks.count());
-    }
-
-    /// Get current memory usage of block content strings in bytes.
-    /// Excludes HashMap overhead to provide clean measurement for flush thresholds.
-    pub fn memory_usage(self: *const BlockIndex) u64 {
-        return self.memory_used;
-    }
-
     /// Clear all blocks in preparation for StorageEngine arena reset.
     /// Retains HashMap capacity for efficient reuse after StorageEngine resets arena.
     /// This is the key operation that enables O(1) bulk deallocation through StorageEngine.
@@ -345,8 +334,8 @@ test "block index initialization creates empty index" {
     var index = BlockIndex.init(&coordinator, testing.allocator);
     defer index.deinit();
 
-    try testing.expectEqual(@as(u32, 0), index.block_count());
-    try testing.expectEqual(@as(u64, 0), index.memory_usage());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.blocks.count())));
+    try testing.expectEqual(@as(u64, 0), index.memory_used);
 }
 
 test "put and find block operations work correctly" {
@@ -368,7 +357,7 @@ test "put and find block operations work correctly" {
     };
 
     try index.put_block(test_block);
-    try testing.expectEqual(@as(u32, 1), index.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(index.blocks.count())));
 
     const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
@@ -423,12 +412,12 @@ test "remove block updates count and memory accounting" {
     };
 
     try index.put_block(test_block);
-    const memory_before = index.memory_usage();
+    const memory_before = index.memory_used;
     try testing.expect(memory_before > 0);
 
     index.remove_block(block_id);
-    try testing.expectEqual(@as(u32, 0), index.block_count());
-    try testing.expectEqual(@as(u64, 0), index.memory_usage());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.blocks.count())));
+    try testing.expectEqual(@as(u64, 0), index.memory_used);
 }
 
 test "block replacement updates memory accounting correctly" {
@@ -448,7 +437,7 @@ test "block replacement updates memory accounting correctly" {
     };
 
     try index.put_block(test_block);
-    const memory_after_first = index.memory_usage();
+    const memory_after_first = index.memory_used;
 
     const replacement_block = ContextBlock{
         .id = block_id,
@@ -459,10 +448,10 @@ test "block replacement updates memory accounting correctly" {
     };
 
     try index.put_block(replacement_block);
-    const memory_after_second = index.memory_usage();
+    const memory_after_second = index.memory_used;
 
     // Should still have 1 block
-    try testing.expectEqual(@as(u32, 1), index.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(index.blocks.count())));
 
     // Memory should have increased due to longer content
     try testing.expect(memory_after_second > memory_after_first);
@@ -494,12 +483,12 @@ test "clear operation resets index to empty state efficiently" {
         try index.put_block(test_block);
     }
 
-    try testing.expectEqual(@as(u32, 10), index.block_count());
-    try testing.expect(index.memory_usage() > 0);
+    try testing.expectEqual(@as(u32, 10), @as(u32, @intCast(index.blocks.count())));
+    try testing.expect(index.memory_used > 0);
 
     index.clear();
-    try testing.expectEqual(@as(u32, 0), index.block_count());
-    try testing.expectEqual(@as(u64, 0), index.memory_usage());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(index.blocks.count())));
+    try testing.expectEqual(@as(u64, 0), index.memory_used);
 }
 
 test "memory accounting tracks string content accurately" {
@@ -525,7 +514,7 @@ test "memory accounting tracks string content accurately" {
     try index.put_block(test_block);
 
     const expected_memory = source_uri.len + metadata_json.len + content.len;
-    try testing.expectEqual(@as(u64, expected_memory), index.memory_usage());
+    try testing.expectEqual(@as(u64, expected_memory), index.memory_used);
 }
 
 test "large block content handling" {

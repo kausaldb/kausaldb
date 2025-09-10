@@ -283,11 +283,6 @@ pub const WAL = struct {
         );
     }
 
-    /// Get current WAL operation statistics including entry counts and recovery metrics.
-    pub fn statistics(self: *const WAL) WALStats {
-        return self.stats;
-    }
-
     /// List all WAL segment files in the directory, sorted in chronological order
     pub fn list_segment_files(self: *WAL) WALError![][]const u8 {
         var file_list = std.array_list.Managed([]const u8).init(self.allocator);
@@ -586,7 +581,7 @@ test "WAL initialization and cleanup" {
     try testing.expectEqual(@as(u64, 0), wal.segment_size);
     try testing.expect(std.mem.eql(u8, "./test_wal_init", wal.directory));
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expectEqual(@as(u64, 0), stats.entries_written);
     try testing.expectEqual(@as(u64, 0), stats.bytes_written);
     try testing.expectEqual(@as(u32, 0), stats.segments_rotated);
@@ -608,7 +603,7 @@ test "WAL write single entry" {
 
     try wal.write_entry(entry);
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expectEqual(@as(u64, 1), stats.entries_written);
     try testing.expect(stats.bytes_written > 0);
     try testing.expect(wal.segment_size > 0);
@@ -634,7 +629,7 @@ test "WAL write multiple entries" {
         try wal.write_entry(entry);
     }
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expectEqual(@as(u64, num_entries), stats.entries_written);
     try testing.expect(stats.bytes_written > 0);
 }
@@ -664,7 +659,7 @@ test "WAL write different entry types" {
     defer edge_entry.deinit(allocator);
     try wal.write_entry(edge_entry);
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expectEqual(@as(u64, 3), stats.entries_written);
 }
 
@@ -708,7 +703,7 @@ test "WAL segment rotation" {
     try testing.expect(rotation_occurred);
     try testing.expect(wal.segment_number > initial_segment);
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expect(stats.segments_rotated > 0);
 }
 
@@ -803,7 +798,7 @@ test "WAL statistics accuracy" {
     defer wal.deinit();
     try wal.startup();
 
-    const initial_stats = wal.statistics();
+    const initial_stats = wal.stats;
     try testing.expectEqual(@as(u64, 0), initial_stats.entries_written);
     try testing.expectEqual(@as(u64, 0), initial_stats.bytes_written);
 
@@ -815,7 +810,7 @@ test "WAL statistics accuracy" {
 
     try wal.write_entry(entry);
 
-    const updated_stats = wal.statistics();
+    const updated_stats = wal.stats;
     try testing.expectEqual(@as(u64, 1), updated_stats.entries_written);
     try testing.expectEqual(@as(u64, entry_size), updated_stats.bytes_written);
 }
@@ -855,6 +850,6 @@ test "WAL concurrent safety assertions" {
 
     try wal.write_entry(entry);
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expectEqual(@as(u64, 1), stats.entries_written);
 }

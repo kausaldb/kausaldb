@@ -98,7 +98,7 @@ test "storage engine basic defensive operations" {
     }
 
     // Verify block count is correct
-    const count = engine.block_count();
+    const count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try expectEqual(@as(u32, 1), count);
 }
 
@@ -192,7 +192,7 @@ test "storage engine memory behavior under load" {
     }
 
     // Verify final state - expect some blocks were written despite backpressure
-    const final_count = engine.block_count();
+    const final_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try expect(final_count > 0);
     try expect(final_count <= iterations); // Should not exceed what we attempted
 

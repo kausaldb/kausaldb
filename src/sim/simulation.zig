@@ -121,11 +121,6 @@ pub const Simulation = struct {
         self.network.configure_latency(node_a, node_b, latency_ticks);
     }
 
-    /// Get the current tick count.
-    pub fn ticks(self: *Self) u64 {
-        return self.tick_count;
-    }
-
     /// Get a deterministic random number.
     pub fn random(self: *Self) u64 {
         return self.prng.random().int(u64);
@@ -611,12 +606,12 @@ test "simulation basic functionality" {
     try std.testing.expect(node1.id == 0);
     try std.testing.expect(node2.id == 1);
 
-    const initial_tick = sim.ticks();
+    const initial_tick = sim.tick_count;
     sim.tick();
-    try std.testing.expect(sim.ticks() == initial_tick + 1);
+    try std.testing.expect(sim.tick_count == initial_tick + 1);
 
     sim.tick_multiple(5);
-    try std.testing.expect(sim.ticks() == initial_tick + 6);
+    try std.testing.expect(sim.tick_count == initial_tick + 6);
 }
 
 test "simulation node filesystem" {
@@ -689,7 +684,7 @@ test "simulation deterministic behavior" {
     sim1.tick_multiple(10);
     sim2.tick_multiple(10);
 
-    try std.testing.expect(sim1.ticks() == sim2.ticks());
+    try std.testing.expect(sim1.tick_count == sim2.tick_count);
 
     const rand1 = sim1.random();
     const rand2 = sim2.random();

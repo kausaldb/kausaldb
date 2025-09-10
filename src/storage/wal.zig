@@ -101,7 +101,7 @@ test "WAL basic write and recovery" {
 
     try wal.write_entry(block_entry);
 
-    const stats = wal.statistics();
+    const stats = wal.stats;
     try testing.expect(stats.entries_written == 1);
     try testing.expect(stats.bytes_written > 0);
 
@@ -160,14 +160,14 @@ test "WAL segment rotation" {
         try wal.write_entry(block_entry);
         entries_written += 1;
 
-        const stats = wal.statistics();
+        const stats = wal.stats;
         if (stats.segments_rotated > segments_before) {
             try testing.expect(stats.segments_rotated == 1);
             break;
         }
     }
 
-    const final_stats = wal.statistics();
+    const final_stats = wal.stats;
     try testing.expect(final_stats.segments_rotated > 0);
 }
 

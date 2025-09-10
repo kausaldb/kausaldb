@@ -54,13 +54,13 @@ test "wal recovery detects magic number corruption" {
     try harness.shutdown_storage_engine();
 
     // Enable read corruption to simulate magic number corruption
-    harness.simulation_vfs().enable_read_corruption(100, 3); // Moderate corruption rate
+    harness.sim_vfs.enable_read_corruption(100, 3); // Moderate corruption rate
 
     // Restart should handle corruption gracefully
     try harness.startup_storage_engine();
 
     // Data may be lost due to corruption, but system should remain stable
-    const block_count = harness.storage_engine.block_count();
+    const block_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(block_count >= 0); // System should not crash
 }
 
@@ -82,13 +82,13 @@ test "wal recovery handles checksum validation failures" {
     try harness.shutdown_storage_engine();
 
     // Enable read corruption to simulate checksum failures
-    harness.simulation_vfs().enable_read_corruption(50, 3); // Moderate corruption rate
+    harness.sim_vfs.enable_read_corruption(50, 3); // Moderate corruption rate
 
     // Recovery should detect corruption and handle gracefully
     try harness.startup_storage_engine();
 
     // System should remain stable despite checksum failures
-    const final_count = harness.storage_engine.block_count();
+    const final_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(final_count >= 0);
 }
 
@@ -116,13 +116,13 @@ test "wal recovery handles torn writes at segment boundaries" {
     try harness.shutdown_storage_engine();
 
     // Enable torn writes to simulate partial write failures
-    harness.simulation_vfs().enable_torn_writes(250, 16, 750); // 25% chance, min 16 bytes, keep 75%
+    harness.sim_vfs.enable_torn_writes(250, 16, 750); // 25% chance, min 16 bytes, keep 75%
 
     // Recovery should handle partial data gracefully
     try harness.startup_storage_engine();
 
     // Some data might be lost, but system should remain stable
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count <= i); // At most the original number
     try testing.expect(recovered_count >= 0); // But system stable
 }
@@ -145,25 +145,25 @@ test "wal recovery survives complete file corruption" {
     try harness.shutdown_storage_engine();
 
     // Enable extreme read corruption to simulate total file corruption
-    harness.simulation_vfs().enable_read_corruption(1000, 8); // Maximum corruption rate
+    harness.sim_vfs.enable_read_corruption(1000, 8); // Maximum corruption rate
 
     // System should survive total corruption without crashing
     try harness.startup_storage_engine();
 
     // Data may be lost due to corruption, but system should remain operational
-    const block_count = harness.storage_engine.block_count();
+    const block_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     // With extreme corruption, we expect data loss but system stability
     try testing.expect(block_count <= 1); // At most the original data
 
     // Disable corruption so new writes succeed
-    harness.simulation_vfs().disable_all_fault_injection();
+    harness.sim_vfs.disable_all_fault_injection();
 
     // Should be able to add new data after corruption recovery
     const new_block = try TestData.create_test_block_with_content(allocator, 2, "post_corruption");
     defer TestData.cleanup_test_block(allocator, new_block);
     try harness.storage_engine.put_block(new_block);
 
-    const final_count = harness.storage_engine.block_count();
+    const final_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(final_count >= 1); // At least our new block should be there
     try testing.expect(final_count > block_count); // Should have increased from before
 }
@@ -193,13 +193,13 @@ test "wal recovery handles interleaved corruption and valid data" {
     try harness.shutdown_storage_engine();
 
     // Enable moderate read corruption for selective corruption simulation
-    harness.simulation_vfs().enable_read_corruption(300, 8); // 30% corruption rate
+    harness.sim_vfs.enable_read_corruption(300, 8); // 30% corruption rate
 
     // Recovery should salvage what it can
     try harness.startup_storage_engine();
 
     // Recovery should salvage what it can - some data may survive
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count >= 0); // System remains stable
     try testing.expect(recovered_count <= 3); // At most the original data
 
@@ -244,12 +244,12 @@ test "wal recovery handles progressive corruption" {
     try harness.shutdown_storage_engine();
 
     // Enable progressive corruption using read corruption
-    harness.simulation_vfs().enable_read_corruption(200, 4); // Light but persistent corruption
+    harness.sim_vfs.enable_read_corruption(200, 4); // Light but persistent corruption
 
     // Early blocks should be more likely to survive than later ones
     try harness.startup_storage_engine();
 
-    const recovered_count = harness.storage_engine.block_count();
+    const recovered_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(recovered_count <= blocks_added); // At most the original data
     try testing.expect(recovered_count >= 0); // System should remain stable
 }

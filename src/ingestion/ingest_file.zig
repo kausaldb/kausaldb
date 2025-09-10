@@ -54,7 +54,7 @@ pub fn parse_file_to_blocks(
     var blocks = try allocator.alloc(ContextBlock, owned_blocks.len);
     defer allocator.free(owned_blocks);
     for (owned_blocks, 0..) |owned, i| {
-        blocks[i] = owned.extract();
+        blocks[i] = owned.block;
     }
     return blocks;
 }

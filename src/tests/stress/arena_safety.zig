@@ -69,12 +69,12 @@ test "memtable manager lifecycle safety" {
     }
 
     // Verify both storage engines have blocks stored
-    try testing.expect(harness1.storage_engine.block_count() > 0);
-    try testing.expect(harness2.storage_engine.block_count() > 0);
+    try testing.expect(@as(u32, @intCast(harness1.storage_engine.memtable_manager.block_index.blocks.count())) > 0);
+    try testing.expect(@as(u32, @intCast(harness2.storage_engine.memtable_manager.block_index.blocks.count())) > 0);
 
     // Verify memory isolation between harnesses
-    try testing.expect(harness1.storage_engine.block_count() == block_count);
-    try testing.expect(harness2.storage_engine.block_count() == block_count);
+    try testing.expect(@as(u32, @intCast(harness1.storage_engine.memtable_manager.block_index.blocks.count())) == block_count);
+    try testing.expect(@as(u32, @intCast(harness2.storage_engine.memtable_manager.block_index.blocks.count())) == block_count);
 }
 
 test "error path memory cleanup" {
@@ -105,11 +105,11 @@ test "error path memory cleanup" {
     }
 
     // Simulate error condition and verify cleanup
-    const initial_blocks = harness.storage_engine.block_count();
+    const initial_blocks = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(initial_blocks > 0);
 
     // Verify storage integrity after stress test
-    try testing.expect(harness.storage_engine.block_count() == 100);
+    try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == 100);
 }
 
 test "memory fragmentation stress" {
@@ -190,14 +190,14 @@ test "concurrent arena operations" {
 
     // Verify each harness has blocks stored
     for (&harnesses) |*harness| {
-        try testing.expect(harness.storage_engine.block_count() > 0);
+        try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) > 0);
     }
 
     // Test alternating pattern verification
     for (&harnesses, 0..) |*harness, idx| {
         if (idx % 2 == 0) {
             // Verify blocks are present before cleanup
-            try testing.expect(harness.storage_engine.block_count() == 50);
+            try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == 50);
         }
     }
 
@@ -205,7 +205,7 @@ test "concurrent arena operations" {
     for (&harnesses, 0..) |*harness, idx| {
         if (idx % 2 == 1) {
             // Verify blocks are present
-            try testing.expect(harness.storage_engine.block_count() == 50);
+            try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == 50);
         }
     }
 }
@@ -245,11 +245,11 @@ test "large allocation stress" {
         try harness.storage_engine.put_block(block);
 
         // Verify blocks are being stored
-        try testing.expect(harness.storage_engine.block_count() == i + 1);
+        try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == i + 1);
     }
 
     // Verify final state - all blocks stored
-    try testing.expect(harness.storage_engine.block_count() == block_count);
+    try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == block_count);
 
     // Verify large blocks can be retrieved
     const first_block = try harness.storage_engine.find_block(TestData.deterministic_block_id(0), .query_engine);
@@ -290,7 +290,7 @@ test "cross allocator corruption detection" {
     try harness.storage_engine.put_block(block_with_main);
 
     // Verify data is stored correctly
-    try testing.expect(harness.storage_engine.block_count() > 0);
+    try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) > 0);
 
     // Test with data from separate allocator
     const block_with_separate = ContextBlock{
@@ -304,7 +304,7 @@ test "cross allocator corruption detection" {
     try harness.storage_engine.put_block(block_with_separate);
 
     // Verify both blocks stored correctly
-    try testing.expect(harness.storage_engine.block_count() == 2);
+    try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == 2);
 
     // Verify both blocks can be retrieved regardless of source allocator
     const retrieved1 = try harness.storage_engine.find_block(block_with_main.id, .query_engine);
@@ -345,7 +345,7 @@ test "sustained operations memory stability" {
         }
 
         // Verify expected state
-        try testing.expect(harness.storage_engine.block_count() == blocks_per_cycle);
+        try testing.expect(@as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count())) == blocks_per_cycle);
 
         // Simulate storage reset by creating new harness
         harness.deinit();

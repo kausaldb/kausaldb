@@ -233,7 +233,7 @@ pub const ScenarioExecutor = struct {
         }
 
         // Count blocks after all operations (including fault operations) for accurate survival rate
-        const total_blocks_before_crash = storage_engine.block_count();
+        const total_blocks_before_crash = @as(u32, @intCast(storage_engine.memtable_manager.block_index.blocks.count()));
 
         // Fresh engine instance validates recovery from persisted state
         var recovered_engine = try StorageEngine.init_default(self.allocator, sim_vfs.vfs(), dir_name);
@@ -249,7 +249,7 @@ pub const ScenarioExecutor = struct {
         if (self.scenario.expected_recovery_success) {
             try recovery_result;
 
-            const recovered_block_count = recovered_engine.block_count();
+            const recovered_block_count = @as(u32, @intCast(recovered_engine.memtable_manager.block_index.blocks.count()));
             const survival_rate = @as(f32, @floatFromInt(recovered_block_count)) /
                 @as(f32, @floatFromInt(total_blocks_before_crash));
 

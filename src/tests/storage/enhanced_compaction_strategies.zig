@@ -162,7 +162,7 @@ test "compaction memory efficiency under large datasets" {
         test_blocks.deinit();
     }
 
-    const initial_memory = storage_engine.memtable_manager.memory_usage();
+    const initial_memory = storage_engine.memtable_manager.block_index.memory_used;
 
     // Add blocks to trigger multiple compaction cycles
     var i: u32 = 0;
@@ -183,7 +183,7 @@ test "compaction memory efficiency under large datasets" {
 
         // Monitor memory growth during ingestion
         if (i % 1000 == 0) {
-            const current_memory = storage_engine.memtable_manager.memory_usage();
+            const current_memory = storage_engine.memtable_manager.block_index.memory_used;
             const memory_growth = current_memory - initial_memory;
 
             // Memory should grow roughly linearly with active data, not quadratically
@@ -195,7 +195,7 @@ test "compaction memory efficiency under large datasets" {
     // Force memtable flush to trigger compaction
     try storage_engine.flush_memtable_to_sstable();
 
-    const final_memory = storage_engine.memtable_manager.memory_usage();
+    const final_memory = storage_engine.memtable_manager.block_index.memory_used;
 
     // After compaction, memory should be efficiently managed
     // Memory usage should be bounded regardless of total data size

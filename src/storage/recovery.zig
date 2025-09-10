@@ -112,17 +112,17 @@ pub const RecoveryContext = struct {
     /// that could lead to incorrect behavior during normal operations.
     pub fn validate_recovery_state(self: *const RecoveryContext) RecoveryError!void {
         // Verify block index is in valid state
-        if (self.block_index.block_count() > 0) {
+        if (@as(u32, @intCast(self.block_index.blocks.count())) > 0) {
             // Memory usage should be positive if blocks exist
-            if (self.block_index.memory_usage() == 0) {
+            if (self.block_index.memory_used == 0) {
                 return RecoveryError.BlockIndexCorruption;
             }
         }
 
         // Verify graph index consistency
         const edge_count = self.graph_index.edge_count();
-        const source_count = self.graph_index.source_block_count();
-        const target_count = self.graph_index.target_block_count();
+        const source_count = @as(u32, @intCast(self.graph_index.outgoing_edges.count()));
+        const target_count = @as(u32, @intCast(self.graph_index.incoming_edges.count()));
 
         // Edge count should be consistent with index structure
         if (edge_count > 0 and source_count == 0) {
@@ -306,7 +306,7 @@ test "apply wal entry to storage with block operations" {
 
     try testing.expectEqual(@as(u32, 1), context.stats.blocks_recovered);
     try testing.expectEqual(@as(u32, 1), context.stats.total_entries_processed);
-    try testing.expectEqual(@as(u32, 1), setup.block_index.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count())));
 
     const delete_entry = try WALEntry.create_delete_block(testing.allocator, block_id);
     defer delete_entry.deinit(testing.allocator);
@@ -315,7 +315,7 @@ test "apply wal entry to storage with block operations" {
 
     try testing.expectEqual(@as(u32, 1), context.stats.blocks_deleted);
     try testing.expectEqual(@as(u32, 2), context.stats.total_entries_processed);
-    try testing.expectEqual(@as(u32, 0), setup.block_index.block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(setup.block_index.blocks.count())));
 }
 
 test "apply wal entry to storage with edge operations" {
@@ -456,7 +456,7 @@ test "complete recovery workflow with mixed operations" {
     try testing.expectEqual(@as(u32, 0), stats.corrupted_entries_skipped);
 
     // Verify final state: block2 deletion should remove edge block1→block2
-    try testing.expectEqual(@as(u32, 1), setup.block_index.block_count()); // block1 remains
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count()))); // block1 remains
     try testing.expectEqual(@as(u32, 0), setup.graph_index.edge_count()); // edge removed with block2
 }
 
@@ -465,7 +465,7 @@ test "create test recovery setup provides working components" {
     defer setup.deinit();
 
     // Verify components are functional
-    try testing.expectEqual(@as(u32, 0), setup.block_index.block_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(setup.block_index.blocks.count())));
     try testing.expectEqual(@as(u32, 0), setup.graph_index.edge_count());
 
     const block = ContextBlock{
@@ -477,5 +477,5 @@ test "create test recovery setup provides working components" {
     };
 
     try setup.block_index.put_block(block);
-    try testing.expectEqual(@as(u32, 1), setup.block_index.block_count());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count())));
 }

@@ -75,7 +75,7 @@ test "full data lifecycle with compaction" {
     }
 
     // Verify initial state (some blocks may have been flushed to SSTables)
-    const in_memory_count = harness.storage_engine.block_count();
+    const in_memory_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(in_memory_count <= num_blocks); // Some may be in SSTables
 
     // Phase 2: Query validation across storage layers
@@ -127,7 +127,7 @@ test "full data lifecycle with compaction" {
         edges_created += 1;
     }
 
-    try testing.expectEqual(edges_created, harness.storage_engine.edge_count());
+    try testing.expectEqual(edges_created, harness.storage_engine.memtable_manager.graph_index.edge_count());
 
     // Test graph traversal queries (use module 1, not 0)
     const module_1_id = TestData.deterministic_block_id(1);
@@ -202,7 +202,7 @@ test "full data lifecycle with compaction" {
     // Verify deletions (blocks should be gone from memory, but may still be in SSTables)
     // For now, just verify the operation completed without error
 
-    const final_block_count = harness.storage_engine.block_count();
+    const final_block_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     // Block count depends on SSTable flush timing, so just verify it's reasonable
     try testing.expect(final_block_count <= num_blocks);
 
@@ -236,7 +236,7 @@ test "full data lifecycle with compaction" {
         "Integration test completed: {} blocks, {} edges, {}ns avg write, {}ns avg read",
         .{
             final_block_count,
-            harness.storage_engine.edge_count(),
+            harness.storage_engine.memtable_manager.graph_index.edge_count(),
             final_metrics.average_write_latency_ns(),
             final_metrics.average_read_latency_ns(),
         },
@@ -329,7 +329,7 @@ test "concurrent storage and query operations" {
     }
 
     // Phase 3: Validation
-    const final_count = harness.storage_engine.block_count();
+    const final_count = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     try testing.expectEqual(@as(u32, base_blocks + 100), final_count);
 
     const metrics = harness.storage_engine.metrics();
@@ -399,8 +399,8 @@ test "storage recovery and query consistency" {
         try storage_engine1.put_edge(edge2);
 
         // Verify initial state
-        try testing.expectEqual(@as(u32, 3), storage_engine1.block_count());
-        try testing.expectEqual(@as(u32, 2), storage_engine1.edge_count());
+        try testing.expectEqual(@as(u32, 3), @as(u32, @intCast(storage_engine1.memtable_manager.block_index.blocks.count())));
+        try testing.expectEqual(@as(u32, 2), storage_engine1.memtable_manager.graph_index.edge_count());
     }
 
     // Phase 2: Recovery and consistency validation with shared VFS
@@ -413,8 +413,8 @@ test "storage recovery and query consistency" {
     try storage_engine2.startup();
 
     // Verify recovery: all blocks should be retrievable
-    try testing.expectEqual(@as(u32, 3), storage_engine2.block_count());
-    try testing.expectEqual(@as(u32, 2), storage_engine2.edge_count());
+    try testing.expectEqual(@as(u32, 3), @as(u32, @intCast(storage_engine2.memtable_manager.block_index.blocks.count())));
+    try testing.expectEqual(@as(u32, 2), storage_engine2.memtable_manager.graph_index.edge_count());
 
     // Test that all blocks can be retrieved using standardized test data
     const test_indices = [_]u32{ 1, 2, 3 };
@@ -503,7 +503,7 @@ test "large scale performance characteristics" {
     const query_start = std.time.nanoTimestamp();
 
     // Random access pattern using standardized test data
-    const blocks_in_storage = harness.storage_engine.block_count();
+    const blocks_in_storage = @as(u32, @intCast(harness.storage_engine.memtable_manager.block_index.blocks.count()));
     if (blocks_in_storage > 0) {
         const queries_to_run = @min(100, blocks_in_storage);
         for (0..queries_to_run) |i| {

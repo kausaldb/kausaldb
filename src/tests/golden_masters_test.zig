@@ -98,7 +98,7 @@ const GoldenMasterSuite = struct {
         // that could change block counts and make results non-deterministic
         std.Thread.sleep(1_000); // 1μs - minimal delay for recovery completion
 
-        const final_block_count = engine2.block_count();
+        const final_block_count = @as(u32, @intCast(engine2.memtable_manager.block_index.blocks.count()));
         const expected_count = self.expected_block_count(test_name);
 
         if (final_block_count != expected_count) {

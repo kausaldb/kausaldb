@@ -452,6 +452,6 @@ test "query validates parameters and handles malformed inputs" {
     }
 
     // Verify engine remains stable after validation failures
-    const block_count = engine.block_count();
+    const block_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try testing.expectEqual(@as(u32, 0), block_count);
 }

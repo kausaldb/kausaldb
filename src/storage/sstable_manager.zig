@@ -400,27 +400,6 @@ pub const SSTableManager = struct {
         return self.compaction_manager.query_throttle_status();
     }
 
-    /// Get the total number of SSTables currently managed.
-    /// Used for metrics and debugging. O(1) operation.
-    pub fn sstable_count(self: *const SSTableManager) u32 {
-        return @intCast(self.sstable_paths.items.len);
-    }
-
-    /// Get the next SSTable ID that will be assigned.
-    /// Used for testing and debugging SSTable creation sequence.
-    pub fn next_id(self: *const SSTableManager) u32 {
-        return self.next_sstable_id;
-    }
-
-    /// Get the number of SSTables pending compaction.
-    /// Used for memory pressure calculation in backpressure control.
-    /// Returns the current SSTable count as a proxy for compaction pressure.
-    pub fn pending_compaction_count(self: *const SSTableManager) u64 {
-        // For now, use total SSTable count as compaction pressure indicator
-        // More sophisticated compaction management would track actual pending jobs
-        return @intCast(self.sstable_paths.items.len);
-    }
-
     /// Get the total number of blocks across all SSTables.
     /// Used for system-wide statistics and validation.
     /// Iterates through all managed SSTables and sums their block counts.
@@ -733,7 +712,7 @@ pub const SSTableManager = struct {
         fatal_assert(@intFromPtr(&self.compaction_manager) != 0, "CompactionManager pointer corruption", .{});
 
         // Excessive SSTable count indicates counter corruption or runaway file creation
-        const current_sstable_count = self.sstable_count();
+        const current_sstable_count = @as(u32, @intCast(self.sstable_paths.items.len));
         assert_fmt(current_sstable_count < 10000, "SSTable count {} is unreasonable - indicates corruption", .{current_sstable_count});
 
         // ID overflow or corruption could cause file naming conflicts and data loss
@@ -760,11 +739,11 @@ test "SSTableManager two-phase initialization" {
     var manager = SSTableManager.init(&coordinator, allocator, sim_vfs.vfs(), "/test/data");
     defer manager.deinit();
 
-    try testing.expectEqual(@as(u32, 0), manager.sstable_count());
-    try testing.expectEqual(@as(u32, 0), manager.next_id());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.sstable_paths.items.len)));
+    try testing.expectEqual(@as(u32, 0), manager.next_sstable_id);
 
     try manager.startup();
-    try testing.expectEqual(@as(u32, 0), manager.sstable_count());
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.sstable_paths.items.len)));
 }
 
 test "SSTableManager creates new SSTable from owned blocks" {
@@ -794,8 +773,8 @@ test "SSTableManager creates new SSTable from owned blocks" {
     const owned_blocks = [_]OwnedBlock{owned_block1};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
-    try testing.expectEqual(@as(u32, 1), manager.sstable_count());
-    try testing.expectEqual(@as(u32, 1), manager.next_id());
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(manager.sstable_paths.items.len)));
+    try testing.expectEqual(@as(u32, 1), manager.next_sstable_id);
 }
 
 test "SSTableManager finds owned blocks in SSTables" {

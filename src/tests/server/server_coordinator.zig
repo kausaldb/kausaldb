@@ -44,10 +44,10 @@ test "server decomposition maintains coordinator pattern" {
     defer server.deinit();
 
     // Verify server has ConnectionManager
-    try testing.expect(server.connection_manager.active_connection_count() == 0);
+    try testing.expect(server.connection_manager.connections.items.len == 0);
 
     // Verify server statistics are properly aggregated
-    const stats = server.statistics();
+    const stats = server.stats;
     try testing.expectEqual(@as(u64, 0), stats.connections_accepted);
     try testing.expectEqual(@as(u32, 0), stats.connections_active);
 }
@@ -64,7 +64,7 @@ test "connection manager operates independently" {
     defer manager.deinit();
 
     // Verify initial state
-    try testing.expectEqual(@as(u32, 0), manager.active_connection_count());
+    try testing.expectEqual(@as(u32, 0), manager.connections.items.len);
     try testing.expectEqual(@as(u32, 1), manager.next_connection_id);
 
     // Test Phase 2 initialization (I/O resources)
@@ -74,7 +74,7 @@ test "connection manager operates independently" {
     try testing.expect(manager.poll_fds.len == config.max_connections + 1);
 
     // Test statistics tracking
-    const stats = manager.statistics();
+    const stats = manager.stats;
     try testing.expectEqual(@as(u64, 0), stats.connections_accepted);
     try testing.expectEqual(@as(u32, 0), stats.connections_active);
 }
@@ -95,12 +95,12 @@ test "server coordinator delegates to connection manager" {
     defer server.deinit();
 
     // Test that server properly initializes manager
-    try testing.expectEqual(@as(u32, 0), server.connection_manager.active_connection_count());
+    try testing.expectEqual(@as(u32, 0), server.connection_manager.connections.items.len);
 
     // Verify statistics aggregation works
     server.update_aggregated_statistics();
-    const server_stats = server.statistics();
-    const manager_stats = server.connection_manager.statistics();
+    const server_stats = server.stats;
+    const manager_stats = server.connection_manager.stats;
 
     try testing.expectEqual(manager_stats.connections_accepted, server_stats.connections_accepted);
     try testing.expectEqual(manager_stats.connections_active, server_stats.connections_active);
@@ -169,9 +169,9 @@ test "coordinator error handling preserves system stability" {
     defer server.deinit();
 
     // Server should handle initialization errors gracefully
-    try testing.expect(server.connection_manager.active_connection_count() == 0);
+    try testing.expect(server.connection_manager.connections.items.len == 0);
 
     // Verify error handling doesn't corrupt coordinator state
-    const stats = server.statistics();
+    const stats = server.stats;
     try testing.expect(stats.connections_accepted >= 0); // Statistics remain valid
 }

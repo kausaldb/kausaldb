@@ -200,7 +200,7 @@ test "ingestion handles storage failures during block insertion" {
     const put_result = engine.put_block(test_block);
     if (put_result) |_| {
         // Success despite fault injection
-        const block_count = engine.block_count();
+        const block_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         try testing.expect(block_count > 0);
     } else |err| {
         // Expected storage failure from fault injection
@@ -290,7 +290,7 @@ test "ingestion maintains atomicity during cascade failures" {
     try engine.startup();
 
     // Record initial state
-    const initial_block_count = engine.block_count();
+    const initial_block_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
 
     // Enable write failures to simulate cascade failures
     sim_vfs.enable_io_failures(300, .{ .write = true }); // 30% probability on writes
@@ -322,7 +322,7 @@ test "ingestion maintains atomicity during cascade failures" {
         }
     }
 
-    const final_count = engine.block_count();
+    const final_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try testing.expect(final_count >= initial_block_count);
 }
 
@@ -405,7 +405,7 @@ test "ingestion enforces file size limits and handles oversized files" {
     }
 
     // Engine should remain consistent
-    const final_count = engine.block_count();
+    const final_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
     try testing.expectEqual(@as(u32, 0), final_count);
 }
 
@@ -441,7 +441,7 @@ test "ingestion cleans up resources after failures" {
     const put_result = engine.put_block(test_block);
     if (put_result) |_| {
         // Success case - verify proper operation
-        const block_count = engine.block_count();
+        const block_count = @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count()));
         try testing.expect(block_count > 0);
     } else |_| {
         // Failure case - resources should be cleaned up automatically

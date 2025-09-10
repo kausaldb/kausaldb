@@ -285,11 +285,6 @@ pub const TraversalResult = struct {
         self.query_arena.deinit();
     }
 
-    /// Get number of blocks in traversal result
-    pub fn count(self: TraversalResult) usize {
-        return self.blocks.len;
-    }
-
     /// Check if traversal result is empty
     pub fn is_empty(self: TraversalResult) bool {
         return self.blocks.len == 0;
@@ -595,7 +590,7 @@ fn add_neighbors_to_queue(
         const edges = storage_engine.find_outgoing_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.target_id)) {
@@ -617,7 +612,7 @@ fn add_neighbors_to_queue(
         const edges = storage_engine.find_incoming_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.source_id)) {
@@ -653,7 +648,7 @@ fn add_neighbors_to_stack(
         const edges = storage_engine.find_outgoing_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.target_id)) {
@@ -675,7 +670,7 @@ fn add_neighbors_to_stack(
         const edges = storage_engine.find_incoming_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.source_id)) {
@@ -1061,7 +1056,7 @@ fn traverse_topological_sort(
             const edges = storage_engine.find_outgoing_edges(block_id);
 
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 // Track dependency count for Kahn's algorithm ordering
@@ -1100,7 +1095,7 @@ fn traverse_topological_sort(
         const edges = storage_engine.find_outgoing_edges(current);
 
         for (edges) |owned_edge| {
-            const edge = owned_edge.as_edge();
+            const edge = owned_edge.edge;
             if (!edge_passes_filter(edge, query.edge_filter)) continue;
             if (!in_degree.contains(edge.target_id)) continue;
 
@@ -1180,7 +1175,7 @@ fn add_neighbors_to_astar_queue(
         const edges = storage_engine.find_outgoing_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.target_id)) {
@@ -1211,7 +1206,7 @@ fn add_neighbors_to_astar_queue(
         const edges = storage_engine.find_incoming_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.source_id)) {
@@ -1262,7 +1257,7 @@ fn add_neighbors_to_bidirectional_queue(
         const edges = storage_engine.find_outgoing_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.target_id)) {
@@ -1287,7 +1282,7 @@ fn add_neighbors_to_bidirectional_queue(
         const edges = storage_engine.find_incoming_edges(current_id);
         if (edges.len > 0) {
             for (edges) |owned_edge| {
-                const edge = owned_edge.as_edge();
+                const edge = owned_edge.edge;
                 if (!edge_passes_filter(edge, query.edge_filter)) continue;
 
                 if (!visited.contains(edge.source_id)) {

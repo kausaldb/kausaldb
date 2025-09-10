@@ -426,11 +426,6 @@ pub const AllocatorTortureTester = struct {
         // by enhanced allocator validation (DebugAllocator, etc).
         self.current_stats.double_free_attempts += 1;
     }
-
-    /// Get current statistics
-    pub fn stats(self: *const AllocatorTortureTester) TortureTestStats {
-        return self.current_stats;
-    }
 };
 
 test "AllocatorTortureTester: basic functionality" {
@@ -445,7 +440,7 @@ test "AllocatorTortureTester: basic functionality" {
 
     try tester.run_torture_test();
 
-    const stats = tester.stats();
+    const stats = tester.current_stats;
     try std.testing.expect(stats.total_allocations > 0);
 }
 
@@ -463,7 +458,7 @@ test "AllocatorTortureTester: pattern validation stress test" {
 
     try tester.run_torture_test();
 
-    const stats = tester.stats();
+    const stats = tester.current_stats;
 
     // Should have no pattern violations in a correct allocator
     try std.testing.expectEqual(@as(u64, 0), stats.pattern_violations);
@@ -484,7 +479,7 @@ test "AllocatorTortureTester: alignment stress test" {
 
     try tester.run_torture_test();
 
-    const stats = tester.stats();
+    const stats = tester.current_stats;
 
     // Should have no alignment violations
     try std.testing.expectEqual(@as(u64, 0), stats.alignment_violations);
@@ -497,7 +492,7 @@ pub fn run_allocator_torture_test(allocator: std.mem.Allocator, config: TortureT
     defer tester.deinit();
 
     try tester.run_torture_test();
-    return tester.stats();
+    return tester.current_stats;
 }
 
 /// Run torture test suite with different configurations
