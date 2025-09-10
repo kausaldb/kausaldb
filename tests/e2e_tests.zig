@@ -31,4 +31,6 @@ comptime {
     _ = @import("e2e/storage_pressure_testing.zig");
     _ = @import("e2e/workspace_operations.zig");
     _ = @import("e2e/workspace_statistics_test.zig");
+    _ = @import("e2e/query_correctness_validation.zig");
+    _ = @import("e2e/server_protocol_test.zig");
 }

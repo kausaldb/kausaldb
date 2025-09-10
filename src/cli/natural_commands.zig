@@ -56,6 +56,7 @@ pub const NaturalCommand = union(enum) {
     // System commands
     help: HelpCommand,
     version,
+    server: ServerCommand,
 
     pub const LinkCommand = struct {
         path: []const u8,
@@ -98,6 +99,12 @@ pub const NaturalCommand = union(enum) {
         workspace: ?[]const u8 = null,
         depth: ?u32 = null,
         format: OutputFormat = .human,
+    };
+
+    pub const ServerCommand = struct {
+        port: ?u16 = null,
+        host: ?[]const u8 = null,
+        data_dir: ?[]const u8 = null,
     };
 
     pub const HelpCommand = struct {
@@ -192,6 +199,10 @@ pub fn parse_natural_command(allocator: std.mem.Allocator, args: []const [:0]con
 
     if (std.mem.eql(u8, command_name, "trace")) {
         return parse_trace_command(allocator, args[2..]);
+    }
+
+    if (std.mem.eql(u8, command_name, "server")) {
+        return parse_server_command(allocator, args[2..]);
     }
 
     return NaturalCommandError.UnknownCommand;
@@ -377,6 +388,36 @@ fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8)
 
     return ParseResult{
         .command = .{ .trace = .{ .direction = direction, .target = target, .workspace = workspace, .depth = depth, .format = format } },
+        .allocator = allocator,
+    };
+}
+
+fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+    // Expected: server [--port N] [--host <host>] [--data-dir <path>]
+    var port: ?u16 = null;
+    var host: ?[]const u8 = null;
+    var data_dir: ?[]const u8 = null;
+
+    var i: usize = 0;
+    while (i < args.len) {
+        if (std.mem.eql(u8, args[i], "--port") and i + 1 < args.len) {
+            port = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                return NaturalCommandError.InvalidSyntax;
+            };
+            i += 2;
+        } else if (std.mem.eql(u8, args[i], "--host") and i + 1 < args.len) {
+            host = try allocator.dupe(u8, args[i + 1]);
+            i += 2;
+        } else if (std.mem.eql(u8, args[i], "--data-dir") and i + 1 < args.len) {
+            data_dir = try allocator.dupe(u8, args[i + 1]);
+            i += 2;
+        } else {
+            return NaturalCommandError.InvalidSyntax;
+        }
+    }
+
+    return ParseResult{
+        .command = .{ .server = .{ .port = port, .host = host, .data_dir = data_dir } },
         .allocator = allocator,
     };
 }

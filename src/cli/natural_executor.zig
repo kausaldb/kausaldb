@@ -187,6 +187,7 @@ pub fn execute_natural_command(
         .find => |cmd| try execute_find_command(context, cmd),
         .show => |cmd| try execute_show_command(context, cmd),
         .trace => |cmd| try execute_trace_command(context, cmd),
+        .server => |cmd| try execute_server_command(context, cmd),
     }
 }
 
@@ -490,6 +491,22 @@ fn execute_status_command(context: *NaturalExecutionContext, cmd: NaturalCommand
             }
         }
     }
+}
+
+fn execute_server_command(context: *NaturalExecutionContext, cmd: NaturalCommand.ServerCommand) !void {
+    // Server mode requires storage engine initialization
+    try context.ensure_storage_initialized();
+
+    const port = cmd.port orelse 8080;
+    const host = cmd.host orelse "127.0.0.1";
+
+    print_stdout(context.allocator, "Starting KausalDB server on {s}:{}\n", .{ host, port });
+    print_stdout(context.allocator, "Data directory: {s}\n", .{cmd.data_dir orelse context.data_dir});
+
+    // Server implementation placeholder for v0.2.0
+    // Network server with HTTP/gRPC interface planned for next release
+    write_stdout("Server mode not yet implemented\n");
+    write_stdout("This is a placeholder for the upcoming network server functionality\n");
 }
 
 fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.FindCommand) !void {
