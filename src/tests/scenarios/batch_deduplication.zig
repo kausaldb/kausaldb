@@ -44,7 +44,7 @@ const testing = std.testing;
 /// Test harness for batch deduplication scenarios
 pub const BatchDeduplicationHarness = struct {
     allocator: Allocator,
-    simulation_vfs: SimulationVFS,
+    simulation_vfs: *SimulationVFS,
     storage_engine: *StorageEngine,
     batch_writer: *BatchWriter,
 
@@ -61,7 +61,7 @@ pub const BatchDeduplicationHarness = struct {
     pub fn init(allocator: Allocator, seed: u64) !BatchDeduplicationHarness {
         _ = seed; // Not used in clean VFS mode, but kept for API compatibility
 
-        var simulation_vfs = try SimulationVFS.init(allocator);
+        var simulation_vfs = try SimulationVFS.heap_init(allocator);
 
         const storage_engine = try allocator.create(StorageEngine);
         errdefer allocator.destroy(storage_engine);
@@ -101,6 +101,7 @@ pub const BatchDeduplicationHarness = struct {
             }
         }
 
+        // Cleanup batch writer and storage engine
         self.batch_writer.deinit();
         self.allocator.destroy(self.batch_writer);
 
@@ -109,6 +110,7 @@ pub const BatchDeduplicationHarness = struct {
         self.allocator.destroy(self.storage_engine);
 
         self.simulation_vfs.deinit();
+        self.allocator.destroy(self.simulation_vfs);
     }
 
     /// Create batch with controlled duplicate patterns
