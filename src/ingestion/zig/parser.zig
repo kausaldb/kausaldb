@@ -135,7 +135,8 @@ pub const ZigParser = struct {
         file_path: []const u8,
         line_num: u32,
     ) !void {
-        if (std.mem.indexOf(u8, line, "struct {") != null or std.mem.indexOf(u8, line, "= struct") != null) {
+        // Match any line containing "struct" - more inclusive pattern
+        if (std.mem.indexOf(u8, line, "struct") != null) {
             try self.add_type_unit(units, allocator, line, file_path, line_num);
         }
     }
@@ -376,7 +377,7 @@ pub const ZigParser = struct {
 
         const unit = ParsedUnit{
             .id = unit_id,
-            .unit_type = try allocator.dupe(u8, "constant"),
+            .unit_type = try allocator.dupe(u8, "const"),
             .content = try allocator.dupe(u8, trimmed),
             .location = SourceLocation{
                 .file_path = try allocator.dupe(u8, file_path),
@@ -678,6 +679,65 @@ test "pattern parser content type support" {
     // Description should be informative
     const description = ZigParser.describe();
     try testing.expect(std.mem.containsAtLeast(u8, description, 1, "Zig"));
+}
+
+test "pattern parser struct and const detection" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const struct_source =
+        \\const std = @import("std");
+        \\pub const MAX_SIZE: usize = 1000;
+        \\pub const Config = struct {
+        \\    debug: bool = false,
+        \\};
+    ;
+
+    const config = ZigParserConfig{};
+    var parser = ZigParser.init(allocator, config);
+    defer parser.deinit();
+
+    var metadata = std.StringHashMap([]const u8).init(allocator);
+    defer {
+        var iter = metadata.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.value_ptr.*);
+        }
+        metadata.deinit();
+    }
+    try metadata.put("path", try allocator.dupe(u8, "test.zig"));
+
+    const content = SourceContent{
+        .data = struct_source,
+        .content_type = "text/zig",
+        .source_uri = "test.zig",
+        .metadata = metadata,
+        .timestamp_ns = @intCast(std.time.timestamp()),
+    };
+
+    const units = try parser.parse(allocator, content);
+    defer {
+        for (units) |*unit| {
+            unit.deinit(allocator);
+        }
+        allocator.free(units);
+    }
+
+    // Should find 2 units: MAX_SIZE (const) and Config (struct)
+    var struct_found = false;
+    var const_found = false;
+
+    for (units) |*unit| {
+        if (std.mem.eql(u8, unit.unit_type, "type") and std.mem.indexOf(u8, unit.id, "Config") != null) {
+            struct_found = true;
+        }
+        if (std.mem.eql(u8, unit.unit_type, "const") and std.mem.indexOf(u8, unit.id, "MAX_SIZE") != null) {
+            const_found = true;
+        }
+    }
+
+    try testing.expect(struct_found);
+    try testing.expect(const_found);
 }
 
 test "pattern parser extracts comprehensive metadata" {

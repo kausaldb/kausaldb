@@ -719,7 +719,17 @@ pub const QueryEngine = struct {
             if (!std.mem.eql(u8, block_codebase, codebase)) continue;
 
             const unit_type = if (metadata.object.get("unit_type")) |ut| ut.string else continue;
-            if (!std.mem.eql(u8, unit_type, entity_type)) continue;
+
+            // Map user entity types to storage entity types
+            const storage_entity_type = blk: {
+                if (std.mem.eql(u8, entity_type, "struct")) {
+                    break :blk "type"; // structs are stored as "type"
+                } else {
+                    break :blk entity_type; // direct mapping for other types
+                }
+            };
+
+            if (!std.mem.eql(u8, unit_type, storage_entity_type)) continue;
 
             const unit_id = if (metadata.object.get("unit_id")) |ui| ui.string else continue;
             const colon_pos = std.mem.lastIndexOf(u8, unit_id, ":") orelse continue;
