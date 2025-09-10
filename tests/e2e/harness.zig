@@ -198,6 +198,42 @@ pub const E2EHarness = struct {
         };
     }
 
+    /// Execute external commands (git, build tools) using shell interface
+    pub fn execute_shell_command(self: *Self, comptime cmd_fmt: []const u8, args: anytype) ![]const u8 {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_allocator = arena.allocator();
+
+        const full_cmd = try std.fmt.allocPrint(arena_allocator, cmd_fmt, args);
+
+        // Split command into argv
+        var argv = std.ArrayList([]const u8){};
+        defer argv.deinit(arena_allocator);
+
+        var arg_iter = std.mem.tokenizeAny(u8, full_cmd, " \t");
+        while (arg_iter.next()) |arg| {
+            try argv.append(arena_allocator, arg);
+        }
+
+        if (argv.items.len == 0) return error.EmptyCommand;
+
+        const result = try std.process.Child.run(.{
+            .allocator = arena_allocator,
+            .argv = argv.items,
+            .max_output_bytes = 1024 * 1024,
+        });
+
+        if (!process_succeeded(result.term)) {
+            std.debug.print("Shell command failed: {s}\n", .{full_cmd});
+            if (result.stderr.len > 0) {
+                std.debug.print("Stderr: {s}\n", .{result.stderr});
+            }
+            return error.CommandFailed;
+        }
+
+        return try self.allocator.dupe(u8, result.stdout);
+    }
+
     /// Execute workspace command (link, unlink, sync)
     pub fn execute_workspace_command(self: *Self, comptime fmt: []const u8, args: anytype) !CommandResult {
         const cmd_string = try std.fmt.allocPrint(self.allocator, fmt, args);
@@ -634,17 +670,21 @@ pub const E2EHarness = struct {
 
 /// Build KausalDB binary to ensure latest version for testing
 fn build_kausaldb_binary(allocator: std.mem.Allocator) !void {
-    const build_result = try std.process.Child.run(.{
+    // Create a temporary harness just for the shell command
+    var temp_harness = E2EHarness{
         .allocator = allocator,
-        .argv = &[_][]const u8{ "./zig/zig", "build" },
-    });
-    defer allocator.free(build_result.stdout);
-    defer allocator.free(build_result.stderr);
+        .binary_path = "",
+        .test_workspace = "",
+        .cleanup_paths = std.ArrayList([]const u8){},
+    };
 
-    if (!process_succeeded(build_result.term)) {
-        std.debug.print("Build failed:\nstdout: {s}\nstderr: {s}\n", .{ build_result.stdout, build_result.stderr });
-        return error.BuildFailed;
-    }
+    _ = temp_harness.execute_shell_command("./zig/zig build", .{}) catch |err| switch (err) {
+        error.CommandFailed => {
+            std.debug.print("Build failed: ./zig/zig build command failed\n", .{});
+            return error.BuildFailed;
+        },
+        else => return err,
+    };
 }
 
 /// Create isolated workspace directory for test execution
