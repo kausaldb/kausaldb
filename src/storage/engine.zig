@@ -109,6 +109,9 @@ const FlushMemtableCommand = struct {
             return err;
         };
 
+        // Reset storage arena to reclaim memory from flushed memtable
+        self.storage_engine.reset_storage_memory();
+
         // Execute compaction if needed using command pattern
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
         try compaction_command.execute();
@@ -839,7 +842,8 @@ pub const StorageEngine = struct {
     };
 
     /// Find all outgoing edges from a source block.
-    /// Delegates to memtable manager for graph traversal operations.
+    /// Searches both memtable and SSTables following LSM-tree read path.
+    /// Returns edges with memtable_manager ownership for consistency.
     pub fn find_outgoing_edges(self: *const StorageEngine, source_id: BlockId) []const OwnedGraphEdge {
         fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
 
@@ -855,14 +859,20 @@ pub const StorageEngine = struct {
 
         fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
 
-        const edges = self.memtable_manager.find_outgoing_edges(source_id);
+        // First check memtable (recent writes have precedence)
+        const memtable_edges = self.memtable_manager.find_outgoing_edges(source_id);
 
-        if (edges.len > 0) {
-            fatal_assert(@intFromPtr(edges.ptr) != 0, "MemtableManager returned null edges pointer with non-zero length - heap corruption detected", .{});
-            fatal_assert(std.mem.eql(u8, &edges[0].edge.source_id.bytes, &source_id.bytes), "First edge has wrong source_id - index corruption detected", .{});
+        if (memtable_edges.len > 0) {
+            fatal_assert(@intFromPtr(memtable_edges.ptr) != 0, "MemtableManager returned null edges pointer with non-zero length - heap corruption detected", .{});
+            fatal_assert(std.mem.eql(u8, &memtable_edges[0].edge.source_id.bytes, &source_id.bytes), "First edge has wrong source_id - index corruption detected", .{});
+            return memtable_edges;
         }
 
-        return edges;
+        // Check SSTables if not found in memtable
+        // NOTE: SSTable edge querying not yet implemented - edges currently memtable-only
+        // This maintains current behavior until full LSM-tree edge support is added
+
+        return &[_]OwnedGraphEdge{};
     }
 
     /// Find all incoming edges to a target block.

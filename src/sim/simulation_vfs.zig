@@ -754,7 +754,9 @@ pub const SimulationVFS = struct {
         // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
-        return self.files.contains(path);
+        const file_exists = self.files.contains(path);
+
+        return file_exists;
     }
 
     fn mkdir(ptr: *anyopaque, path: []const u8) VFSError!void {
