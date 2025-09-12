@@ -5,89 +5,64 @@
 
 > Code is a graph. Query it.
 
-KausalDB models your codebase as a directed graph of dependencies and relationships. Built for LLMs that need to understand software structure, not just grep through text.
-
-## System Requirements
-
-- Linux, macOS (Windows support planned)
-- 4GB+ RAM recommended
-- No external dependencies (single static binary)
+Model your codebase as a directed graph of dependencies and relationships. Built for LLMs or human that need to understand software structure, not just grep through text.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/kausaldb/kausaldb
-cd kausaldb
-
-# One-time setup: install Zig toolchain
+# Setup
 ./scripts/install_zig.sh
+./scripts/setup_hooks.sh
 
-# Optional: install project git hooks
-./zig/zig build hooks-install
-
-# Build and start the server
-./zig/zig build server
-
-# Or run a quick demo
-./zig/zig build demo
+# Build and run
+./zig/zig build test
+./zig/zig build run
 ```
 
-The server starts on port 8080 with a binary protocol for client connections.
-
-## Why
+## What it does
 
 Your codebase isn't a flat directory of text files. It's a network of dependencies with causal relationships. Grep and semantic search find text. KausalDB finds causality.
 
-```zig
-// What breaks if we change authenticate_user()?
-var func = try kausaldb.find("function:authenticate_user");
-var affected = try kausaldb.traverse(func.id, .incoming, .depth(3));
-````
+```bash
+# Link your codebase first
+kausaldb link /path/to/codebase as myproject
 
-The model operates on ground truth, not approximations.
+# Find a specific function
+kausaldb find function "authenticate_user" in myproject
 
-## Performance
+# What calls this function?
+kausaldb show callers "authenticate_user" in myproject
 
-Single-threaded by design. Zero data races, deterministic testing.
+# Trace deep call chains
+kausaldb trace callees "main" --depth 5
+```
 
-- **Block Write**: 30µs (33K ops/sec optimized)
-- **Block Read**: 33ns (29.9M ops/sec from memtable)
-- **Single Query**: 56ns (17.9M ops/sec)
-- **Zero Dependencies**: Single static binary
+Pattern-based parsing extracts semantic structure from source code. Stores relationships (`imports`, `calls`, `defines`, `references`) for fast graph traversal.
 
 ## Architecture
 
-LSM-Tree storage with arena-based memory management. See [DESIGN.md](docs/DESIGN.md) for the philosophy.
+**LSM-tree storage** optimized for write-heavy ingestion:
+- Write-Ahead Log for durability
+- In-memory indexes for fast reads
+- Size-tiered compaction
 
-```
-src/
-├── core/       # Types, assertions, memory patterns
-├── storage/    # LSM-Tree implementation
-├── query/      # Graph traversal engine
-└── server/     # Binary protocol server
-```
+**Single-threaded core** eliminates data races by design. All I/O through Virtual File System abstraction enabling deterministic testing.
 
-## Development
+**Performance**: 68µs writes, 23ns reads, 1.2µs graph traversal
 
+## Philosophy
+
+**Correctness over performance**. Property-based testing with deterministic simulation finds edge cases traditional unit tests miss.
+
+**Simplicity over features**. Arena memory management, explicit control flow, zero-cost abstractions.
+
+**Every test failure reproducible**:
 ```bash
-# Quick development cycle
-./zig/zig build                   # Build all executables
-./zig/zig build server            # Start server (Ctrl+C to stop)
-./zig/zig build demo              # Run demo
-./zig/zig build analyze           # Self-analysis demo
-./zig/zig build bench-write       # Run specific benchmark
-
-# Testing and validation
-./zig/zig build test              # Fast tests (unit + integration)
-./zig/zig build test-all          # Full test suite (simulation, fault injection)
-./zig/zig build perf              # Validate performance thresholds
-
-# Code quality
-./zig/zig build fmt-fix           # Fix formatting
-./zig/zig build tidy              # Check code quality
-./zig/zig build ci                # Run all CI checks
+./zig/zig build test -Dseed=0xDEADBEEF
 ```
 
-## Contributing
+Built for mission-critical AI systems that need reliable code understanding.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and [HACKING.md](HACKING.md) for architecture deep-dive.
+---
+
+See [`docs/`](docs/) for detailed design, development guide, and testing philosophy.

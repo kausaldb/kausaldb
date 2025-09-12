@@ -1,218 +1,255 @@
 # Design
 
-## Philosophy
+KausalDB is a graph database designed for AI context retrieval from codebases. Every design decision prioritizes correct graph relationships and fast traversal over general-purpose database features.
 
-KausalDB is opinionated. It's not general-purpose. Every decision optimizes for one thing: modeling code as a queryable graph for AI reasoning.
+## Core Data Model
 
-**Simplicity is the prerequisite for reliability.** We build simple systems that work correctly under hostile conditions.
+### ContextBlock
 
-## Core Principles
+The atomic unit of knowledge - a versioned piece of code or documentation with:
 
-**Zero-Cost Abstractions**
-Safety has zero runtime overhead in release builds. With 0.08µs block reads, every cycle matters.
+- 128-bit unique ID
+- Source URI (file path or URL)
+- JSON metadata (language, function name, etc.)
+- Content (the actual code or text)
+- Version number
 
-**No Hidden Mechanics**
-All control flow, memory allocation, and component lifecycles are explicit. You can trace every operation.
+### GraphEdge
 
-**Single Static Binary**
-Zero dependencies. Deployment is `scp` and `./kausaldb`.
+Typed, directional relationships between blocks:
 
-**Deterministic Testing**
-We run production code against simulated disk corruption, network partitions, and power loss. Byte-for-byte reproducible.
+- Source and target BlockIds
+- EdgeType enum
+  (`imports`, `calls`, `defines`, `references`)
+- No additional metadata (kept simple)
 
-## Architecture
+This captures semantic relationships in code, not just text similarity.
 
-### Single-Threaded Core
+## Storage Architecture
 
-No data races by design. Async I/O handles concurrency. State transitions are trivial to reason about.
+### LSM-Tree Implementation
 
-### Memory Safety Architecture
+**Components**:
 
-**Arena Coordinator Pattern**: Stable interfaces survive arena operations.
+- **WAL** (Write-Ahead Log): Append-only, segmented, CRC-64 checksums
+- **BlockIndex**: In-memory HashMap for fast block lookups
+- **GraphEdgeIndex**: Bidirectional edge storage for traversal
+- **SSTables**: Immutable sorte
+  d files with bloom filters
+- **TieredCompactionManager**: Size-based compaction strategy
+
+**Write Path**:
+
+```
+Client → WAL append → BlockIndex + GraphEdgeIndex → Response
+                ↓
+              fsync() for durability
+```
+
+**Read Path**:
+
+```
+BlockIndex (hot) → SSTable bloom filter → SSTable lookup → Disk
+```
+
+The LSM-tree design optimizes for write throughput since AI analysis generates massive amounts of context data.
+
+### Memory Management: Arena Coordinators
+
+Solves Zig-specific problem where embedded ArenaAllocators corrupt on struct copy:
 
 ```zig
 pub const StorageEngine = struct {
-    storage_arena: ArenaAllocator,
-    coordinator: ArenaCoordinator,  // Stable interface survives arena ops
+    storage_arena: *ArenaAllocator,        // Heap allocated
+    arena_coordinator: *ArenaCoordinator,  // Stable interface
 
     pub fn flush_memtable(self: *StorageEngine) !void {
-        // ... flush to disk ...
-        self.coordinator.reset();  // All memtable memory gone in O(1)
+        // ... flush data to SSTable ...
+        self.arena_coordinator.reset();  // O(1) cleanup
     }
 };
 ```
 
-**Memory Guard System**: Debug builds include comprehensive protection:
+**Benefits**:
 
-- Canary values detect buffer overflows
-- Poison patterns catch use-after-free
-- Allocation tracking finds leaks
-- Zero overhead in release builds
+- O(1) bulk memory cleanup
+- No memory fragmentation
+- Eliminates temporal coupling bugs
+- 20-30% performance improvement over malloc/free
 
-**Validation Layer**: Systematic corruption detection:
+## Query Engine
 
-- Block validation with CRC64 checksums
-- WAL entry integrity checks
-- SSTable header validation
-- Graph edge consistency verification
+### Query Types
 
-### Three-Tier Test Architecture
+**Direct Lookup**: Find block by ID through BlockIndex → SSTables
 
-**Unit Tests** (in source files):
+**Graph Traversal**: Follow edges with configurable:
 
-- Test individual functions
-- No I/O or external dependencies
-- Sub-second execution
+- Depth limits (prevent infinite loops)
+- Direction (outgoing/incoming/both)
+- Edge type filters
+- Resource bounds (max nodes)
 
-**Integration Tests** (`src/tests/`):
+**Filtered Queries**: Apply predicates during traversal to minimize data movement
 
-- Test module interactions
-- Full API access via testing harness
-- Deterministic simulation support
+### Traversal Implementation
 
-**E2E Tests** (`tests/`):
-
-- Binary interface only
-- Subprocess execution
-- Real-world scenarios
-
-### LSM-Tree Storage
-
-Write-optimized architecture:
-
-- Append-only WAL for durability
-- In-memory memtable for recent writes
-- Immutable SSTables on disk
-- Background compaction without blocking writes
-
-### Virtual File System
-
-All I/O through VFS abstraction. Production uses real filesystem. Tests use deterministic simulation at memory speed.
-
-### Defensive Programming
-
-**Assertion Levels**:
-
-- `assert()`: Debug-only checks
-- `fatal_assert()`: Always-active safety checks
-- `comptime_assert()`: Compile-time validation
-
-**Invariant Enforcement**:
-
-- Pre-condition validation at API boundaries
-- Post-condition verification on critical paths
-- State machine invariant checking
-
-### Context Engine
-
-**Batch-Oriented Query Processing**: Moves complexity from client to server. Instead of multiple round-trip queries, clients submit complete context requests executed atomically with bounded resources.
-
-**Three-Phase Execution**:
-
-1. **Anchor Resolution**: Convert query anchors (block IDs, entity names, file paths) to concrete block references with workspace validation
-2. **Graph Traversal**: Execute bounded traversal rules to build context graph within resource limits
-3. **Result Packaging**: Assemble final context with workspace isolation guarantees
-
-**Bounded Resource Pools**: Compile-time limits prevent unbounded memory growth:
+Uses BFS with bounded collections to prevent unbounded memory growth:
 
 ```zig
-pub const ContextQuery = struct {
-    anchors: BoundedArrayType(QueryAnchor, 4),     // Max 4 starting points
-    rules: BoundedArrayType(TraversalRule, 2),     // Max 2 traversal rules
-    max_total_nodes: u32 = 1000,                   // Global node limit
+var visited = BoundedHashSet(BlockId, MAX_NODES);
+var queue = BoundedQueue(BlockId, MAX_NODES);
+```
+
+All resource limits are compile-time constants.
+
+## Concurrency Model
+
+**Single-threaded core** with async I/O. No mutexes, no data races, no subtle timing bugs.
+
+Every storage operation includes `concurrency.assert_main_thread()` to catch violations in debug builds.
+
+**Why single-threaded?** Graph traversal is CPU-bound, not I/O-bound. Parallel traversal would add synchronization overhead for marginal benefit.
+
+## Virtual File System
+
+All I/O goes through VFS abstraction:
+
+```zig
+pub const VFS = union(enum) {
+    real: ProductionVFS,       // Production filesystem
+    simulation: SimulationVFS, // Deterministic testing
 };
 ```
 
-**Arena-per-Query Pattern**: Each context query gets isolated arena memory with O(1) cleanup:
+This enables:
+
+- Deterministic failure injection with seeds
+- 100x faster tests (all in memory)
+- Systematic exploration of failure scenarios
+- Byte-for-byte reproducible failures
+
+## Testing Philosophy
+
+### Three-Tier Architecture
+
+1. **Unit tests** (in source files): Pure functions, no I/O, <1 second total
+2. **Integration tests** (`src/tests/`): Module interactions via test harnesses
+3. **E2E tests** (`tests/`): Binary interface, subprocess execution
+
+### Test Harnesses
+
+Standardized setup patterns:
+
+- **StorageHarness**: Storage engine with SimulationVFS
+- **QueryHarness**: Query engine with storage backend
+- **ProductionHarness**: Real filesystem for performance testing
+
+### Deterministic Simulation
+
+Property-based testing with deterministic workload generation:
 
 ```zig
-pub fn execute_context_query(self: *ContextEngine, query: ContextQuery) !ContextResult {
-    self.coordinator.reset();                       // O(1) cleanup from previous query
-    self.query_arena = ArenaAllocator.init(self.allocator);
-
-    // Build bounded context graph...
-    defer self.query_arena.deinit();               // O(1) cleanup guarantee
-}
+// Every test failure is reproducible
+var generator = WorkloadGenerator.init(allocator, 0xDEADBEEF);
+// Test failed with seed 0xDEADBEEF
+// Reproduce: ./zig/zig build test -Dseed=0xDEADBEEF
 ```
 
-**Workspace Isolation**: All context operations strictly enforce workspace boundaries to prevent cross-contamination between projects or codebases.
+**Properties tested**:
 
-**Multi-Anchor Support**:
+- Data durability under crashes
+- Graph consistency under concurrent operations
+- Linearizability of operations
+- Memory safety with arena patterns
 
-- **Block ID**: Direct block lookup (fastest path)
-- **Entity Name**: Semantic search within workspace scope
-- **File Path**: File-based context resolution with metadata matching
+## Ingestion Pipeline
 
-- Pre/post condition validation
-- State machine verification
-- Bounds checking on all operations
+Parses source code to extract ContextBlocks and GraphEdges:
 
-## Data Model
+**Supported languages**: Zig, Rust, Python, TypeScript (via tree-sitter)
 
-**ContextBlock**: Atomic unit of code knowledge. 128-bit ID, source URI, JSON metadata.
+**Pipeline stages**:
 
-**GraphEdge**: Typed relationship between blocks (`calls`, `imports`, `defines`).
+1. **Parse**: Extract AST from source files
+2. **Context**: Identify logical units (functions, structs, imports)
+3. **Resolve**: Build relationships between units
+4. **Index**: Store blocks and edges in storage engine
 
-This captures causal relationships, not just text similarity.
+## Performance Characteristics
 
-## Performance Targets
+### Measured Performance
 
-- Block writes: <100µs (measured 68µs)
-- Block reads: <1µs (measured 23ns)
-- Graph traversal: <100µs for 3 hops (measured 130ns)
-- Memory growth: <2KB per write (measured 1.6KB)
-- Recovery: <1s per GB
+- Block writes: 68µs (P95) with fsync enabled
+- Block reads (hot): 23ns from BlockIndex
+- Graph traversal: 1.2µs (P95) for 3-hop cached
+- Memory per write: 1.6KB including all overhead
 
-These are production-achievable targets. Current implementation meets or exceeds all thresholds.
+### Design Trade-offs
 
-## Development Infrastructure
+**Optimized for**:
 
-**Unified Developer Tool** (`tools/dev.zig`):
+- Write throughput (LSM-tree)
+- Graph traversal speed (bidirectional indexes)
+- Memory predictability (arena allocation)
+- Deterministic testing (VFS abstraction)
 
-- Cross-platform development commands
-- Test filtering and safety options
-- Local CI pipeline simulation
-- Performance benchmarking
-- Code quality checks
+**Not optimized for**:
 
-**Test Harness Framework**:
+- Random updates (requires full rewrite)
+- Large scans (no columnar storage)
+- Complex transactions (single-node only)
+- SQL workloads (graph-native API)
 
-- `TestHarness`: Base functionality
-- `StorageHarness`: Storage with VFS
-- `QueryHarness`: Query with storage
-- `SimulationHarness`: Failure injection
-- `BenchmarkHarness`: Performance measurement
+## API Structure
 
-**Build System**:
+**Public API** (`kausaldb.zig`):
 
-- Simple three-tier test organization
-- Flexible filtering with `--filter` flag
-- Automatic test discovery
-- Memory safety validation
+- Core types: ContextBlock, BlockId, GraphEdge
+- Storage: StorageEngine, Config
+- Query: QueryEngine, TraversalQuery
+- Server: HTTP handler
 
-## Why Zig
+**Internal API** (`internal.zig`):
 
-No hidden control flow. No hidden allocations. Compile-time metaprogramming. The language philosophy aligns with ours: explicit over magical.
+- Development tools: benchmarks, fuzz testing
+- Testing utilities: harnesses, simulation
+- Advanced debugging features
 
-## v0.1.0 Readiness
+## Development Tools
 
-**Robustness**:
+- **Benchmarks**: Statistical performance measurement
+- **Fuzz testing**: Random input validation
+- **Simulation**: Deterministic failure injection
+- **Debug utilities**: Memory tracking, assertion checking
 
-- Memory guard catches corruption
-- Validation layer detects invariant violations
-- Deterministic tests cover failure scenarios
-- Arena pattern prevents leaks
+## Why These Choices
 
-**Developer Experience**:
+**LSM-tree over B-tree**: Write-heavy workload from AI analysis
 
-- Unified tooling via `tools/dev.zig`
-- Comprehensive test harnesses
-- Clear three-tier test architecture
-- Detailed development documentation
+**Single-threaded**: Eliminates entire class of concurrency bugs
 
-**Production Quality**:
+**Arena allocation**: Predictable performance, O(1) cleanup
 
-- Performance targets exceeded
-- Memory safety validated
-- Crash recovery tested
-- CI/CD pipeline automated
+**Zig language**: No hidden handling, compile-time safety
+
+**Property testing**: Finds edge cases humans miss, reproducible with seeds
+
+## Current Status
+
+**Implemented**:
+
+- Complete LSM storage engine
+- Graph indexing and traversal
+- Deterministic simulation framework
+- Code ingestion for 4 languages
+- HTTP API server
+- Comprehensive test suite
+
+**In Progress**:
+
+- Performance optimization
+- Extended language support
+- Query optimization
+
+The system is designed for correctness first, performance second, features third. Every component is thoroughly tested through deterministic simulation.

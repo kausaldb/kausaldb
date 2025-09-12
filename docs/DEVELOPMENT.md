@@ -1,119 +1,134 @@
-# Development Guide
+# Development
 
-Comprehensive guide for KausalDB development, testing, and contribution.
+Practical guide for KausalDB development. No fluff, just what you need to know.
 
 ## Quick Start
 
 ```bash
-# Install toolchain and setup
-./zig/zig build ci-setup
+# Setup
+./scripts/install_zig.sh     # Get exact Zig version
+./scripts/setup_hooks.sh     # Install git hooks
 
-# Run tests
-./zig/zig build test                     # Fast unit tests
-./zig/zig build test-integration         # Integration tests
-./zig/zig build ci-full                  # Full CI pipeline locally
+# Build and test
+./zig/zig build test         # Fast unit tests (~5 seconds)
+./zig/zig build run          # Start server
 
-# Development workflow
-./zig/zig build run                      # Run server
-./zig/zig build ci-smoke                 # Code quality checks
-./zig/zig build benchmark               # Performance benchmarks
+# Full validation before commit
+./zig/zig build ci-smoke     # Format, tidy, tests
 ```
 
-## Development Workflow
+## Project Structure
 
-### Unified Developer Tool
+```
+kausaldb/
+├── src/
+│   ├── core/              # Foundation: types, VFS, memory, concurrency
+│   ├── storage/           # LSM engine: WAL, memtable, SSTables, compaction
+│   ├── query/             # Query engine: traversal, filtering, planning
+│   ├── ingestion/         # File parsing: Zig, Rust, Python, TypeScript
+│   ├── sim/               # Deterministic simulation framework
+│   ├── server/            # HTTP API and request handling
+│   ├── tests/             # Integration tests with internal API access
+│   ├── dev/               # Development tools: benchmark, fuzz, debug
+│   ├── kausaldb.zig       # Public API
+│   ├── internal.zig       # Internal API for dev tools
+│   └── main.zig           # CLI entry point
+├── tests/                 # E2E tests (binary interface only)
+├── docs/                  # You are here
+└── build.zig              # Build configuration
+```
 
-All development tasks are managed through build targets:
+## Build System
+
+Everything goes through `build.zig`. No Makefiles, no shell scripts for building.
+
+### Common Targets
 
 ```bash
 # Testing
-./zig/zig build test                             # Fast unit tests
-./zig/zig build test --test-filter="storage"     # Test specific component
-./zig/zig build test -fsanitize-address          # Enable safety checks
-./zig/zig build ci-stress                        # Stress testing
+./zig/zig build test                          # Unit tests only
+./zig/zig build test-integration              # Integration tests
+./zig/zig build test-all                      # Everything including stress
+./zig/zig build test --test-filter="storage"  # Specific component
+./zig/zig build test -Dseed=0xDEADBEEF       # Deterministic reproduction
 
-# Code Quality
-./zig/zig build ci-smoke                         # Format + tidy + fast tests
-./zig/zig build fmt-fix                          # Auto-fix formatting
+# Development
+./zig/zig build run                           # Run server
+./zig/zig build run -- --help                 # Pass arguments
+./zig/zig build benchmark                     # Performance tests
+./zig/zig build fuzz                         # Fuzz testing
+./zig/zig build debug                        # Debug utilities
 
-# Performance
-./zig/zig build benchmark                        # Run benchmarks
-./zig/zig build fuzz                             # Fuzz testing
-./zig/zig build ci-perf                          # Performance validation
-
-# CI Validation
-./zig/zig build ci-full                          # Complete CI pipeline locally
+# CI/Quality
+./zig/zig build ci-smoke                     # Quick validation
+./zig/zig build ci-full                      # Complete validation
+./zig/zig build ci-stress                    # Stress testing
+./zig/zig build fmt-check                    # Format verification
+./zig/zig build tidy                         # Naming conventions
 ```
 
-### Git Workflow
+### Build Options
 
-Pre-commit hooks automatically:
-- Format code with `zig fmt`
-- Run tidy checks for naming conventions
-- Execute fast unit tests
-- Validate commit message format
+```bash
+# Optimization
+-Doptimize=Debug          # Default, fast compilation
+-Doptimize=ReleaseSafe    # Production with safety
+-Doptimize=ReleaseFast    # Maximum performance
+-Doptimize=ReleaseSmall   # Minimum binary size
 
-## Test Architecture
+# Safety
+-fsanitize-address        # AddressSanitizer
+-Denable-memory-guard     # Custom memory validation
+-Denable-tracy            # Tracy profiler integration
 
-### Three-Tier Testing Hierarchy
+# Testing
+-Dseed=0x12345           # Deterministic test seed
+-Dtest-filter="pattern"   # Run specific tests
+```
 
-1. **Unit Tests** (in source files)
-   - Test individual functions
-   - No I/O or external dependencies
-   - Run in <1 second total
+## Testing Workflow
 
-2. **Integration Tests** (`src/tests/`)
-   - Test module interactions
-   - Use test harnesses for consistency
+### Three-Tier Testing
 
-3. **E2E Tests** (`tests/`)
-   - Binary interface only
-   - Subprocess execution
-   - Real-world scenarios
+1. **Unit tests** (in source files): No I/O, pure functions
+2. **Integration tests** (`src/tests/`): Module interactions, harness-based
+3. **E2E tests** (`tests/`): Binary interface, subprocess execution
 
-### Test Harness Framework
+### Test Harnesses
 
 All integration tests use standardized harnesses:
 
 ```zig
-const harness = @import("harness.zig");
-
 test "storage operations" {
-    var test_harness = harness.StorageHarness.init(allocator, "test_name", false);
-    defer test_harness.deinit();
+    var harness = try StorageHarness.init(allocator, "test_db");
+    defer harness.deinit();
 
-    try test_harness.startup();
-    defer test_harness.shutdown();
+    try harness.startup();
+    defer harness.shutdown();
 
-    // Test implementation using harness utilities
-    const block = try test_harness.base.generate_block(42);
-    try test_harness.write_and_verify_block(&block);
+    // Your test here
+    const block = try harness.generate_block(42);
+    try harness.write_and_verify_block(&block);
 }
 ```
 
 Available harnesses:
-- `TestHarness`: Base functionality, memory management
-- `StorageHarness`: Storage engine with VFS
+
+- `StorageHarness`: Storage with SimulationVFS
 - `QueryHarness`: Query engine with storage
-- `SimulationHarness`: Deterministic failure injection
+- `SimulationHarness`: Failure injection
 - `BenchmarkHarness`: Performance measurement
 
-### Memory Safety
+### Deterministic Reproduction
 
-Debug builds include comprehensive memory protection:
+Every test failure can be reproduced:
 
-```zig
-const memory_guard = @import("core/memory_guard.zig");
+```bash
+# Test output on failure:
+# Test failed with seed: 0x7B3AF291
+# Reproduce with: ./zig/zig build test -Dseed=0x7B3AF291
 
-test "memory safety" {
-    var guard = memory_guard.create_test_allocator(allocator);
-    defer guard.deinit();  // Reports any leaks
-
-    const alloc = guard.allocator();
-    // All allocations tracked with canary values
-    // Buffer overflows detected immediately
-    // Use-after-free caught with poison patterns
-}
+./zig/zig build test -Dseed=0x7B3AF291  # Exact reproduction
 ```
 
 ## Code Style
@@ -121,18 +136,21 @@ test "memory safety" {
 ### Naming Conventions
 
 **Functions**: Verb-first, action-oriented
+
 ```zig
 pub fn find_block(id: BlockId) !?ContextBlock     // GOOD
-pub fn get_block(id: BlockId) !?ContextBlock      // BAD: no get prefix
+pub fn get_block(id: BlockId) !?ContextBlock      // BAD: no get/set
 ```
 
 **Error Handling**: Prefix indicates fallibility
+
 ```zig
-pub fn try_parse_header() !Header        // Error union
-pub fn maybe_find_block() ?Block        // Optional
+pub fn try_parse_header() !Header    // Error union
+pub fn maybe_find_block() ?Block     // Optional
 ```
 
 **Lifecycle**: Standard names only
+
 ```zig
 pub fn init()      // Cold: memory only
 pub fn startup()   // Hot: I/O operations
@@ -140,136 +158,146 @@ pub fn shutdown()  // Graceful termination
 pub fn deinit()    // Memory cleanup
 ```
 
+### Import Organization
+
+Manually formatted, no automation:
+
+```zig
+// 1. Standard library
+const std = @import("std");
+
+// 2. Internal modules (alphabetical)
+const assert_mod = @import("../core/assert.zig");
+const memory = @import("../core/memory.zig");
+const vfs = @import("../core/vfs.zig");
+
+// 3. Re-declarations
+const assert = assert_mod.assert;
+const fatal_assert = assert_mod.fatal_assert;
+
+// 4. Types
+const ArenaAllocator = std.heap.ArenaAllocator;
+const BlockId = types.BlockId;
+```
+
 ### Comments
 
-Comments explain **why**, not **what**:
+Explain **why**, not **what**:
 
 ```zig
 // BAD: Increment counter
 counter += 1;
 
-// GOOD: WAL requires sequential entry numbers for recovery validation
+// GOOD: WAL requires sequential IDs for recovery validation
 counter += 1;
 ```
 
-### Arena Memory Pattern
+### Memory Patterns
 
-Coordinators provide stable interfaces:
+Arena coordinator pattern:
 
 ```zig
 pub const Engine = struct {
     arena: ArenaAllocator,
-    coordinator: ArenaCoordinator,  // Survives arena ops
+    coordinator: ArenaCoordinator,  // Survives copies
 
     pub fn flush(self: *Engine) !void {
-        // ... flush to disk ...
+        // Work...
         self.coordinator.reset();  // O(1) cleanup
     }
 };
 ```
 
-## Performance Guidelines
+## Development Tools
 
-### Measurement First
-
-Before optimizing:
-1. Benchmark current performance
-2. Identify bottleneck with profiling
-3. Implement improvement
-4. Measure again to verify
+### Benchmarking
 
 ```bash
-# Benchmark specific operation
-zig run tools/dev.zig -- bench block-write
+# Run all benchmarks
+./zig/zig build benchmark
 
-# Profile with tracy (if enabled)
-zig build -Denable-tracy=true
-./zig-out/bin/kausaldb --profile
+# Specific operation
+./zig-out/bin/benchmark storage
+./zig-out/bin/benchmark query
+./zig-out/bin/benchmark compaction
+
+# JSON output for CI
+./zig-out/bin/benchmark all --json
 ```
 
-### Performance Targets
+Performance targets:
 
-All operations must meet these thresholds:
+- Block write: <100µs
+- Block read: <1µs
+- Graph traversal: <100µs
+- Memory/op: <2KB
 
-| Operation | Target | Current | Margin |
-|-----------|--------|---------|--------|
-| Block Write | <100µs | 68µs | 32% |
-| Block Read | <1µs | 23ns | 43x |
-| Graph Traversal | <100µs | 130ns | 769x |
-| Memory/Write | <2KB | 1.6KB | 20% |
+### Fuzzing
 
-## Debugging
+```bash
+# Quick fuzz (5 minutes)
+./scripts/quick_fuzz.sh
 
-### Memory Corruption
+# Production fuzz (overnight)
+./scripts/production_fuzz.sh
 
-Use tiered debugging approach:
+# Specific component
+./zig-out/bin/fuzz storage --iterations=10000
+```
 
-1. **Quick Check**: Enable safety allocator
+### Debugging
+
+#### Memory Issues
+
+Tiered approach:
+
+1. **Quick**: Safety allocator
+
 ```zig
 var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
 ```
 
-2. **Deep Analysis**: AddressSanitizer
+2. **Deep**: AddressSanitizer
+
 ```bash
-zig build test -fsanitize-address
+./zig/zig build test -fsanitize-address
 ```
 
 3. **Interactive**: LLDB
+
 ```bash
 lldb ./zig-out/bin/test
-(lldb) break set -n assert_fmt
+(lldb) break set -n fatal_assert
 (lldb) run
 ```
 
-### Deterministic Reproduction
+#### Test Failures
 
-All failures must be reproducible:
-
-```zig
-test "deterministic failure" {
-    var sim = Simulation.init(allocator, 0x12345);  // Fixed seed
-    sim.inject_io_failure_at(500);                  // Precise failure
-    // Test handles failure correctly
-}
-```
-
-## Project Structure
-
-```
-kausaldb/
-├── src/                    # Source code
-│   ├── core/              # Core utilities (assert, memory, vfs)
-│   ├── storage/           # Storage engine components
-│   ├── query/             # Query engine
-│   ├── dev/               # Development tools (CI, benchmarks, etc.)
-│   ├── tests/             # Integration tests with API access
-│   └── main.zig           # Entry point
-├── tests/                  # E2E tests (binary interface only)
-├── docs/                   # Documentation
-└── build.zig              # Build configuration with CI targets
-```
-
-## Contributing
-
-### Before Submitting
-
-1. **Run full validation**:
 ```bash
-./zig/zig build ci-full
+# Get detailed output
+./zig/zig build test --verbose
+
+# Run single test
+./zig/zig build test --test-filter="exact_test_name"
+
+# Debug build with symbols
+./zig/zig build -Doptimize=Debug
+lldb ./zig-out/bin/test
 ```
 
-2. **Update documentation** if changing APIs
+## Git Workflow
 
-3. **Add tests** for new functionality:
-   - Unit test in source file
-   - Integration test in `src/tests/`
-   - E2E test if user-facing
+### Pre-commit Hooks
 
-4. **Benchmark** performance-critical changes
+Automatically runs on commit:
+
+1. `zig fmt` - Code formatting
+2. `build tidy` - Naming conventions
+3. `build test` - Unit tests
+4. Commit message validation
 
 ### Commit Messages
 
-Follow conventional format:
 ```
 type(scope): brief summary
 
@@ -283,84 +311,165 @@ Impact: Result statement.
 
 Types: `feat`, `fix`, `refactor`, `test`, `docs`, `perf`, `chore`
 
-### Review Checklist
+Example:
 
-- [ ] Follows naming conventions
-- [ ] Comments explain why, not what
-- [ ] Tests cover edge cases
-- [ ] No memory leaks (debug build passes)
-- [ ] Performance targets met
-- [ ] Documentation updated
+```
+feat(storage): implement size-tiered compaction
+
+Replace level-based compaction with size-tiered strategy for
+better write amplification under heavy ingestion workloads.
+
+- Add TieredCompactionManager with size-based triggers
+- Remove LevelCompactionStrategy and related code
+- Update SSTableManager to track size tiers
+- Add compaction metrics for tier tracking
+
+Impact: 30% reduction in write amplification.
+```
+
+## CI Pipeline
+
+### Local CI Simulation
+
+```bash
+# Run what CI runs
+./zig/zig build ci-smoke    # Quick checks (2 min)
+./zig/zig build ci-full     # Everything (10 min)
+```
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/ci.yml
+- ci-smoke: Format, tidy, unit tests
+- ci-matrix: Cross-platform compilation
+- ci-stress: Extended stress testing
+- ci-perf: Performance regression detection
+```
+
+## Performance Profiling
+
+### CPU Profiling
+
+```bash
+# With Tracy (if built with -Denable-tracy)
+./zig/zig build -Denable-tracy
+./zig-out/bin/kausaldb --profile
+
+# With perf (Linux)
+perf record ./zig-out/bin/benchmark storage
+perf report
+```
+
+### Memory Profiling
+
+```bash
+# Built-in metrics
+./zig-out/bin/kausaldb --memory-stats
+
+# Valgrind (Linux)
+valgrind --leak-check=full ./zig-out/bin/test
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
 **Import errors in tests**:
+
 ```
-ERROR: import of file outside module path
+error: import of file outside module path
 ```
+
 Solution: Move test to `src/tests/` for internal API access.
 
 **Memory corruption**:
+
 ```bash
-# Enable memory guard
-zig build test -Denable-memory-guard=true
+# Enable all safety checks
+./zig/zig build test -Denable-memory-guard -fsanitize-address
 ```
 
 **Performance regression**:
+
 ```bash
-# Compare benchmarks
+# Compare before/after
 ./zig/zig build benchmark > before.txt
 # ... make changes ...
 ./zig/zig build benchmark > after.txt
 diff before.txt after.txt
 ```
 
-### Getting Help
+**Deterministic test failure**:
 
-1. Check existing tests for patterns
-2. Review harness implementations
-3. Read architecture docs in `docs/architecture/`
-4. Ask in discussions with minimal reproduction
+```bash
+# Use the seed from CI
+./zig/zig build test -Dseed=0xFAILED_SEED
+```
 
 ## Release Process
 
 ### Pre-release Checklist
 
-- [ ] All tests pass: `./zig/zig build ci-full`
+- [ ] `./zig/zig build ci-full` passes
 - [ ] No memory leaks: `./zig/zig build test -fsanitize-address`
-- [ ] Performance targets met: `./zig/zig build ci-perf`
+- [ ] Performance targets met: `./zig/zig build benchmark`
+- [ ] Fuzz testing clean: `./scripts/quick_fuzz.sh`
 - [ ] Documentation current
 - [ ] CHANGELOG updated
-- [ ] Version bumped in `build.zig`
 
-### Release Commands
+### Build Release
 
 ```bash
-# Tag release
-git tag -a v0.1.0 -m "Release v0.1.0"
+# Build optimized binaries
+./zig/zig build -Doptimize=ReleaseSafe     # With safety checks
+./zig/zig build -Doptimize=ReleaseFast     # Maximum performance
 
-# Build release binaries
-zig build -Doptimize=ReleaseFast
-zig build -Doptimize=ReleaseSmall
-
-# Run release validation
+# Verify
+./zig-out/bin/kausaldb --version
 ./scripts/validate_release.sh
 ```
 
+## Contributing
+
+### Code Review Checklist
+
+- [ ] Follows naming conventions (verb-first functions)
+- [ ] Comments explain why, not what
+- [ ] Tests use harnesses where applicable
+- [ ] Error handling is explicit
+- [ ] Memory management uses arena pattern
+- [ ] Performance impact considered
+- [ ] Documentation updated if needed
+
+### Adding Features
+
+1. Write property-based test first
+2. Implement with simplest approach
+3. Measure performance impact
+4. Add integration test with harness
+5. Update relevant documentation
+
+### Performance Guidelines
+
+Before optimizing:
+
+1. Benchmark current state
+2. Profile to find bottleneck
+3. Implement improvement
+4. Measure again
+5. Document trade-offs
+
 ## Philosophy
 
-**Simplicity is the prerequisite for reliability.** Every line of code should be:
-- Obviously correct
-- Necessary for functionality
-- Testable in isolation
-- Maintainable by others
+**Explicit over implicit**: Every allocation, every state change visible.
 
-**Zero-cost abstractions.** Safety mechanisms must have zero runtime overhead in release builds. We target microsecond operations.
+**Simple over clever**: Boring code that works > clever code that might work.
 
-**Explicit over magic.** All control flow, memory allocation, and state transitions must be immediately obvious. No hidden behavior.
+**Test properties, not examples**: Find bugs through systematic exploration.
 
----
+**Fail fast and loud**: `fatal_assert` on invariant violations.
 
-*Last updated: Preparing for v0.1.0 release*
+**Arena everywhere**: O(1) cleanup, no fragmentation, predictable performance.
+
+Remember: We're building a database. Correctness matters more than features. Performance matters more than flexibility. Simplicity matters more than elegance.

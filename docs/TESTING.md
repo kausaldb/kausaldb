@@ -1,109 +1,321 @@
-# Deterministic Simulation Testing for Database Systems
+# Testing
 
-Database systems demand exceptional reliability, yet traditional testing approaches often miss critical edge cases that appear in production. **Deterministic simulation testing has emerged as the gold standard for database reliability**, enabling systems like TigerBeetle and FoundationDB to achieve unprecedented correctness guarantees through systematic exploration of failure scenarios.
+KausalDB uses deterministic simulation and property-based testing to catch bugs that traditional unit tests miss. Every test failure can be reproduced exactly using a seed.
 
-This comprehensive guide synthesizes proven techniques from industry-leading implementations, providing concrete strategies for implementing deterministic simulation testing across all major database components and architectures.
+## Test Architecture
 
-## TigerBeetle's defense-in-depth testing philosophy
+### Three-Tier Structure
 
-TigerBeetle pioneered a **defense-in-depth testing strategy** that combines multiple complementary approaches to achieve exceptional reliability for financial transaction processing. Their approach centers on the VOPR (Viewstamped Operation Replicator) simulator, which **accelerates testing by 700x** - making 3.3 seconds of simulation equivalent to 39 minutes of real-world testing.
+**Unit Tests** (in source files):
 
-**VOPR's dual-mode innovation** represents a breakthrough in distributed systems testing. **Safety mode** injects faults uniformly across the system, testing strict serializability under network partitions, process crashes, and storage corruption. More importantly, **liveness mode** maintains a core quorum while making failures permanent for non-core replicas, specifically testing system availability under sustained failures. This dual approach discovered critical bugs like the "resonance bug" - an infinite loop in repair algorithms that would never surface in traditional testing.
+- Test individual functions in isolation
+- No I/O operations, pure computation
+- Run in <1 second total
+- Located alongside implementation code
 
-The system implements **physical determinism** through several key principles: all memory is allocated at startup with no dynamic allocation, LSM compaction work is scheduled deterministically, and data structures use hash-chained immutable logs. This enables **byte-identical replica convergence**, allowing block-level repair between replicas and simplifying debugging through perfectly reproducible test executions.
+**Integration Tests** (`src/tests/`):
 
-TigerBeetle complements deterministic simulation with **Vörtex**, a non-deterministic testing framework that tests production binaries "from the outside in" using TCP proxies for network fault injection and process-level fault injection. This dual approach ensures comprehensive coverage of both deterministic execution paths and non-deterministic system boundaries.
+- Test interactions between modules
+- Use standardized test harnesses
+- Access to internal APIs
+- Deterministic via SimulationVFS
 
-## FoundationDB's simulation-first architecture
+**End-to-End Tests** (`tests/`):
 
-FoundationDB's approach demonstrates the power of **building systems in simulation first** - they developed their distributed database entirely within a deterministic simulation environment for the first 18 months before writing production code. This simulation-first philosophy enabled them to discover and fix thousands of bugs that would have been nearly impossible to find through traditional testing.
+- Test binary interface only
+- Subprocess execution with real CLI
+- Real-world usage scenarios
 
-The **Flow language architecture** serves as the foundation for their testing approach. Flow extends C++11 with actor-based concurrency primitives, enabling **single-threaded deterministic execution** of entire distributed systems. The key insight is replacing physical interfaces with simulation shims - network I/O, disk operations, and time-based scheduling are all replaced with deterministic simulation equivalents.
+## Test Harnesses
 
-**FoundationDB's fault injection techniques** include sophisticated patterns like "swizzle-clogging" - systematically stopping network connections one by one over seconds, then unclogging them in random order. This technique is particularly effective at finding rare edge cases in consensus algorithms and distributed state machines.
+All integration tests use standardized harnesses from `src/tests/harness.
+zig`:
 
-Their **workload-based testing framework** runs continuous simulations equivalent to over one trillion CPU-hours of testing. Each simulation is perfectly reproducible through seed-based deterministic execution, enabling developers to debug complex distributed systems issues as easily as single-threaded programs.
+### StorageHarness
 
-## Graph database testing with metamorphic relations
+For testing storage operations with simulation:
 
-Testing graph databases presents unique challenges due to **complex relationship semantics** that traditional testing approaches struggle to validate. The most effective approach leverages **metamorphic testing using graph-aware metamorphic relations (MRs)**.
+```zig
+test "storage operations" {
+    var harness = try StorageHarness.init(allocator, "test_db");
+    defer harness.deinit();
 
-**The Gamera framework** has demonstrated remarkable effectiveness, detecting 39 bugs across 7 major graph databases by implementing three classes of MRs:
+    try harness.startup();
+    defer harness.shutdown();
 
-**Elementary MRs** test fundamental graph operations through connectivity invariants. If node A connects to B, and B connects to C, then A should connect to C transitively. **Path number calculations** verify that paths from A to C via B equal (paths A→B) × (paths B→C).
+    const block = try TestData.create_test_block(allocator, 1);
+    try harness.write_and_verify_block(&block);
+}
+```
 
-**Compound MRs** test complex functionalities using pattern fusion and partitioning. **K-hop neighbor consistency** ensures that if B is a k-hop neighbor of A, then A should be a k-hop neighbor of B. **Shortest path invariants** verify that removing nodes from shortest paths never makes paths shorter.
+### QueryHarness
 
-**Dynamic MRs** test data mutation operations by verifying that **graph structure properties are preserved** under addition, deletion, and update operations. These relations significantly outperform differential testing approaches by 3-5x in bug detection while producing fewer false positives.
+For testing query operations with storage backend:
 
-For implementation, use **deterministic graph generators** based on realistic network models. The Barabási-Albert model generates scale-free networks mimicking social graphs, while Watts-Strogatz creates small-world networks with clustering properties. **Seeded pseudo-random generation** ensures reproducible test cases while maintaining realistic graph topologies.
+```zig
+test "graph traversal" {
+    var harness = try QueryHarness.init(allocator, "test_db");
+    defer harness.deinit();
 
-## LSM-tree storage engine testing techniques
+    try harness.startup();
+    // Query testing with full storage stack
+}
+```
 
-LSM-tree storage engines require specialized testing approaches due to their **complex interaction between writes, compaction, and reads**. Effective testing must address compaction behavior, crash recovery, and read performance under concurrent operations.
+### ProductionHarness
 
-**RocksDB's db_stress framework** provides the industry standard for LSM testing. It operates through **deterministic compaction scheduling** using fixed seeds, making compaction behavior reproducible across test runs. The framework validates data using test oracles including "latest values files" and operation traces that ensure no data corruption occurs during background compaction.
+For performance testing with real filesystem:
 
-**Compaction testing strategies** include compaction simulators that replace physical SST files with in-memory bitsets to test compaction behaviors more consistently. **Write amplification measurement** tracks actual bytes written versus logical writes under different compaction strategies, enabling optimization of compaction parameters.
+```zig
+var harness = try ProductionHarness.init(allocator, "perf_test");
+// Real I/O for accurate performance measurements
+```
 
-**Crash recovery testing** must address both white-box crashes (injected at specific filesystem operation points) and black-box crashes (kill -9 process termination). Critical testing scenarios include **lost buffered write detection** - ensuring recovery doesn't create "holes" where newer writes survive but older ones are lost. **Trace-based recovery validation** traces all writes and verifies recovery matches a prefix of the trace.
+## Deterministic Simulation
 
-For **cross-component interactions**, implement unified simulation environments where storage, query, and ingestion components operate on shared simulated storage layers. Use **event-driven testing** with deterministic message scheduling between components to verify end-to-end consistency under concurrent operations.
+### Virtual File System
 
-## Ingestion pipeline and query engine simulation
+All I/O goes through VFS abstraction enabling deterministic testing:
 
-Testing ingestion pipelines and query engines in simulation requires **comprehensive validation of data flow, transformation correctness, and performance consistency**. The key is creating unified testing environments that can validate entire data processing workflows.
+```zig
+pub const VFS = union(enum) {
+    real: ProductionVFS,       // Production
+    simulation: SimulationVFS, // Testing
+};
+```
 
-**Batch versus streaming ingestion testing** should use identical data sets processed through both pathways, then compare results for consistency. Implement **deterministic data generation** using seeded PRNGs to create reproducible test scenarios while maintaining realistic data distributions and relationships.
+SimulationVFS provides:
 
-**Data validation strategies** must include schema compliance at ingestion boundaries, statistical validation for data quality (completeness, accuracy, consistency), and comprehensive error handling testing. For **transformation correctness**, implement property-based testing where transformations preserve specific mathematical relationships or business invariants.
+- In-memory filesystem
+- Deterministic failure injection
+- 100x faster test execution
+- Perfect reproducibility
 
-**Query engine testing** focuses on execution plan validation, ensuring identical queries generate equivalent plans and that cost models accurately predict execution costs. **Performance regression detection** through automated benchmarking catches performance degradation before production deployment.
+### Property-Based Testing
 
-**Result correctness validation** compares query results against reference implementations, tests query invariants and mathematical properties, and ensures cross-query consistency where related queries should return logically consistent results.
+Located in `src/sim/deterministic_test.zig`, tests system properties rather than specific examples:
 
-## Migrating from example-based to property-based testing
+```zig
+// WorkloadGenerator creates deterministic operation sequences
+var generator = WorkloadGenerator.init(allocator, seed, operation_mix);
 
-The migration from traditional unit tests to property-based testing requires a **systematic, gradual approach** that builds team expertise while delivering immediate value. The most successful migrations use data-driven testing as a bridge between example-based and property-based approaches.
+// PropertyChecker validates system invariants
+try PropertyChecker.check_no_data_loss(&model, &system);
+try PropertyChecker.check_graph_consistency(&model);
+```
 
-**The four-phase migration strategy** begins with identifying existing example-based tests that can be generalized. **Phase 2** converts these to data-driven tests with multiple inputs using the original implementation as a test oracle. **Phase 3** introduces property-based testing frameworks with simple generators, while **Phase 4** implements full property-based testing with shrinking and advanced generators.
+**Operation Types Tested**:
 
-**Property discovery follows seven core patterns**: "different paths, same destination" for commutative operations, "there and back again" for invertible functions like serialization/deserialization, and "some things never change" for invariants under transformation. For database systems, focus on **ACID properties verification** - atomicity (all-or-nothing completion), consistency (invariant maintenance), isolation (non-interference), and durability (persistence).
+- `put_block` - Block storage operations
+- `find_block` - Block retrieval operations
+- `put_edge` - Graph edge creation
+- `find_edges` - Graph traversal
+- `delete_block` - Block removal
 
-**Framework selection** should prioritize database-specific capabilities. **Hypothesis (Python)** provides excellent stateful testing support and Django integration. **jqwik (Java)** offers comprehensive stateful testing with model-based properties. **QuickCheck variants** in Haskell provide the most mature property-based testing ecosystem with extensive database testing capabilities.
+### Fault Injection
 
-## Test code organization for maximum coverage
+Realistic failure scenarios via `SimulationVFS`:
 
-Effective test organization balances **comprehensive coverage with maintainable code structure** and acceptable execution performance. The optimal organization separates concerns into distinct layers while enabling efficient test execution and debugging.
+- I/O errors at specific operation counts
+- Partial writes (simulating power loss)
+- File corruption with checksum validation
+- Disk full scenarios
+- Process crashes during operations
 
-**Hierarchical test structure** organizes code into property-tests (generators, properties, oracles, shrinking), simulation-tests (state-machines, actions, scenarios), and integration tests (models, comparisons). This separation enables teams to work on different testing aspects independently while maintaining clear interfaces between components.
+## Deterministic Reproduction
 
-**Coverage optimization techniques** leverage pairwise combinatorial testing - research shows most defects are found through 2-way parameter interactions rather than exhaustive testing. **Smart test generation** uses risk-based prioritization focusing on business-critical functionality and error-prone areas first, with statistical coverage tracking to identify untested scenarios.
+Every test uses seeded random generation:
 
-**Performance optimization** requires lazy generation of test data on-demand, caching expensive computations across test runs, and parallel execution of independent property tests. For database testing specifically, use in-memory databases for faster execution, connection pooling to reuse database connections, and transaction batching to reduce overhead.
+```zig
+test "crash recovery" {
+    const seed = std.testing.random_seed;
+    var sim = try SimulationRunner.init(allocator, seed);
 
-## Cross-component interaction testing patterns
+    // On failure, outputs:
+    // Test failed with seed: 0xDEADBEEF
+    // Reproduce: ./zig/zig build test -Dseed=0xDEADBEEF
+}
+```
 
-Testing interactions between storage, query, and ingestion components requires **unified simulation environments** that can model realistic system behavior while maintaining deterministic execution. The most effective approach combines component-specific testing with integrated system-level validation.
+Build system supports seed parameter:
 
-**Model-based testing architecture** creates simplified models that mimic database behavior alongside the actual system implementation. Action-based structures define database operations with explicit preconditions, postconditions, and state transitions, enabling systematic exploration of valid operation sequences.
+```bash
+# Reproduce exact failure
+./zig/zig build test -Dseed=0xDEADBEEF
 
-**State machine organization** represents system state explicitly and generates sequences of valid operations with proper preconditions. **Deterministic simulation components** include deterministic schedulers for timing control, network simulation for partition modeling, systematic fault injection, and state comparison between actual and expected behaviors.
+# Run with specific seed
+./zig/zig build test -Dseed=0x12345
+```
 
-**Integration test strategies** use in-memory test doubles for unit-level testing, containerized test environments for integration testing, and service mesh testing for inter-service communication patterns. **End-to-end pipeline testing** validates complete data flow from ingestion through storage to query execution.
+## Memory Safety Testing
 
-**Cross-component trace analysis** tracks operations across all components to verify end-to-end consistency. **Workload mixing** tests concurrent read/write/compaction operations to identify interaction effects that only appear under realistic load patterns.
+### Arena Validation
 
-## Implementation roadmap and best practices
+Tests verify arena memory patterns work correctly:
 
-Successfully implementing deterministic simulation testing requires **strategic planning and gradual adoption** that builds organizational capability while delivering measurable improvements in system reliability.
+```zig
+test "arena cleanup" {
+    var arena = ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-**Start with deterministic simulation** following FoundationDB's example of building simulation infrastructure before production code. **Layer testing approaches** combining unit tests, integration tests, property-based tests, and chaos testing provides comprehensive coverage across different failure modes and system states.
+    // Operations that allocate memory
+    var storage = try StorageEngine.init(arena.allocator(), vfs, "test");
 
-**Focus on component boundaries** by testing interactions between storage, query, and ingestion layers extensively. These boundaries often contain the most subtle bugs that only appear under specific timing conditions or failure scenarios.
+    // Verify no leaks after cleanup
+    storage.deinit();
+}
+```
 
-**Implement continuous validation** through automated stress tests and consistency checks in CI/CD pipelines. **Use formal methods appropriately** - TLA+ specifications for critical algorithms and protocols provide mathematical verification of correctness properties.
+### Memory Guard (Debug Builds)
 
-**Avoid common anti-patterns**: over-reliance on mocking (real database interactions often behave differently), insufficient crash recovery testing, single-node testing only for distributed systems, and inadequate performance regression testing.
+Debug builds include comprehensive memory protection:
 
-The investment in deterministic simulation testing pays significant dividends through improved bug detection, better understanding of system properties, and more robust database implementations that maintain correctness even under extreme failure conditions.
+- Canary values detect buffer overflows
+- Poison patterns catch use-after-free
+- Allocation tracking finds leaks
+- Zero overhead in release builds
+
+## Running Tests
+
+### Local Development
+
+```bash
+# Fast unit tests (~5 seconds)
+./zig/zig build test
+
+# Integration tests with simulation
+./zig/zig build test-integration
+
+# Full test suite including stress tests
+./zig/zig build test-all
+
+# Specific component
+./zig/zig build test --test-filter="storage"
+
+# With deterministic seed
+./zig/zig build test -Dseed=0x12345
+```
+
+````
+
+### Memory Safety Validation
+
+```bash
+# Enable safety allocator
+./zig/zig build test -Denable-memory-guard=true
+
+# AddressSanitizer (deep analysis)
+./zig/zig build test -fsanitize-address
+
+# Valgrind (Linux only)
+valgrind --leak-check=full ./zig-out/bin/test
+````
+
+### CI Integration
+
+GitHub Actions runs multiple configurations:
+
+- Unit and integration tests
+- Cross-platform validation (Linux, macOS, Windows)
+- Multiple deterministic seeds
+- Memory safety validation
+- Performance regression detection
+
+## Test Organization
+
+```
+src/tests/
+├── harness.zig                   # Test utilities and harnesses
+├── simulation/                   # Deterministic simulation tests
+│   ├── crash_recovery_test.zig   # WAL recovery validation
+│   ├── property_test.zig         # Property-based testing
+│   └── workload_test.zig         # Mixed operation patterns
+├── storage/                      # Storage engine tests
+│   ├── memtable_test.zig         # In-memory operations
+│   ├── wal_test.zig              # Write-ahead log durability
+│   └── compaction_test.zig       # LSM compaction behavior
+├── query/                        # Query engine tests
+│   ├── traversal_test.zig        # Graph traversal algorithms
+│   └── filtering_test.zig        # Query filtering
+└── fault_injection/              # Failure scenario testing
+    ├── io_errors_test.zig        # Disk failure simulation
+    └── corruption_test.zig       # Data corruption handling
+```
+
+## Performance Testing
+
+### Statistical Benchmarking
+
+Located in `src/dev/benchmark/`, uses statistical sampling:
+
+```zig
+var sampler = StatisticalSampler.init();
+// Multiple iterations with warmup
+// P95, P99 percentile calculations
+// Regression detection vs thresholds
+```
+
+### Benchmark Categories
+
+- **Storage**: Block operations, WAL performance, compaction
+- **Query**: Traversal algorithms, filtering, caching
+- **Parsing**: Code ingestion from different languages
+- **Memory**: Arena allocation patterns, cleanup performance
+
+## Debugging Failed Tests
+
+### Deterministic Reproduction
+
+```bash
+# Get seed from failed test output
+./zig/zig build test -Dseed=0xFAILED_SEED
+
+# Run with verbose output
+./zig/zig build test --verbose
+
+# Debug single test
+./zig/zig build test --test-filter="exact_test_name"
+```
+
+### Memory Debugging
+
+Tiered approach for memory issues:
+
+1. **Quick**: Safety allocator in debug builds
+2. **Deep**: AddressSanitizer for detailed analysis
+3. **Interactive**: LLDB for complex issues
+
+## What We Test
+
+### Core Properties
+
+- **Durability**: Acknowledged writes survive crashes
+- **Consistency**: Graph relationships remain valid after operations
+- **Isolation**: Concurrent operations don't interfere
+- **Recoverability**: WAL replay restores exact pre-crash state
+
+### Graph-Specific Properties
+
+- **Edge Validity**: All edges reference existing blocks
+- **Traversal Consistency**: Same query returns same results
+- **Bidirectional Index**: Forward/reverse edge lookups are consistent
+
+### Performance Properties
+
+- Block writes: <100µs (95th percentile)
+- Block reads: <1µs (hot data from memory)
+- Graph traversal: <100µs (3-hop cached)
+- Memory per operation: <2KB including all overhead
+
+## What We Don't Test
+
+- **Byzantine failures**: Single-node system, not distributed consensus
+- **Network partitions**: No distributed components
+- **SQL compliance**: Graph-native API only
+- **Infinite edge cases**: Bounded by practical usage scenarios
+
+## Philosophy
+
+Test properties, not examples. Use deterministic simulation to systematically explore the state space. Every bug found in testing is one that won't corrupt production data.
+
+The goal isn't 100% code coverage - it's confidence that the system behaves correctly under any realistic conditions.
