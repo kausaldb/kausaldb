@@ -244,3 +244,184 @@ test "property: reproducible failure with seed 0xBADF00D" {
 
     try runner.run(500);
 }
+
+test "property: graph transitivity is preserved" {
+    const allocator = testing.allocator;
+
+    // Create connected graph pattern
+    const operation_mix = OperationMix{
+        .put_block_weight = 30,
+        .find_block_weight = 20,
+        .delete_block_weight = 0, // No deletes to keep graph intact
+        .put_edge_weight = 40, // Heavy on edges for transitivity
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x72A45171, // TRAN-like seed
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Build graph with potential transitivity
+    try runner.run(500);
+
+    // Verify transitivity property if engine is still running
+    if (runner.storage_engine.state.can_read()) {
+        try PropertyChecker.check_transitivity(&runner.model, runner.storage_engine);
+    }
+}
+
+test "property: k-hop consistency across operations" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 25,
+        .find_block_weight = 25,
+        .delete_block_weight = 5,
+        .put_edge_weight = 30,
+        .find_edges_weight = 15,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x4A0B5555, // 4HOP-like seed
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Build initial graph
+    try runner.run(200);
+
+    // Check various k values if engine is running
+    if (runner.storage_engine.state.can_read()) {
+        var k: u32 = 1;
+        while (k <= 3) : (k += 1) {
+            try PropertyChecker.check_k_hop_consistency(&runner.model, runner.storage_engine, k);
+        }
+    }
+
+    // Restart engine for more operations
+    try runner.storage_engine.startup();
+
+    // Run more operations
+    try runner.run(300);
+
+    // Verify k-hop consistency maintained if engine is still running
+    if (runner.storage_engine.state.can_read()) {
+        var k: u32 = 1;
+        while (k <= 3) : (k += 1) {
+            try PropertyChecker.check_k_hop_consistency(&runner.model, runner.storage_engine, k);
+        }
+    }
+}
+
+test "property: bidirectional edge indices remain consistent" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 20,
+        .find_block_weight = 20,
+        .delete_block_weight = 10,
+        .put_edge_weight = 35, // Heavy edge operations
+        .find_edges_weight = 15,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0xB1D12EC7, // BIDI-like seed
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Run operations with periodic consistency checks
+    var i: u32 = 0;
+    while (i < 10) : (i += 1) {
+        // Restart engine if needed
+        if (!runner.storage_engine.state.can_write()) {
+            try runner.storage_engine.startup();
+        }
+
+        try runner.run(100);
+
+        // Check bidirectional consistency after each batch if engine is running
+        if (runner.storage_engine.state.can_read()) {
+            try PropertyChecker.check_bidirectional_consistency(
+                &runner.model,
+                runner.storage_engine,
+            );
+        }
+    }
+}
+
+test "property: graph consistency under crash recovery" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 25,
+        .find_block_weight = 20,
+        .delete_block_weight = 5,
+        .put_edge_weight = 35,
+        .find_edges_weight = 15,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0xC2A542EC, // CRASH-REC seed
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Build graph
+    try runner.run(300);
+
+    // Check graph properties before crash if engine is running
+    if (runner.storage_engine.state.can_read()) {
+        try PropertyChecker.check_transitivity(&runner.model, runner.storage_engine);
+        try PropertyChecker.check_bidirectional_consistency(&runner.model, runner.storage_engine);
+    }
+
+    // Simulate crash
+    try runner.simulate_crash_recovery();
+
+    // Verify graph properties preserved after recovery
+    if (runner.storage_engine.state.can_read()) {
+        try PropertyChecker.check_transitivity(&runner.model, runner.storage_engine);
+        try PropertyChecker.check_bidirectional_consistency(&runner.model, runner.storage_engine);
+        try PropertyChecker.check_k_hop_consistency(&runner.model, runner.storage_engine, 2);
+    }
+}
+
+test "property: edge deletion maintains graph integrity" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 20,
+        .find_block_weight = 20,
+        .delete_block_weight = 20, // Significant deletions
+        .put_edge_weight = 30,
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0xDE1E7E55, // DELETE seed
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Build and modify graph with deletions
+    try runner.run(1000);
+
+    // All properties should hold even with deletions if engine is running
+    if (runner.storage_engine.state.can_read()) {
+        try PropertyChecker.check_bidirectional_consistency(&runner.model, runner.storage_engine);
+        try PropertyChecker.check_k_hop_consistency(&runner.model, runner.storage_engine, 2);
+    }
+}

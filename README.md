@@ -37,9 +37,11 @@ kausaldb show callers "authenticate_user" in myproject
 kausaldb trace callees "main" --depth 5
 ```
 
-Pattern-based parsing extracts semantic structure from source code. Stores relationships (`imports`, `calls`, `defines`, `references`) for fast graph traversal.
+Pattern-based parsing extracts semantic structure from source code.
 
-## Architecture
+Stores relationships (`imports`, `calls`, `defines`, `references`) for fast graph traversal.
+
+## Design
 
 **LSM-tree storage** optimized for write-heavy ingestion:
 - Write-Ahead Log for durability
@@ -60,8 +62,6 @@ Pattern-based parsing extracts semantic structure from source code. Stores relat
 ```bash
 ./zig/zig build test -Dseed=0xDEADBEEF
 ```
-
-Built for mission-critical AI systems that need reliable code understanding.
 
 ---
 
