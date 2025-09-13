@@ -53,7 +53,8 @@ pub const BloomFilter = struct {
             const ln2_squared = 0.4804530139182014; // (ln(2))^2
             const bit_count_f = -items_f * @log(false_positive_rate) / ln2_squared;
 
-            const bit_count = @as(u32, @intFromFloat(@ceil(bit_count_f / 8.0) * 8.0));
+            const bit_count_int = @as(u32, @intFromFloat(bit_count_f));
+            const bit_count = ((bit_count_int + 7) / 8) * 8;
 
             // k = (m/n) * ln(2)
             const hash_count_f = (@as(f64, @floatFromInt(bit_count)) / items_f) * @log(2.0);
