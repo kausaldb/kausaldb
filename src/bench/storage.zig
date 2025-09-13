@@ -91,7 +91,7 @@ fn bench_block_write(
         const start = timer.read();
         try storage.put_block(block);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_block_write", samples.items);

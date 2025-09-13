@@ -175,8 +175,7 @@ jobs:
             -Dbench-iterations=10000 \
             -Dbench-warmup=1000 \
             -Dbench-baseline=bench-baseline.json \
-            -- --json \
-            | tee bench-results.txt
+            > bench-results.txt 2>&1
 
       - name: Check for Performance Regressions
         run: |
@@ -190,8 +189,8 @@ jobs:
       - name: Save Benchmark Results
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
-          # Extract JSON results from benchmark output
-          grep "^{" bench-results.txt > bench-baseline.json || true
+          # Save benchmark results as baseline for comparison
+          cp bench-results.txt bench-baseline.json || true
 
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@v4
