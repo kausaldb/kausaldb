@@ -170,7 +170,7 @@ pub const E2EHarness = struct {
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = argv_list.items,
-            .max_output_bytes = 1024 * 1024, // 1MB instead of default 50KB
+            .max_output_bytes = 4 * 1024 * 1024, // 4MB
         });
 
         const exit_code: u8 = switch (result.term) {
@@ -220,7 +220,7 @@ pub const E2EHarness = struct {
         const result = try std.process.Child.run(.{
             .allocator = arena_allocator,
             .argv = argv.items,
-            .max_output_bytes = 1024 * 1024,
+            .max_output_bytes = 4 * 1024 * 1024, // 4MB
         });
 
         if (!process_succeeded(result.term)) {
@@ -419,7 +419,7 @@ pub const E2EHarness = struct {
             \\const Point = struct {
             \\    x: f32,
             \\    y: f32,
-            \\    
+            \\
             \\    pub fn distance(self: Point, other: Point) f32 {
             \\        const dx = self.x - other.x;
             \\        const dy = self.y - other.y;
@@ -469,7 +469,7 @@ pub const E2EHarness = struct {
             \\
             \\pub const Logger = struct {
             \\    level: LogLevel,
-            \\    
+            \\
             \\    pub fn log(self: Logger, message: []const u8) void {
             \\        print("[{}] {s}\n", .{ self.level, message });
             \\    }
@@ -529,14 +529,14 @@ pub const E2EHarness = struct {
                 \\pub const Module{d}Struct = struct {{
                 \\    id: u32,
                 \\    data: [100]u8,
-                \\    
+                \\
                 \\    pub fn init(id: u32) Module{d}Struct {{
                 \\        return Module{d}Struct{{
                 \\            .id = id,
                 \\            .data = [_]u8{{0}} ** 100,
                 \\        }};
                 \\    }}
-                \\    
+                \\
                 \\    pub fn process(self: *Module{d}Struct) u32 {{
                 \\        return self.id * 2;
                 \\    }}
