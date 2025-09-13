@@ -1,256 +1,351 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-const BuildOptions = struct {
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    test_filter: ?[]const u8,
-    enable_asan: bool,
-    enable_ubsan: bool,
-    log_level: std.log.Level,
-
-    fn init(b: *std.Build) BuildOptions {
-        return BuildOptions{
-            .target = b.standardTargetOptions(.{}),
-            .optimize = b.standardOptimizeOption(.{}),
-            .test_filter = b.option([]const u8, "test-filter", "Filter tests by name pattern"),
-            .enable_asan = b.option(bool, "enable-asan", "Enable AddressSanitizer") orelse false,
-            .enable_ubsan = b.option(bool, "enable-ubsan", "Enable UndefinedBehaviorSanitizer") orelse false,
-            .log_level = b.option(std.log.Level, "log-level", "Set log level") orelse .warn,
-        };
-    }
+const zig_version = std.SemanticVersion{
+    .major = 0,
+    .minor = 15,
+    .patch = 1,
 };
 
-fn create_build_options(b: *std.Build, options: BuildOptions) *std.Build.Step.Options {
-    const build_options = b.addOptions();
-    build_options.addOption(bool, "debug_tests", options.optimize == .Debug);
-    build_options.addOption(bool, "sanitizers_active", options.enable_asan or options.enable_ubsan);
-    build_options.addOption(std.log.Level, "log_level", options.log_level);
-    return build_options;
+comptime {
+    const version_matches = zig_version.major == builtin.zig_version.major and
+        zig_version.minor == builtin.zig_version.minor and
+        zig_version.patch == builtin.zig_version.patch;
+
+    if (!version_matches) {
+        @compileError(std.fmt.comptimePrint(
+            "KausalDB requires exact Zig version {}, found {}. Run: ./scripts/install_zig.sh",
+            .{ zig_version, builtin.zig_version },
+        ));
+    }
 }
 
-fn create_test_executable(b: *std.Build, test_file: []const u8, options: BuildOptions) *std.Build.Step.Compile {
-    const test_exe = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path(test_file),
-            .target = options.target,
-            .optimize = options.optimize,
+const BuildOptions = struct {
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    options: *std.Build.Step.Options,
+};
+
+const TestOptions = struct {
+    seed: ?u64,
+    filter: ?[]const u8,
+    iterations: u32,
+};
+
+const DevOptions = struct {
+    fuzz_iterations: u32,
+    bench_iterations: u32,
+    bench_warmup: u32,
+    bench_baseline: ?[]const u8,
+};
+
+pub fn build(b: *std.Build) void {
+    const target = resolve_target(b);
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Deterministic seeds enable reproducible test failures across CI runs.
+    const test_seed_str = b.option([]const u8, "seed", "Test seed (hex or decimal)");
+    const test_seed: ?u64 = if (test_seed_str) |str| blk: {
+        if (std.mem.startsWith(u8, str, "0x") or std.mem.startsWith(u8, str, "0X")) {
+            break :blk std.fmt.parseInt(u64, str[2..], 16) catch
+                std.debug.panic("Invalid hex seed format. Use: 0xDEADBEEF", .{});
+        } else {
+            break :blk std.fmt.parseInt(u64, str, 10) catch
+                std.debug.panic("Invalid decimal seed format. Use: 123456", .{});
+        }
+    } else null;
+
+    const test_options = TestOptions{
+        .seed = test_seed,
+        .filter = b.option([]const u8, "filter", "Filter tests by name"),
+        .iterations = b.option(u32, "test-iterations", "Number of test iterations") orelse 1,
+    };
+
+    const dev_options = DevOptions{
+        .fuzz_iterations = b.option(u32, "fuzz-iterations", "Fuzzing iterations") orelse 10000,
+        .bench_iterations = b.option(u32, "bench-iterations", "Benchmark iterations") orelse 1000,
+        .bench_warmup = b.option(u32, "bench-warmup", "Benchmark warmup iterations") orelse 100,
+        .bench_baseline = b.option([]const u8, "bench-baseline", "Baseline results for comparison"),
+    };
+
+    const options = b.addOptions();
+    options.addOption(std.builtin.OptimizeMode, "optimize", optimize);
+    options.addOption(?u64, "test_seed", test_options.seed);
+    options.addOption(?[]const u8, "test_filter", test_options.filter);
+    options.addOption(u32, "test_iterations", test_options.iterations);
+    options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
+    options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
+    options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
+    options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
+
+    const build_options = BuildOptions{
+        .b = b,
+        .target = target,
+        .optimize = optimize,
+        .options = options,
+    };
+
+    // Core build targets - the essential functionality
+    build_executable(build_options);
+    build_tests(build_options, test_options);
+    build_dev_tools(build_options, dev_options);
+    build_ci_targets(build_options);
+}
+
+fn resolve_target(b: *std.Build) std.Build.ResolvedTarget {
+    var target = b.standardTargetOptions(.{});
+
+    // Enable CPU features for consistent performance across builds
+    if (target.result.cpu.arch == .x86_64) {
+        // SSE4.2 for string operations
+        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.sse4_2));
+        // POPCNT for bit manipulation
+        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.popcnt));
+        // CRC32 for checksums
+        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.crc32));
+        // AVX2 for SIMD operations if available
+        const no_avx2 = b.option(bool, "no-avx2", "Disable AVX2") orelse false;
+        if (!no_avx2) {
+            target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.avx2));
+        }
+    } else if (target.result.cpu.arch == .aarch64) {
+        // Enable NEON and crypto extensions for ARM64
+        target.result.cpu.features.addFeature(@intFromEnum(std.Target.aarch64.Feature.neon));
+        target.result.cpu.features.addFeature(@intFromEnum(std.Target.aarch64.Feature.crypto));
+    }
+
+    return target;
+}
+
+fn build_executable(build_options: BuildOptions) void {
+    const exe = build_options.b.addExecutable(.{
+        .name = "kausaldb",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/main.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
         }),
     });
 
-    // Add sanitizer support if enabled
-    if (options.enable_asan or options.enable_ubsan) {
-        test_exe.root_module.sanitize_c = .full;
+    exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(exe.root_module, build_options);
+
+    build_options.b.installArtifact(exe);
+
+    const run_cmd = build_options.b.addRunArtifact(exe);
+    run_cmd.step.dependOn(build_options.b.getInstallStep());
+    if (build_options.b.args) |args| {
+        run_cmd.addArgs(args);
     }
 
-    test_exe.root_module.addImport("build_options", create_build_options(b, options).createModule());
+    const run_step = build_options.b.step("run", "Run the KausalDB server");
+    run_step.dependOn(&run_cmd.step);
+}
+
+fn build_tests(build_options: BuildOptions, test_options: TestOptions) void {
+    const unit_tests = build_test_artifact(build_options, "src/unit_tests.zig", "unit-tests");
+    const unit_run = build_test_runner(build_options, unit_tests, test_options);
+    const unit_step = build_options.b.step("test-unit", "Run unit tests");
+    unit_step.dependOn(&unit_run.step);
+
+    const integration_tests = build_test_artifact(build_options, "src/integration_tests.zig", "integration-tests");
+    const integration_run = build_test_runner(build_options, integration_tests, test_options);
+    const integration_step = build_options.b.step("test-integration", "Run integration tests");
+    integration_step.dependOn(&integration_run.step);
+
+    const e2e_tests = build_test_artifact(build_options, "tests/e2e_tests.zig", "e2e-tests");
+    const e2e_run = build_test_runner(build_options, e2e_tests, test_options);
+    const e2e_step = build_options.b.step("test-e2e", "Run end-to-end tests");
+    e2e_step.dependOn(&e2e_run.step);
+
+    const test_fast = build_options.b.step("test", "Run fast test suite (unit + integration)");
+    test_fast.dependOn(&unit_run.step);
+    test_fast.dependOn(&integration_run.step);
+
+    const test_all = build_options.b.step("test-all", "Run complete test suite");
+    test_all.dependOn(&unit_run.step);
+    test_all.dependOn(&integration_run.step);
+    test_all.dependOn(&e2e_run.step);
+}
+
+fn build_dev_tools(build_options: BuildOptions, options: DevOptions) void {
+    build_benchmarks(build_options, options);
+    build_fuzzer(build_options, options);
+    build_tidy(build_options);
+    build_git_hooks(build_options);
+}
+
+fn build_benchmarks(build_options: BuildOptions, _: DevOptions) void {
+    const bench_exe = build_options.b.addExecutable(.{
+        .name = "bench",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/bench/main.zig"),
+            .target = build_options.target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+
+    bench_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(bench_exe.root_module, build_options);
+
+    const bench_run = build_options.b.addRunArtifact(bench_exe);
+
+    // Allow component selection via command line args
+    if (build_options.b.args) |args| {
+        bench_run.addArgs(args);
+    }
+
+    const bench_step = build_options.b.step("bench", "Run performance benchmarks");
+    bench_step.dependOn(&bench_run.step);
+}
+
+fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
+    const fuzz_exe = build_options.b.addExecutable(.{
+        .name = "fuzz",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/fuzz/main.zig"),
+            .target = build_options.target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+
+    // Use ReleaseFast for speed but enables sanitizers
+    fuzz_exe.root_module.sanitize_c = .full;
+
+    fuzz_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(fuzz_exe.root_module, build_options);
+
+    const fuzz_run = build_options.b.addRunArtifact(fuzz_exe);
+    fuzz_run.addArg("--iterations");
+    fuzz_run.addArg(build_options.b.fmt("{}", .{dev_options.fuzz_iterations}));
+
+    if (build_options.b.args) |args| {
+        fuzz_run.addArgs(args);
+    }
+
+    const fuzz_step = build_options.b.step("fuzz", "Run fuzz testing");
+    fuzz_step.dependOn(&fuzz_run.step);
+
+    const fuzz_quick_step = build_options.b.step("fuzz-quick", "Run quick fuzz test (1000 iterations)");
+    const quick_run = build_options.b.addRunArtifact(fuzz_exe);
+    quick_run.addArg("--iterations");
+    quick_run.addArg("1000");
+    fuzz_quick_step.dependOn(&quick_run.step);
+}
+
+fn build_tidy(build_options: BuildOptions) void {
+    const fmt_paths = [_][]const u8{ "src", "tests", "build.zig" };
+
+    const fmt_step = build_options.b.step("fmt", "Format all source code");
+    const fmt_run = build_options.b.addFmt(.{
+        .paths = &fmt_paths,
+        .check = false,
+    });
+    fmt_step.dependOn(&fmt_run.step);
+
+    const fmt_check_step = build_options.b.step("fmt-check", "Check code formatting");
+    const fmt_check = build_options.b.addFmt(.{
+        .paths = &fmt_paths,
+        .check = true,
+    });
+    fmt_check_step.dependOn(&fmt_check.step);
+
+    const tidy_exe = build_options.b.addExecutable(.{
+        .name = "tidy",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/dev/tidy.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+
+    tidy_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(tidy_exe.root_module, build_options);
+
+    const tidy_run = build_options.b.addRunArtifact(tidy_exe);
+    const tidy_step = build_options.b.step("tidy", "Check naming conventions and style rules");
+    tidy_step.dependOn(&tidy_run.step);
+}
+
+fn build_git_hooks(build_options: BuildOptions) void {
+    const hooks_exe = build_options.b.addExecutable(.{
+        .name = "hooks",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/dev/hooks.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+
+    hooks_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(hooks_exe.root_module, build_options);
+
+    const hooks_install = build_options.b.addRunArtifact(hooks_exe);
+    hooks_install.addArg("install");
+    const hooks_install_step = build_options.b.step("hooks-install", "Install git hooks");
+    hooks_install_step.dependOn(&hooks_install.step);
+}
+
+fn build_ci_targets(build_options: BuildOptions) void {
+    const lint_step = build_options.b.step("lint", "Run all linters and style checks");
+
+    const fmt_check = build_options.b.addFmt(.{
+        .paths = &[_][]const u8{ "src", "tests", "build.zig" },
+        .check = true,
+    });
+    lint_step.dependOn(&fmt_check.step);
+
+    const tidy_exe = build_options.b.addExecutable(.{
+        .name = "lint-tidy",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/dev/tidy.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+    tidy_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(tidy_exe.root_module, build_options);
+
+    const tidy_run = build_options.b.addRunArtifact(tidy_exe);
+    lint_step.dependOn(&tidy_run.step);
+}
+
+fn add_internal_module(module: *std.Build.Module, build_options: BuildOptions) void {
+    const internal_module = build_options.b.createModule(.{
+        .root_source_file = build_options.b.path("src/internal.zig"),
+        .target = build_options.target,
+        .optimize = build_options.optimize,
+    });
+    internal_module.addImport("build_options", build_options.options.createModule());
+    module.addImport("internal", internal_module);
+}
+
+fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, name: []const u8) *std.Build.Step.Compile {
+    const test_exe = build_options.b.addTest(.{
+        .name = name,
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path(source_path),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+
+    test_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(test_exe.root_module, build_options);
+
     return test_exe;
 }
 
-fn create_tool_executable(b: *std.Build, name: []const u8, source_file: []const u8, options: BuildOptions, optimize_mode: std.builtin.OptimizeMode) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{
-        .name = name,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path(source_file),
-            .target = options.target,
-            .optimize = optimize_mode,
-        }),
-    });
-    exe.root_module.addImport("build_options", create_build_options(b, options).createModule());
-    return exe;
-}
-
-fn add_test_step(b: *std.Build, step_name: []const u8, description: []const u8, test_exe: *std.Build.Step.Compile, options: BuildOptions) *std.Build.Step {
-    const step = b.step(step_name, description);
-    const run_test = b.addRunArtifact(test_exe);
-    run_test.has_side_effects = true;
-
-    if (options.test_filter) |filter| {
-        run_test.addArgs(&.{ "--test-filter", filter });
+fn build_test_runner(
+    build_options: BuildOptions,
+    test_exe: *std.Build.Step.Compile,
+    test_options: TestOptions,
+) *std.Build.Step.Run {
+    const run = build_options.b.addRunArtifact(test_exe);
+    if (test_options.filter) |filter| {
+        run.addArg("--test-filter");
+        run.addArg(filter);
     }
-
-    if (b.args) |args| run_test.addArgs(args);
-    step.dependOn(&run_test.step);
-    return step;
-}
-
-pub fn build(b: *std.Build) void {
-    const options = BuildOptions.init(b);
-
-    const kausaldb_module = b.createModule(.{
-        .root_source_file = b.path("src/kausaldb.zig"),
-        .target = options.target,
-        .optimize = options.optimize,
-    });
-    kausaldb_module.addImport("build_options", create_build_options(b, options).createModule());
-
-    const internal_module = b.createModule(.{
-        .root_source_file = b.path("src/internal.zig"),
-        .target = options.target,
-        .optimize = options.optimize,
-    });
-    internal_module.addImport("build_options", create_build_options(b, options).createModule());
-
-    const exe = b.addExecutable(.{
-        .name = "kausaldb",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = options.target,
-            .optimize = .ReleaseSafe,
-        }),
-    });
-    exe.root_module.addImport("kausaldb", kausaldb_module);
-    exe.root_module.addImport("build_options", create_build_options(b, options).createModule());
-    b.installArtifact(exe);
-
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
-
-    const run_step = b.step("run", "Run kausaldb server");
-    run_step.dependOn(&run_cmd.step);
-
-    const unit_tests = create_test_executable(b, "src/unit_tests.zig", options);
-    const test_step = add_test_step(b, "test", "Run unit tests", unit_tests, options);
-
-    const integration_tests = create_test_executable(b, "src/integration_tests.zig", options);
-    const integration_step = add_test_step(b, "test-integration", "Run integration tests", integration_tests, options);
-
-    const e2e_tests = create_test_executable(b, "tests/e2e_tests.zig", options);
-    const e2e_step = add_test_step(b, "test-e2e", "Run end-to-end tests", e2e_tests, options);
-    e2e_step.dependOn(&exe.step);
-
-    const test_fast_step = b.step("test-fast", "Run fast tests (unit + integration)");
-    test_fast_step.dependOn(test_step);
-    test_fast_step.dependOn(integration_step);
-
-    const test_all_step = b.step("test-all", "Run all tests");
-    test_all_step.dependOn(test_fast_step);
-    test_all_step.dependOn(e2e_step);
-
-    const unit_only_step = b.step("test-unit-only", "Run only unit tests (fast)");
-    unit_only_step.dependOn(test_step);
-
-    const integration_only_step = b.step("test-integration-only", "Run only integration tests");
-    integration_only_step.dependOn(integration_step);
-
-    const benchmark_exe = create_tool_executable(b, "benchmark", "src/dev/benchmark.zig", options, .ReleaseFast);
-    benchmark_exe.root_module.addImport("internal", internal_module);
-    b.installArtifact(benchmark_exe);
-
-    const benchmark_cmd = b.addRunArtifact(benchmark_exe);
-    if (b.args) |args| benchmark_cmd.addArgs(args);
-    const benchmark_step = b.step("benchmark", "Run performance benchmarks");
-    benchmark_step.dependOn(&benchmark_cmd.step);
-
-    const tidy_exe = create_tool_executable(b, "tidy", "src/dev/tidy.zig", options, options.optimize);
-    b.installArtifact(tidy_exe);
-
-    const tidy_cmd = b.addRunArtifact(tidy_exe);
-    if (b.args) |args| tidy_cmd.addArgs(args);
-    const tidy_step = b.step("tidy", "Run code quality checks");
-    tidy_step.dependOn(&tidy_cmd.step);
-
-    const fuzz_exe = create_tool_executable(b, "fuzz", "src/dev/fuzz/main.zig", options, options.optimize);
-    fuzz_exe.root_module.addImport("internal", internal_module);
-    b.installArtifact(fuzz_exe);
-
-    const fuzz_cmd = b.addRunArtifact(fuzz_exe);
-    if (b.args) |args| fuzz_cmd.addArgs(args);
-    const fuzz_step = b.step("fuzz", "Run fuzz testing");
-    fuzz_step.dependOn(&fuzz_cmd.step);
-
-    const commit_msg_validator_exe = create_tool_executable(
-        b,
-        "commit-msg-validator",
-        "src/dev/commit_msg_validator.zig",
-        options,
-        options.optimize,
-    );
-    b.installArtifact(commit_msg_validator_exe);
-
-    const commit_msg_validator_step = b.step("commit-msg-validator", "Build commit message validator");
-    commit_msg_validator_step.dependOn(&b.addInstallArtifact(commit_msg_validator_exe, .{}).step);
-
-    const fmt_check = b.addFmt(.{
-        .paths = &.{ "src", "tests", "build.zig" },
-        .check = true,
-    });
-    const fmt_step = b.step("fmt", "Check code formatting");
-    fmt_step.dependOn(&fmt_check.step);
-
-    const fmt_fix = b.addFmt(.{
-        .paths = &.{ "src", "tests", "build.zig" },
-        .check = false,
-    });
-    const fmt_fix_step = b.step("fmt-fix", "Fix code formatting");
-    fmt_fix_step.dependOn(&fmt_fix.step);
-
-    const ci_smoke_step = b.step("ci-smoke", "Quick smoke tests for rapid feedback");
-    ci_smoke_step.dependOn(fmt_step);
-    ci_smoke_step.dependOn(tidy_step);
-    ci_smoke_step.dependOn(test_step);
-
-    const ci_perf_step = b.step("ci-perf", "Performance regression validation");
-    const ci_perf_cmd = b.addRunArtifact(benchmark_exe);
-    ci_perf_cmd.addArg("all"); // Run all benchmarks for CI validation
-    ci_perf_step.dependOn(&ci_perf_cmd.step);
-
-    const ci_full_step = b.step("ci-full", "Complete CI pipeline");
-    ci_full_step.dependOn(ci_smoke_step);
-    ci_full_step.dependOn(ci_perf_step);
-    ci_full_step.dependOn(test_all_step);
-
-    const ci_stress_step = b.step("ci-stress", "Stress testing with extended scenarios");
-    const stress_test_exe = create_tool_executable(
-        b,
-        "ci-stress",
-        "src/dev/ci/stress_runner.zig",
-        options,
-        options.optimize,
-    );
-    const run_stress_test = b.addRunArtifact(stress_test_exe);
-    if (b.args) |args| run_stress_test.addArgs(args);
-    ci_stress_step.dependOn(&run_stress_test.step);
-
-    const ci_security_step = b.step("ci-security", "Security analysis and memory safety checks");
-    ci_security_step.dependOn(tidy_step);
-    const security_scan_exe = create_tool_executable(
-        b,
-        "ci-security",
-        "src/dev/ci/security_scanner.zig",
-        options,
-        options.optimize,
-    );
-    const run_security_scan = b.addRunArtifact(security_scan_exe);
-    if (b.args) |args| run_security_scan.addArgs(args);
-    ci_security_step.dependOn(&run_security_scan.step);
-
-    const ci_matrix_step = b.step("ci-matrix", "Cross-platform matrix testing");
-    ci_matrix_step.dependOn(fmt_step);
-    ci_matrix_step.dependOn(tidy_step);
-    ci_matrix_step.dependOn(test_all_step);
-
-    const ci_setup_step = b.step("ci-setup", "Development environment setup");
-    const setup_exe = create_tool_executable(
-        b,
-        "ci-setup",
-        "src/dev/ci/setup_runner.zig",
-        options,
-        options.optimize,
-    );
-    const run_setup = b.addRunArtifact(setup_exe);
-    if (b.args) |args| run_setup.addArgs(args);
-    ci_setup_step.dependOn(&run_setup.step);
-
-    const hooks_install_step = b.step("hooks-install", "Install git hooks");
-    const hooks_install_cmd = b.addSystemCommand(
-        &.{ "sh", "-c", "mkdir -p .git/hooks && cp .githooks/* .git/hooks/ && chmod +x .git/hooks/* && echo 'Git hooks installed'" },
-    );
-    hooks_install_step.dependOn(&hooks_install_cmd.step);
-
-    const hooks_uninstall_step = b.step("hooks-uninstall", "Remove git hooks");
-    const hooks_uninstall_cmd = b.addSystemCommand(
-        &.{ "sh", "-c", "rm -f .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/pre-push && echo 'Git hooks removed'" },
-    );
-    hooks_uninstall_step.dependOn(&hooks_uninstall_cmd.step);
+    return run;
 }

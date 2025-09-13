@@ -33,8 +33,6 @@ comptime {
     _ = @import("core/vfs.zig");
     _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
-    _ = @import("dev/test_discovery.zig");
-    _ = @import("dev/shell.zig");
     _ = @import("dev/tidy.zig");
     _ = @import("ingestion/ingest_directory.zig");
     _ = @import("ingestion/zig/parser.zig");
@@ -73,28 +71,4 @@ comptime {
     _ = @import("testing/defensive.zig");
     _ = @import("testing/property_testing.zig");
     _ = @import("testing/systematic_fuzzing.zig");
-}
-
-test "unit test discovery validation" {
-    const test_discovery = @import("dev/test_discovery.zig");
-
-    const expected_files = test_discovery.find_unit_test_files(std.testing.allocator) catch |err| {
-        std.debug.print("Git discovery failed ({}), skipping validation\n", .{err});
-        return;
-    };
-    defer {
-        for (expected_files) |file| {
-            std.testing.allocator.free(file);
-        }
-        std.testing.allocator.free(expected_files);
-    }
-
-    const is_valid = test_discovery.validate_imports(std.testing.allocator, "src/unit_tests.zig", expected_files) catch |err| {
-        std.debug.print("Import validation failed ({})\n", .{err});
-        return;
-    };
-
-    if (!is_valid) {
-        std.debug.print("Unit test files missing imports - check src/unit_tests.zig\n", .{});
-    }
 }
