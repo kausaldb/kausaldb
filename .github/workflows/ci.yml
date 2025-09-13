@@ -136,7 +136,7 @@ jobs:
             --error-exitcode=1 \
             --gen-suppressions=all \
             --log-file=valgrind-report.txt \
-            ./zig-out/bin/kausaldb --test-quick
+            ./zig/zig build test-all -Dseed=0xDEADBEEF
 
       - name: Upload Valgrind Report
         if: always()

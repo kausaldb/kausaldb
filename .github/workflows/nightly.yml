@@ -310,7 +310,7 @@ jobs:
 
       - name: Run Valgrind Memcheck
         run: |
-          echo "Running memory analysis..."
+          echo "Running comprehensive memory analysis on test suite..."
           valgrind \
             --tool=memcheck \
             --leak-check=full \
@@ -321,16 +321,16 @@ jobs:
             --gen-suppressions=all \
             --num-callers=40 \
             --log-file=valgrind-memcheck.txt \
-            ./zig-out/bin/kausaldb --test-quick
+            ./zig/zig build test-all -Dseed=0xDEADBEEF
 
       - name: Run Valgrind Helgrind (Thread Safety)
         run: |
-          echo "Checking for threading issues..."
+          echo "Checking for threading issues in test suite..."
           valgrind \
             --tool=helgrind \
             --error-exitcode=1 \
             --log-file=valgrind-helgrind.txt \
-            ./zig-out/bin/kausaldb --test-quick || true
+            ./zig/zig build test-all -Dseed=0xCAFEBABE || true
 
       - name: Upload Memory Reports
         if: always()
