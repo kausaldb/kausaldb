@@ -12,12 +12,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
+env:
+  ZIG_VERSION: 0.15.1
+
 jobs:
-  # ================================================================================
-  # SMOKE: Fast feedback for all changes (< 2 minutes)
-  # ================================================================================
-  smoke:
-    name: Smoke Tests
+  # Quick validation checks that should pass before any other jobs
+  validation:
+    name: Validation
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -29,65 +30,31 @@ jobs:
       - name: Setup Zig
         uses: ./.github/actions/setup-zig
 
-      - name: CI Smoke Tests
-        run: ./zig/zig build ci-smoke
+      - name: Check Formatting
+        run: ./zig/zig build fmt-check
 
-  # ================================================================================
-  # TEST: Core functionality validation (< 15 minutes)
-  # ================================================================================
-  test:
-    name: Core Tests
-    runs-on: ubuntu-latest
-    needs: smoke
+      - name: Check Style Rules
+        run: ./zig/zig build tidy
+
+      - name: Validate Build Configuration
+        run: ./zig/zig build --help > /dev/null
+
+  # Main test matrix with deterministic seeds
+  test-matrix:
+    name: Test / ${{ matrix.os }} / seed:${{ matrix.seed }}
+    needs: validation
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: CI Full Pipeline
-        run: ./zig/zig build ci-full
-
-      - name: Performance Validation
-        run: ./zig/zig build ci-perf
-
-      - name: Upload Test Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-ubuntu
-          path: |
-            zig-out/
-            test-results/
-          retention-days: 3
-
-  # ================================================================================
-  # CLIENTS: Cross-platform matrix testing
-  # ================================================================================
-  clients:
-    name: Platform Matrix (${{ matrix.target.name }})
-    runs-on: ${{ matrix.target.os }}
-    needs: smoke
-    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - { name: "ubuntu-debug", os: "ubuntu-latest", optimize: "Debug" }
-          - {
-              name: "ubuntu-releasesafe",
-              os: "ubuntu-latest",
-              optimize: "ReleaseSafe",
-            }
-          - {
-              name: "macos-releasesafe",
-              os: "macos-latest",
-              optimize: "ReleaseSafe",
-            }
+        os: [ubuntu-latest, macos-latest]
+        seed:
+          - "0xDEADBEEF"
+          - "0xCAFEBABE"
+          - "0x8BADF00D"
+          - "0xFEEDFACE"
+          - "0x1337BEEF"
 
     steps:
       - name: Checkout
@@ -102,100 +69,45 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            zig-cache/
-            zig-out/
-          key: build-${{ matrix.target.name }}-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**/*.zig') }}
+            zig-cache
+            zig-out
+          key: ${{ runner.os }}-zig-${{ hashFiles('build.zig', 'src/**/*.zig') }}-${{ matrix.seed }}
+          restore-keys: |
+            ${{ runner.os }}-zig-${{ hashFiles('build.zig', 'src/**/*.zig') }}-
+            ${{ runner.os }}-zig-
 
-      - name: Build and Test
+      - name: Run Unit Tests
         run: |
-          ./zig/zig build ci-full -Doptimize=${{ matrix.target.optimize }}
+          echo "========================================="
+          echo "Testing on ${{ matrix.os }} with seed: ${{ matrix.seed }}"
+          echo "Reproduce failures with: ./zig/zig build test-unit -Dseed=${{ matrix.seed }}"
+          echo "========================================="
+          ./zig/zig build test-unit -Dseed=${{ matrix.seed }} -Dtest-iterations=3
 
-      - name: Platform-Specific Performance Check
-        if: matrix.target.name == 'ubuntu-releasesafe'
-        run: ./zig/zig build ci-perf -Doptimize=${{ matrix.target.optimize }}
+      - name: Run Integration Tests
+        run: ./zig/zig build test-integration -Dseed=${{ matrix.seed }}
 
-      - name: Upload Platform Artifacts
-        if: matrix.target.name == 'ubuntu-releasesafe'
+      - name: Run E2E Tests
+        run: ./zig/zig build test-e2e -Dseed=${{ matrix.seed }}
+
+
+      - name: Upload Test Artifacts on Failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.target.name }}
-          path: zig-out/bin/
+          name: test-failure-${{ matrix.os }}-${{ matrix.seed }}
+          path: |
+            zig-out/
+            test-logs/
           retention-days: 7
 
-  # ================================================================================
-  # FUZZING: Dedicated fuzz testing for bug discovery
-  # ================================================================================
-  fuzzing:
-    name: Fuzz Testing
+
+  # Valgrind memory analysis (separate job due to significant slowdown)
+  valgrind:
+    name: Valgrind Analysis
+    needs: validation
     runs-on: ubuntu-latest
-    needs: test
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Run Fuzz Tests
-        run: ./zig/zig build fuzz -- all 10
-
-      - name: Upload Fuzz Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-results
-          path: |
-            fuzz-results/
-            crash-reports/
-          retention-days: 7
-
-  # ================================================================================
-  # COMPREHENSIVE: Stress testing and security (merge queue & main only)
-  # ================================================================================
-  comprehensive:
-    name: Comprehensive Validation
-    runs-on: ubuntu-latest
-    needs: [test, clients, fuzzing]
-    if: github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Stress Testing
-        run: ./zig/zig build ci-stress
-
-      - name: Security Analysis
-        run: ./zig/zig build ci-security
-
-      - name: Upload Comprehensive Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: comprehensive-validation
-          path: |
-            stress-results/
-            security-results/
-            performance-results/
-          retention-days: 14
-
-  # ================================================================================
-  # MEMORY SAFETY: AddressSanitizer validation (critical paths only)
-  # ================================================================================
-  memory-safety:
-    name: Memory Safety
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || contains(github.event.pull_request.labels.*.name, 'memory-check')
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -210,76 +122,257 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
-      - name: Memory Safety Analysis
-        run: |
-          echo "Running memory safety checks..."
-          ./zig/zig build ci-security
-          echo "Memory safety validation completed"
+      - name: Build Debug Binary
+        run: ./zig/zig build -Doptimize=Debug
 
-      - name: Valgrind Analysis (Critical Components)
+      - name: Run Valgrind Memory Check
         run: |
-          ./zig/zig build -Doptimize=ReleaseSafe
-          echo "Testing storage engine under Valgrind..."
-          valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
-            --track-origins=yes --verbose --error-exitcode=1 \
-            ./zig-out/bin/kausaldb --test-mode > valgrind-report.txt 2>&1 || true
-          echo "Valgrind analysis completed"
+          valgrind \
+            --tool=memcheck \
+            --leak-check=full \
+            --show-leak-kinds=all \
+            --track-origins=yes \
+            --verbose \
+            --error-exitcode=1 \
+            --gen-suppressions=all \
+            --log-file=valgrind-report.txt \
+            ./zig-out/bin/kausaldb --test-quick
 
-      - name: Upload Memory Analysis
+      - name: Upload Valgrind Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: memory-safety-report
+          name: valgrind-report
           path: valgrind-report.txt
           retention-days: 7
 
-  # ================================================================================
-  # QUALITY GATE: Final validation checkpoint
-  # ================================================================================
-  quality-gate:
-    name: Quality Gate
+  # Performance benchmarking and regression detection
+  benchmarks:
+    name: Benchmarks
+    needs: validation
     runs-on: ubuntu-latest
-    needs: [smoke, test, clients]
-    if: always()
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
-      - name: Evaluate Quality Standards
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for baseline comparison
+
+      - name: Setup Zig
+        uses: ./.github/actions/setup-zig
+
+      - name: Download Previous Benchmark Results
+        uses: actions/cache@v4
+        with:
+          path: bench-baseline.json
+          key: benchmarks-${{ runner.os }}-${{ github.base_ref || 'main' }}
+          restore-keys: |
+            benchmarks-${{ runner.os }}-
+
+      - name: Run Benchmarks
         run: |
-          # Check if all required jobs passed
-          SMOKE_STATUS="${{ needs.smoke.result }}"
-          TEST_STATUS="${{ needs.test.result }}"
-          CLIENTS_STATUS="${{ needs.clients.result }}"
+          ./zig/zig build bench \
+            -Doptimize=ReleaseFast \
+            -Dbench-iterations=10000 \
+            -Dbench-warmup=1000 \
+            -Dbench-baseline=bench-baseline.json \
+            | tee bench-results.txt
 
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║                        CI QUALITY GATE                           ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
-          echo
-          echo "Job Status Summary:"
-          echo "  Smoke Tests: $SMOKE_STATUS"
-          echo "  Core Tests: $TEST_STATUS"
-          echo "  Platform Matrix: $CLIENTS_STATUS"
-          echo
-
-          # Determine overall result
-          if [[ "$SMOKE_STATUS" == "success" && "$TEST_STATUS" == "success" && "$CLIENTS_STATUS" == "success" ]]; then
-            echo "[+] QUALITY GATE: PASSED"
-            echo "All critical validation checks completed successfully"
-            echo
-            echo "System Ready For:"
-            echo "  [+] Code review and merge"
-            echo "  [+] Deployment to staging"
-            echo "  [+] Performance benchmarking"
-            echo
-            exit 0
-          else
-            echo "[-] QUALITY GATE: FAILED"
-            echo
-            echo "Failed Checks:"
-            [[ "$SMOKE_STATUS" != "success" ]] && echo "  [-] Smoke tests failed - basic functionality issues"
-            [[ "$TEST_STATUS" != "success" ]] && echo "  [-] Core tests failed - system reliability issues"
-            [[ "$CLIENTS_STATUS" != "success" ]] && echo "  [-] Platform tests failed - cross-platform compatibility issues"
-            echo
-            echo "[!] BLOCKING DEPLOYMENT"
-            echo "Fix failing checks before merge"
+      - name: Check for Performance Regressions
+        run: |
+          # Parse benchmark results and check for regressions
+          if grep -q "REGRESSION" bench-results.txt; then
+            echo "::error::Performance regression detected!"
+            cat bench-results.txt
             exit 1
           fi
+
+      - name: Save Benchmark Results
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          # Extract JSON results from benchmark output
+          grep "^{" bench-results.txt > bench-baseline.json || true
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            bench-results.txt
+            bench-baseline.json
+          retention-days: 30
+
+      - name: Comment PR with Benchmark Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('bench-results.txt', 'utf8');
+            const summary = results.split('\n').filter(line =>
+              line.includes('avg') || line.includes('PASS') || line.includes('REGRESSION')
+            ).join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Benchmark Results\n\`\`\`\n${summary}\n\`\`\``
+            });
+
+  # Fuzzing for bug discovery
+  fuzzing:
+    name: Fuzzing
+    needs: validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Zig
+        uses: ./.github/actions/setup-zig
+
+      - name: Restore Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz-corpus
+          # Use source hash + date to create evolving corpus cache
+          key: fuzz-corpus-${{ hashFiles('src/**/*.zig') }}-${{ github.run_number }}
+          restore-keys: |
+            fuzz-corpus-${{ hashFiles('src/**/*.zig') }}-
+            fuzz-corpus-
+
+      - name: Run Quick Fuzz Test
+        run: |
+          ./zig/zig build fuzz-quick \
+            -Dfuzz-corpus=fuzz-corpus
+
+      - name: Run Extended Fuzzing (main branch only)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          ./zig/zig build fuzz \
+            -Dfuzz-iterations=100000 \
+            -Dfuzz-corpus=fuzz-corpus
+
+      - name: Save Corpus Statistics
+        if: success() || failure()
+        run: |
+          echo "Fuzzing corpus statistics:"
+          find fuzz-corpus -type f -name "*.bin" | wc -l || echo "0"
+          du -sh fuzz-corpus/ || echo "0B"
+
+      - name: Upload Crash Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            fuzz-corpus/crashes/
+            fuzz-corpus/hangs/
+          retention-days: 30
+
+  # Code coverage reporting
+  coverage:
+    name: Code Coverage
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Zig
+        uses: ./.github/actions/setup-zig
+
+      - name: Install Coverage Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Run Tests with Coverage
+        run: |
+          ./zig/zig build test-all \
+            -Dcoverage=true \
+            -Dcoverage-dir=coverage-reports \
+            -Dseed=0xDEADBEEF
+
+      - name: Generate Coverage Report
+        run: |
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.info
+          flags: unittests
+          fail_ci_if_error: false
+
+  # Release build verification
+  release:
+    name: Release Build / ${{ matrix.os }}
+    needs: [test-matrix]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Zig
+        uses: ./.github/actions/setup-zig
+
+      - name: Build Release Binary
+        run: |
+          ./zig/zig build \
+            -Doptimize=ReleaseSafe \
+            -Dtarget=${{ matrix.os == 'ubuntu-latest' && 'x86_64-linux' || 'x86_64-macos' }}
+
+      - name: Test Release Binary
+        run: |
+          ./zig-out/bin/kausaldb --version
+          ./zig-out/bin/kausaldb --help
+
+      - name: Package Release
+        run: |
+          tar -czf kausaldb-${{ matrix.os }}.tar.gz -C zig-out/bin kausaldb
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: kausaldb-${{ matrix.os }}.tar.gz
+          retention-days: 30
+
+  # Final status check
+  ci-status:
+    name: CI Status
+    needs: [validation, test-matrix, benchmarks, fuzzing, release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI Status
+        if: |
+          needs.validation.result != 'success' ||
+          needs.test-matrix.result != 'success' ||
+          needs.benchmarks.result != 'success' ||
+          needs.fuzzing.result != 'success' ||
+          needs.release.result != 'success'
+        run: |
+          echo "::error::CI pipeline failed"
+          exit 1
+
+      - name: CI Success
+        if: success()
+        run: echo "CI pipeline passed successfully"

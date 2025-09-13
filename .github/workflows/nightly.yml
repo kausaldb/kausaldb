@@ -1,308 +1,384 @@
-name: Nightly Validation
+name: Nightly
 
 on:
   schedule:
-    - cron: "0 2 * * *" # Daily at 2 AM UTC
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      skip_fuzzing:
+        description: 'Skip fuzzing tests'
+        type: boolean
+        default: false
+      skip_stress:
+        description: 'Skip stress tests'
+        type: boolean
+        default: false
 
 concurrency:
   group: nightly-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false # Never cancel nightly builds
+
+env:
+  ZIG_VERSION: 0.15.1
 
 jobs:
-  # ================================================================================
-  # SYSTEMATIC FUZZING: Deep security validation
-  # ================================================================================
-  systematic-fuzzing:
-    name: Systematic Fuzzing
+  # Deep fuzzing with extensive iterations
+  deep-fuzzing:
+    name: Deep Fuzzing / ${{ matrix.target }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180 # 3 hours
+    if: github.event.inputs.skip_fuzzing != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [storage, logic]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Zig
         uses: ./.github/actions/setup-zig
 
-      - name: Extended Fuzzing Campaign
-        run: |
-          echo "Starting systematic fuzzing campaign..."
-          ./zig/zig build ci-stress -- --timeout 7200
-          echo "Fuzzing campaign completed"
+      - name: Restore Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz-corpus-${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
 
-      - name: Upload Fuzz Results
-        if: always()
+      - name: Run Deep Fuzzing
+        run: |
+          echo "========================================="
+          echo "Deep fuzzing ${{ matrix.target }} target"
+          echo "Running 10,000,000 iterations"
+          echo "========================================="
+          ./zig/zig build fuzz \
+            -Dfuzz-iterations=10000000 \
+            -Dfuzz-corpus=fuzz-corpus-${{ matrix.target }} \
+            -- ${{ matrix.target }}
+
+      - name: Archive Crash Artifacts
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: systematic-fuzz-results
+          name: fuzz-crashes-${{ matrix.target }}-${{ github.run_number }}
           path: |
-            fuzz-results/
-            crash-reports/
-          retention-days: 30
+            fuzz-corpus-${{ matrix.target }}/crashes/
+            fuzz-corpus-${{ matrix.target }}/hangs/
+          retention-days: 90
 
-  # ================================================================================
-  # STRESS & ENDURANCE: Long-running stability testing
-  # ================================================================================
-  stress-endurance:
-    name: Stress & Endurance
+      - name: Save Updated Corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz-corpus-${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+
+  # Stress testing with heavy workloads
+  stress-testing:
+    name: Stress Test / ${{ matrix.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120 # 2 hours
+    if: github.event.inputs.skip_stress != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - heavy-writes
+          - compaction-stress
+          - memory-pressure
+          - crash-recovery
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Zig
         uses: ./.github/actions/setup-zig
 
-      - name: Memory Pressure Endurance
+      - name: Run Stress Test
         run: |
-          echo "Starting memory pressure endurance testing..."
-          ./zig/zig build ci-stress -- --memory-limit 1024 --cycles 20 --timeout 3600
+          echo "========================================="
+          echo "Running stress scenario: ${{ matrix.scenario }}"
+          echo "========================================="
 
-      - name: High-Load Stress Testing
-        run: |
-          echo "High-load stress testing with concurrent operations..."
-          ./zig/zig build ci-stress -- --concurrent-processes 8 --cycles 10
+          case "${{ matrix.scenario }}" in
+            heavy-writes)
+              # Simulate sustained high write throughput
+              ./zig/zig build test-integration \
+                -Dseed=0xSTRESS01 \
+                -Dtest-filter="heavy_write" \
+                -Dtest-iterations=100
+              ;;
+            compaction-stress)
+              # Force aggressive compaction scenarios
+              ./zig/zig build test-integration \
+                -Dseed=0xCOMPACT1 \
+                -Dtest-filter="compaction" \
+                -Dtest-iterations=50
+              ;;
+            memory-pressure)
+              # Test under memory constraints
+              ./zig/zig build test-integration \
+                -Dseed=0xMEMORY01 \
+                -Dtest-filter="memory" \
+                -Dtest-iterations=50
+              ;;
+            crash-recovery)
+              # Systematic crash recovery testing
+              ./zig/zig build test-integration \
+                -Dseed=0xCRASH001 \
+                -Dtest-filter="recovery" \
+                -Dtest-iterations=100
+              ;;
+          esac
 
-      - name: Upload Stress Results
-        if: always()
+      - name: Upload Test Results
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: stress-endurance-results
-          path: stress-results/
+          name: stress-test-${{ matrix.scenario }}-${{ github.run_number }}
+          path: |
+            test-logs/
+            zig-out/
           retention-days: 30
 
-  # ================================================================================
-  # PERFORMANCE VALIDATION: Comprehensive benchmarking
-  # ================================================================================
-  performance-validation:
-    name: Performance Validation
+  # Performance trending with historical comparison
+  performance-trending:
+    name: Performance Trending
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for comparisons
+
+      - name: Setup Zig
+        uses: ./.github/actions/setup-zig
+
+      - name: Restore Performance History
+        uses: actions/cache@v4
+        with:
+          path: |
+            perf-history/
+            bench-baseline.json
+          key: perf-history-${{ github.ref }}-${{ github.run_number }}
+          restore-keys: |
+            perf-history-${{ github.ref }}-
+            perf-history-
+
+      - name: Run Extended Benchmarks
+        run: |
+          echo "========================================="
+          echo "Running extended performance benchmarks"
+          echo "100,000 iterations with 10,000 warmup"
+          echo "========================================="
+
+          mkdir -p perf-history
+
+          ./zig/zig build bench \
+            -Doptimize=ReleaseFast \
+            -Dbench-iterations=100000 \
+            -Dbench-warmup=10000 \
+            -Dbench-baseline=bench-baseline.json \
+            | tee perf-history/bench-${{ github.run_number }}.txt
+
+          # Extract JSON results
+          grep "^{" perf-history/bench-${{ github.run_number }}.txt > bench-baseline.json || true
+
+      - name: Analyze Performance Trends
+        run: |
+          # Simple trend analysis
+          if [ -f perf-history/bench-$((github.run_number - 1)).txt ]; then
+            echo "Comparing with previous nightly run:"
+            diff -u perf-history/bench-$((github.run_number - 1)).txt \
+                    perf-history/bench-${{ github.run_number }}.txt || true
+          fi
+
+          # Check for major regressions
+          if grep -q "REGRESSION.*[2-9][0-9]\." perf-history/bench-${{ github.run_number }}.txt; then
+            echo "::error::Major performance regression detected (>20%)"
+            exit 1
+          fi
+
+      - name: Save Performance History
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            perf-history/
+            bench-baseline.json
+          key: perf-history-${{ github.ref }}-${{ github.run_number }}
+
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report-${{ github.run_number }}
+          path: perf-history/bench-${{ github.run_number }}.txt
+          retention-days: 90
+
+  # Expanded compatibility testing
+  expanded-matrix:
+    name: Expanded Matrix / ${{ matrix.os }} / Zig ${{ matrix.zig_version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, macos-13, macos-14]
+        zig_version: ['0.15.1', 'master']
+        exclude:
+          # Skip master on older OS versions
+          - os: ubuntu-20.04
+            zig_version: master
+          - os: macos-13
+            zig_version: master
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Zig
+        if: matrix.zig_version == '0.15.1'
+        uses: ./.github/actions/setup-zig
+
+      - name: Setup Zig Master
+        if: matrix.zig_version == 'master'
+        run: |
+          # Download and setup Zig master branch
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            curl -L https://ziglang.org/builds/zig-linux-x86_64-master.tar.xz | tar -xJ
+            mv zig-linux-x86_64-* zig-master
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            if [[ "${{ runner.arch }}" == "ARM64" ]]; then
+              curl -L https://ziglang.org/builds/zig-macos-aarch64-master.tar.xz | tar -xJ
+              mv zig-macos-aarch64-* zig-master
+            else
+              curl -L https://ziglang.org/builds/zig-macos-x86_64-master.tar.xz | tar -xJ
+              mv zig-macos-x86_64-* zig-master
+            fi
+          fi
+          echo "$PWD/zig-master" >> $GITHUB_PATH
+
+      - name: Build and Test
+        run: |
+          echo "Testing on ${{ matrix.os }} with Zig ${{ matrix.zig_version }}"
+
+          # Use appropriate zig command based on version
+          if [[ "${{ matrix.zig_version }}" == "master" ]]; then
+            zig-master/zig build test -Dseed=0xNIGHTLY1
+          else
+            ./zig/zig build test -Dseed=0xNIGHTLY1
+          fi
+
+      - name: Report Compatibility Issues
+        if: failure() && matrix.zig_version == 'master'
+        run: |
+          echo "::warning::Compatibility issue with Zig master on ${{ matrix.os }}"
+
+  # Memory safety validation with multiple tools
+  memory-safety:
+    name: Memory Safety Validation
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Comprehensive Performance Benchmarking
-        run: |
-          echo "Running comprehensive performance validation..."
-          mkdir -p performance-results
-          ./zig/zig build benchmark all
-
-      - name: Performance Regression Analysis
-        run: |
-          echo "Analyzing performance trends and regression detection..."
-          # Performance analysis would be implemented in ci-perf
-          if [ -f performance-results/regression-detected.txt ]; then
-            echo "Performance regression detected!"
-            cat performance-results/regression-detected.txt
-            exit 1
-          fi
-
-      - name: Upload Performance Data
-        uses: actions/upload-artifact@v4
         with:
-          name: performance-validation
-          path: performance-results/
-          retention-days: 90
-
-  # ================================================================================
-  # PLATFORM MATRIX: Extended cross-platform validation
-  # ================================================================================
-  platform-matrix:
-    name: Platform Matrix (${{ matrix.target.name }})
-    runs-on: ${{ matrix.target.os }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - { name: "Ubuntu-Debug", os: "ubuntu-latest", optimize: "Debug" }
-          - {
-              name: "Ubuntu-ReleaseSafe",
-              os: "ubuntu-latest",
-              optimize: "ReleaseSafe",
-            }
-          - {
-              name: "Ubuntu-ReleaseFast",
-              os: "ubuntu-latest",
-              optimize: "ReleaseFast",
-            }
-          - {
-              name: "macOS-ReleaseSafe",
-              os: "macos-latest",
-              optimize: "ReleaseSafe",
-            }
-          - { name: "macOS-Debug", os: "macos-latest", optimize: "Debug" }
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          fetch-depth: 1
 
       - name: Setup Zig
         uses: ./.github/actions/setup-zig
 
-      - name: Build and Test
+      - name: Install Analysis Tools
         run: |
-          echo "Platform testing on ${{ matrix.target.name }}..."
-          ./zig/zig build ci-full -Doptimize=${{ matrix.target.optimize }}
+          sudo apt-get update
+          sudo apt-get install -y valgrind
 
-      - name: Extended Platform Testing
+      - name: Build Debug Binary
+        run: ./zig/zig build -Doptimize=Debug
+
+      - name: Run Valgrind Memcheck
         run: |
-          echo "Extended testing for ${{ matrix.target.name }}..."
-          ./zig/zig build ci-perf -Doptimize=${{ matrix.target.optimize }}
-          if [[ "${{ matrix.target.optimize }}" == "ReleaseFast" ]]; then
-            echo "Running stress tests on optimized build..."
-            ./zig/zig build ci-stress -- --cycles 5
-          fi
+          echo "Running memory analysis..."
+          valgrind \
+            --tool=memcheck \
+            --leak-check=full \
+            --show-leak-kinds=all \
+            --track-origins=yes \
+            --expensive-definedness-checks=yes \
+            --error-exitcode=1 \
+            --gen-suppressions=all \
+            --num-callers=40 \
+            --log-file=valgrind-memcheck.txt \
+            ./zig-out/bin/kausaldb --test-quick
 
-      - name: Upload Platform Results
+      - name: Run Valgrind Helgrind (Thread Safety)
+        run: |
+          echo "Checking for threading issues..."
+          valgrind \
+            --tool=helgrind \
+            --error-exitcode=1 \
+            --log-file=valgrind-helgrind.txt \
+            ./zig-out/bin/kausaldb --test-quick || true
+
+      - name: Upload Memory Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: platform-${{ matrix.target.name }}
-          path: |
-            zig-out/
-            platform-results/
-          retention-days: 14
-
-  # ================================================================================
-  # SECURITY & CORRECTNESS: Deep security analysis
-  # ================================================================================
-  security-correctness:
-    name: Security & Correctness Deep Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Deep Security Analysis
-        run: |
-          echo "Running comprehensive security analysis..."
-          ./zig/zig build ci-security
-
-      - name: Memory Safety with AddressSanitizer
-        run: |
-          echo "Memory safety analysis with AddressSanitizer..."
-          ./zig/zig build ci-security
-
-      - name: ThreadSanitizer Analysis
-        run: |
-          echo "Concurrency safety analysis..."
-          ./zig/zig build ci-security || echo "ThreadSanitizer completed"
-
-      - name: UndefinedBehaviorSanitizer
-        run: |
-          echo "Undefined behavior analysis..."
-          ./zig/zig build ci-security
-
-      - name: Upload Security Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-analysis
-          path: security-results/
+          name: memory-safety-reports-${{ github.run_number }}
+          path: valgrind-*.txt
           retention-days: 30
 
-  # ================================================================================
-  # NIGHTLY SUMMARY: Comprehensive report generation
-  # ================================================================================
+  # Nightly status summary
   nightly-summary:
-    name: Nightly Validation Summary
-    runs-on: ubuntu-latest
-    needs:
-      [
-        systematic-fuzzing,
-        stress-endurance,
-        performance-validation,
-        platform-matrix,
-        security-correctness,
-      ]
+    name: Nightly Summary
+    needs: [deep-fuzzing, stress-testing, performance-trending, expanded-matrix, memory-safety]
     if: always()
-    timeout-minutes: 10
+    runs-on: ubuntu-latest
     steps:
-      - name: Generate Comprehensive Report
+      - name: Check Status
         run: |
-          echo "╔══════════════════════════════════════════════════════════════════╗"
-          echo "║                    NIGHTLY VALIDATION SUMMARY                    ║"
-          echo "╚══════════════════════════════════════════════════════════════════╝"
-          echo
-          echo "Validation Results:"
-          echo "  Systematic Fuzzing: ${{ needs.systematic-fuzzing.result }}"
-          echo "  Stress & Endurance: ${{ needs.stress-endurance.result }}"
-          echo "  Performance Validation: ${{ needs.performance-validation.result }}"
-          echo "  Platform Matrix: ${{ needs.platform-matrix.result }}"
-          echo "  Security & Correctness: ${{ needs.security-correctness.result }}"
-          echo
+          echo "========================================="
+          echo "Nightly Build Summary"
+          echo "========================================="
+          echo "Deep Fuzzing: ${{ needs.deep-fuzzing.result }}"
+          echo "Stress Testing: ${{ needs.stress-testing.result }}"
+          echo "Performance: ${{ needs.performance-trending.result }}"
+          echo "Compatibility: ${{ needs.expanded-matrix.result }}"
+          echo "Memory Safety: ${{ needs.memory-safety.result }}"
+          echo "========================================="
 
-          # Count successful jobs
-          TOTAL_JOBS=5
-          SUCCESSFUL_JOBS=0
-
-          [[ "${{ needs.systematic-fuzzing.result }}" == "success" ]] && ((SUCCESSFUL_JOBS++))
-          [[ "${{ needs.stress-endurance.result }}" == "success" ]] && ((SUCCESSFUL_JOBS++))
-          [[ "${{ needs.performance-validation.result }}" == "success" ]] && ((SUCCESSFUL_JOBS++))
-          [[ "${{ needs.platform-matrix.result }}" == "success" ]] && ((SUCCESSFUL_JOBS++))
-          [[ "${{ needs.security-correctness.result }}" == "success" ]] && ((SUCCESSFUL_JOBS++))
-
-          echo "Success Rate: $SUCCESSFUL_JOBS/$TOTAL_JOBS"
-          echo
-
-          if [[ $SUCCESSFUL_JOBS -eq $TOTAL_JOBS ]]; then
-            echo "[+] NIGHTLY VALIDATION: COMPLETE SUCCESS"
-            echo
-            echo "All validation pipelines completed successfully:"
-            echo "  [+] Zero security vulnerabilities detected"
-            echo "  [+] Memory safety validated across all platforms"
-            echo "  [+] Performance characteristics within targets"
-            echo "  [+] Stress testing passed under extreme load"
-            echo "  [+] Cross-platform compatibility confirmed"
-            echo
-            echo "[+] SYSTEM READY FOR PRODUCTION DEPLOYMENT"
-            echo
-          elif [[ $SUCCESSFUL_JOBS -ge 4 ]]; then
-            echo "[!] NIGHTLY VALIDATION: MOSTLY SUCCESSFUL"
-            echo
-            echo "Most validation pipelines successful with minor issues:"
-            [[ "${{ needs.systematic-fuzzing.result }}" != "success" ]] && echo "  [!] Fuzzing issues detected - review required"
-            [[ "${{ needs.stress-endurance.result }}" != "success" ]] && echo "  [!] Stress testing issues - stability concerns"
-            [[ "${{ needs.performance-validation.result }}" != "success" ]] && echo "  [!] Performance regression detected"
-            [[ "${{ needs.platform-matrix.result }}" != "success" ]] && echo "  [!] Platform compatibility issues"
-            [[ "${{ needs.security-correctness.result }}" != "success" ]] && echo "  [!] Security analysis concerns"
-            echo
-            echo "[!] REVIEW REQUIRED BEFORE RELEASE"
-            echo
-          else
-            echo "[-] NIGHTLY VALIDATION: FAILED"
-            echo
-            echo "Multiple critical validation failures detected:"
-            [[ "${{ needs.systematic-fuzzing.result }}" != "success" ]] && echo "  [-] Systematic fuzzing failed"
-            [[ "${{ needs.stress-endurance.result }}" != "success" ]] && echo "  [-] Stress testing failed"
-            [[ "${{ needs.performance-validation.result }}" != "success" ]] && echo "  [-] Performance validation failed"
-            [[ "${{ needs.platform-matrix.result }}" != "success" ]] && echo "  [-] Platform matrix failed"
-            [[ "${{ needs.security-correctness.result }}" != "success" ]] && echo "  [-] Security analysis failed"
-            echo
-            echo "[!] BLOCKING ALL RELEASES"
-            echo "Critical issues must be resolved immediately"
-            echo
+          # Fail if any critical job failed
+          if [[ "${{ needs.deep-fuzzing.result }}" == "failure" ]] || \
+             [[ "${{ needs.stress-testing.result }}" == "failure" ]] || \
+             [[ "${{ needs.performance-trending.result }}" == "failure" ]] || \
+             [[ "${{ needs.memory-safety.result }}" == "failure" ]]; then
+            echo "::error::Nightly build failed"
             exit 1
           fi
 
-          echo "Report generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
-
-      - name: Upload Final Report
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Create Issue on Failure
+        if: failure()
+        uses: actions/github-script@v7
         with:
-          name: nightly-validation-report
-          path: nightly-report.txt
-          retention-days: 90
+          script: |
+            const date = new Date().toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Nightly Build Failed - ${date}`,
+              body: `The nightly build failed on ${date}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['nightly-failure', 'automated']
+            });
+

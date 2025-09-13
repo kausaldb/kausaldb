@@ -6,9 +6,10 @@
 const std = @import("std");
 const testing = std.testing;
 
-const SimulationHarness = @import("../simulation_harness.zig").SimulationHarness;
-const Fault = @import("../simulation_harness.zig").Fault;
-const Workload = @import("../simulation_harness.zig").Workload;
+const harness = @import("../harness.zig");
+const SimulationHarness = harness.SimulationHarness;
+const Fault = harness.Fault;
+const Workload = harness.Workload;
 
 const types = @import("../../core/types.zig");
 const ContextBlock = types.ContextBlock;
@@ -386,7 +387,7 @@ test "progressive corruption degradation" {
         }
 
         // Verify degradation is bounded
-        const error_rate = @intToFloat(f32, read_errors) / @intToFloat(f32, i);
+        const error_rate = @as(f32, read_errors) / @as(f32, i);
         try testing.expect(error_rate < 0.5); // Less than 50% error rate
     }
 }

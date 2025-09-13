@@ -35,6 +35,7 @@ const TestOptions = struct {
 
 const DevOptions = struct {
     fuzz_iterations: u32,
+    fuzz_corpus: []const u8,
     bench_iterations: u32,
     bench_warmup: u32,
     bench_baseline: ?[]const u8,
@@ -64,6 +65,7 @@ pub fn build(b: *std.Build) void {
 
     const dev_options = DevOptions{
         .fuzz_iterations = b.option(u32, "fuzz-iterations", "Fuzzing iterations") orelse 10000,
+        .fuzz_corpus = b.option([]const u8, "fuzz-corpus", "Fuzzing corpus directory") orelse "fuzz-corpus",
         .bench_iterations = b.option(u32, "bench-iterations", "Benchmark iterations") orelse 1000,
         .bench_warmup = b.option(u32, "bench-warmup", "Benchmark warmup iterations") orelse 100,
         .bench_baseline = b.option([]const u8, "bench-baseline", "Baseline results for comparison"),
@@ -78,6 +80,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
     options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
     options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
+    options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
 
     const build_options = BuildOptions{
         .b = b,
@@ -217,9 +220,8 @@ fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
     add_internal_module(fuzz_exe.root_module, build_options);
 
     const fuzz_run = build_options.b.addRunArtifact(fuzz_exe);
-    fuzz_run.addArg("--iterations");
-    fuzz_run.addArg(build_options.b.fmt("{}", .{dev_options.fuzz_iterations}));
 
+    // Allow target selection via command line args
     if (build_options.b.args) |args| {
         fuzz_run.addArgs(args);
     }
@@ -227,10 +229,30 @@ fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
     const fuzz_step = build_options.b.step("fuzz", "Run fuzz testing");
     fuzz_step.dependOn(&fuzz_run.step);
 
+    // Create a separate build options for fuzz-quick with 1000 iterations
+    const quick_options = build_options.b.addOptions();
+    quick_options.addOption(u32, "fuzz_iterations", 1000);
+    quick_options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
+
+    const quick_exe = build_options.b.addExecutable(.{
+        .name = "fuzz-quick",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/fuzz/main.zig"),
+            .target = build_options.target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+
+    quick_exe.root_module.sanitize_c = .full;
+    quick_exe.root_module.addImport("build_options", quick_options.createModule());
+    add_internal_module(quick_exe.root_module, build_options);
+
+    const quick_run = build_options.b.addRunArtifact(quick_exe);
+    if (build_options.b.args) |args| {
+        quick_run.addArgs(args);
+    }
+
     const fuzz_quick_step = build_options.b.step("fuzz-quick", "Run quick fuzz test (1000 iterations)");
-    const quick_run = build_options.b.addRunArtifact(fuzz_exe);
-    quick_run.addArg("--iterations");
-    quick_run.addArg("1000");
     fuzz_quick_step.dependOn(&quick_run.step);
 }
 

@@ -1,21 +1,182 @@
-# Development
+# Development Guide
 
-Practical guide for KausalDB development. No fluff, just what you need to know.
+Practical guide for KausalDB development focused on production-grade tooling and workflows.
 
 ## Quick Start
 
 ```bash
-# Setup
-./scripts/install_zig.sh     # Get exact Zig version
-./scripts/setup_hooks.sh     # Install git hooks
+# Install exact Zig version
+./scripts/install_zig.sh
 
-# Build and test
-./zig/zig build test         # Fast unit tests (~5 seconds)
-./zig/zig build run          # Start server
+# Run fast test suite
+./zig/zig build test
 
-# Full validation before commit
-./zig/zig build ci-smoke     # Format, tidy, tests
+# Run benchmarks
+./zig/zig build bench
+
+# Run fuzzing
+./zig/zig build fuzz-quick
+
+# Build and run the server
+./zig/zig build run
 ```
+
+## Build System
+
+KausalDB uses a comprehensive Zig build system designed for deterministic, production-grade development:
+
+- **Deterministic**: All builds and tests are reproducible using seeds
+- **Comprehensive**: Full coverage of unit, integration, simulation, and fuzz testing
+- **Performance-focused**: Benchmarks target microsecond-level precision
+- **Production-grade**: Security scanning, memory safety, and regression detection
+
+### Core Executable
+
+```bash
+# Build the main KausalDB server
+./zig/zig build
+
+# Build and run the server
+./zig/zig build run
+
+# Build with specific optimization
+./zig/zig build -Doptimize=ReleaseSafe
+./zig/zig build -Doptimize=ReleaseFast
+./zig/zig build -Doptimize=ReleaseSmall
+./zig/zig build -Doptimize=Debug
+```
+
+### Test Suites
+
+```bash
+# Fast test suite (unit + integration) - for development
+./zig/zig build test
+
+# Complete test suite - for CI validation
+./zig/zig build test-all
+
+# Individual test suites
+./zig/zig build test-unit          # Unit tests only
+./zig/zig build test-integration   # Integration tests only
+./zig/zig build test-e2e          # End-to-end tests only
+```
+
+### Test Configuration
+
+```bash
+# Run with deterministic seed (reproducible failures)
+./zig/zig build test -Dseed=0xDEADBEEF
+
+# Filter tests by name
+./zig/zig build test -Dfilter="storage"
+
+# Run multiple iterations for flaky test detection
+./zig/zig build test -Dtest-iterations=10
+
+# Set test timeout (milliseconds)
+./zig/zig build test -Dtest-timeout=60000
+
+# Enable verbose logging
+./zig/zig build test -Dlog=debug
+```
+
+
+### Benchmarking
+
+```bash
+# Run all benchmarks
+./zig/zig build bench
+
+# Configure benchmark parameters
+./zig/zig build bench \
+    -Dbench-iterations=10000 \
+    -Dbench-warmup=1000
+
+# Compare against baseline for regression detection
+./zig/zig build bench -Dbench-baseline=baseline.json
+```
+
+Performance targets enforced by benchmarks:
+
+- **Block reads**: Must complete in < 0.06µs
+- **Block writes**: Must complete in < 1µs
+- **Query parsing**: Must complete in < 10µs
+- **SSTable scans**: Must maintain > 100MB/s throughput
+
+### Fuzzing
+
+```bash
+# Run 1000 iterations for quick validation
+./zig/zig build fuzz-quick
+
+# Run full fuzzing campaign
+./zig/zig build fuzz \
+    -Dfuzz-iterations=100000 \
+    -Dfuzz-timeout=5000 \
+    -Dfuzz-corpus=fuzz-corpus
+```
+
+### Development Tools
+
+```bash
+# Format all code in-place
+./zig/zig build fmt
+
+# Check formatting without modifying
+./zig/zig build fmt-check
+
+# Run style and naming convention checks
+./zig/zig build tidy
+
+# Run all linters
+./zig/zig build lint
+```
+
+### Git Hooks
+
+Git hooks are pre-configured and active in this repository:
+- Code formatting checks (`zig fmt`)
+- Style and naming convention validation (`zig build tidy`) 
+- Fast unit test execution (`zig build test`)
+
+These hooks run automatically on commit and push operations.
+
+
+### Build Options Reference
+
+#### Global Options
+
+| Option       | Type   | Default | Description                        |
+| ------------ | ------ | ------- | ---------------------------------- |
+| `-Dtarget`   | string | native  | Target triple (e.g., x86_64-linux) |
+| `-Doptimize` | enum   | Debug   | Optimization mode                  |
+| `-Dlog`      | enum   | warn    | Log level (err/warn/info/debug)    |
+
+#### Test Options
+
+| Option              | Type   | Default | Description               |
+| ------------------- | ------ | ------- | ------------------------- |
+| `-Dseed`            | u64    | random  | Test seed for determinism |
+| `-Dfilter`          | string | null    | Filter tests by name      |
+| `-Dtest-iterations` | u32    | 1       | Number of test iterations |
+| `-Dtest-timeout`    | u32    | 30000   | Test timeout in ms        |
+| `-Dcoverage`        | bool   | false   | Enable coverage reporting |
+
+#### Benchmark Options
+
+| Option               | Type   | Default | Description                  |
+| -------------------- | ------ | ------- | ---------------------------- |
+| `-Dbench-iterations` | u32    | 1000    | Benchmark iterations         |
+| `-Dbench-warmup`     | u32    | 100     | Warmup iterations            |
+| `-Dbench-baseline`   | string | null    | Baseline file for comparison |
+
+#### Fuzzing Options
+
+| Option              | Type   | Default     | Description            |
+| ------------------- | ------ | ----------- | ---------------------- |
+| `-Dfuzz-iterations` | u32    | 10000       | Fuzzing iterations     |
+| `-Dfuzz-timeout`    | u32    | 1000        | Timeout per test in ms |
+| `-Dfuzz-corpus`     | string | fuzz-corpus | Corpus directory       |
 
 ## Project Structure
 
@@ -29,43 +190,77 @@ kausaldb/
 │   ├── sim/               # Deterministic simulation framework
 │   ├── server/            # HTTP API and request handling
 │   ├── tests/             # Integration tests with internal API access
-│   ├── dev/               # Development tools: benchmark, fuzz, debug
+│   ├── bench/             # Benchmark executables
+│   ├── fuzz/              # Fuzzing executables
 │   ├── kausaldb.zig       # Public API
 │   ├── internal.zig       # Internal API for dev tools
 │   └── main.zig           # CLI entry point
 ├── tests/                 # E2E tests (binary interface only)
-├── docs/                  # You are here
+├── docs/                  # Documentation
 └── build.zig              # Build configuration
 ```
 
-## Build System
+## Debugging Workflow
 
-Everything goes through `build.zig`. No Makefiles, no shell scripts for building.
+### Memory Corruption
 
-### Common Targets
+When encountering memory corruption, follow this tiered approach:
+
+#### Tier 1: General Purpose Allocator
+
+```zig
+// In the failing test, replace:
+const allocator = std.testing.allocator;
+
+// With:
+var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+defer _ = gpa.deinit();
+const allocator = gpa.allocator();
+```
+
+#### Tier 2: Valgrind (Linux)
 
 ```bash
-# Testing
-./zig/zig build test                          # Unit tests only
-./zig/zig build test-integration              # Integration tests
-./zig/zig build test-all                      # Everything including stress
-./zig/zig build test --test-filter="storage"  # Specific component
-./zig/zig build test -Dseed=0xDEADBEEF       # Deterministic reproduction
+valgrind --tool=memcheck --leak-check=full \
+    --track-origins=yes --verbose \
+    ./zig/zig build test
+```
+
+
+## Reproducing CI Failures
+
+When CI fails, reproduce locally using the exact same configuration:
+
+```bash
+# Check the CI logs for the exact command, e.g.:
+# "Testing on ubuntu-latest with seed: 0xDEADBEEF"
+
+# Reproduce locally:
+./zig/zig build test -Dseed=0xDEADBEEF
+
+# For fuzzing crashes:
+./zig/zig build fuzz --corpus fuzz-corpus/crashes/crash_12345.bin
+```
+
+## Common Development Workflows
+
+./zig/zig build test-all # Everything including stress
+./zig/zig build test --test-filter="storage" # Specific component
+./zig/zig build test -Dseed=0xDEADBEEF # Deterministic reproduction
 
 # Development
-./zig/zig build run                           # Run server
-./zig/zig build run -- --help                 # Pass arguments
-./zig/zig build benchmark                     # Performance tests
-./zig/zig build fuzz                         # Fuzz testing
-./zig/zig build debug                        # Debug utilities
+
+./zig/zig build run # Run server
+./zig/zig build run -- --help # Pass arguments
+./zig/zig build test # Core development workflow
+./zig/zig build fuzz # Fuzz testing
 
 # CI/Quality
-./zig/zig build ci-smoke                     # Quick validation
-./zig/zig build ci-full                      # Complete validation
-./zig/zig build ci-stress                    # Stress testing
-./zig/zig build fmt-check                    # Format verification
-./zig/zig build tidy                         # Naming conventions
-```
+
+./zig/zig build fmt-check # Format verification
+./zig/zig build tidy # Naming conventions
+
+````
 
 ### Build Options
 
@@ -76,15 +271,11 @@ Everything goes through `build.zig`. No Makefiles, no shell scripts for building
 -Doptimize=ReleaseFast    # Maximum performance
 -Doptimize=ReleaseSmall   # Minimum binary size
 
-# Safety
--fsanitize-address        # AddressSanitizer
--Denable-memory-guard     # Custom memory validation
--Denable-tracy            # Tracy profiler integration
 
 # Testing
 -Dseed=0x12345           # Deterministic test seed
 -Dtest-filter="pattern"   # Run specific tests
-```
+````
 
 ## Testing Workflow
 
@@ -213,16 +404,8 @@ pub const Engine = struct {
 ### Benchmarking
 
 ```bash
-# Run all benchmarks
-./zig/zig build benchmark
-
-# Specific operation
-./zig-out/bin/benchmark storage
-./zig-out/bin/benchmark query
-./zig-out/bin/benchmark compaction
-
-# JSON output for CI
-./zig-out/bin/benchmark all --json
+# Run performance benchmarks
+./zig/zig build bench
 ```
 
 Performance targets:
@@ -257,10 +440,10 @@ Tiered approach:
 var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
 ```
 
-2. **Deep**: AddressSanitizer
+2. **Deep**: Valgrind (Linux)
 
 ```bash
-./zig/zig build test -fsanitize-address
+valgrind --tool=memcheck --leak-check=full ./zig/zig build test
 ```
 
 3. **Interactive**: LLDB
@@ -329,23 +512,7 @@ Impact: 30% reduction in write amplification.
 
 ## CI Pipeline
 
-### Local CI Simulation
 
-```bash
-# Run what CI runs
-./zig/zig build ci-smoke    # Quick checks (2 min)
-./zig/zig build ci-full     # Everything (10 min)
-```
-
-### GitHub Actions
-
-```yaml
-# .github/workflows/ci.yml
-- ci-smoke: Format, tidy, unit tests
-- ci-matrix: Cross-platform compilation
-- ci-stress: Extended stress testing
-- ci-perf: Performance regression detection
-```
 
 ## Performance Profiling
 
@@ -357,7 +524,7 @@ Impact: 30% reduction in write amplification.
 ./zig-out/bin/kausaldb --profile
 
 # With perf (Linux)
-perf record ./zig-out/bin/benchmark storage
+perf record ./zig-out/bin/kausaldb --benchmark
 perf report
 ```
 
@@ -386,17 +553,17 @@ Solution: Move test to `src/tests/` for internal API access.
 **Memory corruption**:
 
 ```bash
-# Enable all safety checks
-./zig/zig build test -Denable-memory-guard -fsanitize-address
+# Enable safety allocator for debugging
+./zig/zig build test  # Use GeneralPurposeAllocator in test code
 ```
 
 **Performance regression**:
 
 ```bash
 # Compare before/after
-./zig/zig build benchmark > before.txt
+./zig/zig build bench > before.txt
 # ... make changes ...
-./zig/zig build benchmark > after.txt
+./zig/zig build bench > after.txt
 diff before.txt after.txt
 ```
 
@@ -411,9 +578,9 @@ diff before.txt after.txt
 
 ### Pre-release Checklist
 
-- [ ] `./zig/zig build ci-full` passes
-- [ ] No memory leaks: `./zig/zig build test -fsanitize-address`
-- [ ] Performance targets met: `./zig/zig build benchmark`
+- [ ] `./zig/zig build test-all` passes
+- [ ] No memory leaks: `valgrind ./zig/zig build test`
+- [ ] Performance targets met: `./zig/zig build bench`
 - [ ] Fuzz testing clean: `./scripts/quick_fuzz.sh`
 - [ ] Documentation current
 - [ ] CHANGELOG updated

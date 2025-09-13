@@ -166,27 +166,26 @@ const per_op = growth / operation_count;
 ## Performance vs Targets
 
 | Metric          | Target | Achieved    | Status | Margin |
-| --------------- | ------ | ----------- | -------| ------ |
-| Block Write     | <100µs | 68µs (P95)  | OK    | 32%    |
-| Block Read      | <1µs   | 45ns (P95)  | OK  | 22x    |
-| Graph Traversal | <100µs | 1.2µs (P95) | OK  | 83x    |
-| Memory/Write    | <2KB   | 1.6KB       | OK  | 20%    |
-| Recovery        | <1s/GB | 1.12s/GB    | FAIL | -12%   |
+| --------------- | ------ | ----------- | ------ | ------ |
+| Block Write     | <100µs | 68µs (P95)  | OK     | 32%    |
+| Block Read      | <1µs   | 45ns (P95)  | OK     | 22x    |
+| Graph Traversal | <100µs | 1.2µs (P95) | OK     | 83x    |
+| Memory/Write    | <2KB   | 1.6KB       | OK     | 20%    |
+| Recovery        | <1s/GB | 1.12s/GB    | FAIL   | -12%   |
 
 ## Running Benchmarks
 
 ```bash
 # All benchmarks
-./zig/zig build benchmark
+./zig/zig build bench
 
-# Specific components
-./zig-out/bin/benchmark storage
-./zig-out/bin/benchmark query
-./zig-out/bin/benchmark compaction
-./zig-out/bin/benchmark parsing
+# Configure benchmark parameters
+./zig/zig build bench \
+    -Dbench-iterations=10000 \
+    -Dbench-warmup=1000
 
-# JSON output for CI
-./zig-out/bin/benchmark all --json > results.json
+# Compare against baseline for regression detection
+./zig/zig build bench -Dbench-baseline=baseline.json
 
 # With memory profiling
 ./zig-out/bin/benchmark storage --memory-stats

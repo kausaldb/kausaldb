@@ -7,6 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const internal = @import("internal");
+const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
 
@@ -203,38 +204,6 @@ fn parse_target_arg(args: []const []const u8) Target {
     return .all;
 }
 
-/// Parse configuration from command line arguments
-fn parse_config(args: []const []const u8) FuzzConfig {
-    var config = FuzzConfig{
-        .seed = @as(u64, @intCast(std.time.timestamp())) ^ 0xDEADBEEF,
-    };
-
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (std.mem.eql(u8, arg, "--iterations") and i + 1 < args.len) {
-            config.iterations = std.fmt.parseInt(u32, args[i + 1], 10) catch config.iterations;
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--timeout") and i + 1 < args.len) {
-            config.timeout_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch config.timeout_ms;
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--corpus") and i + 1 < args.len) {
-            config.corpus_dir = args[i + 1];
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--seed") and i + 1 < args.len) {
-            config.seed = std.fmt.parseInt(u64, args[i + 1], 0) catch config.seed;
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--verbose")) {
-            config.verbose = true;
-        } else if (std.mem.eql(u8, arg, "--no-save")) {
-            config.save_crashes = false;
-        }
-    }
-
-    return config;
-}
-
 /// Print usage information
 fn print_usage() void {
     std.debug.print("KausalDB Fuzzing Framework\n\n", .{});
@@ -276,7 +245,12 @@ pub fn main() !void {
     }
 
     const target = parse_target_arg(args);
-    const config = parse_config(args);
+    const config = FuzzConfig{
+        .iterations = build_options.fuzz_iterations,
+        .corpus_dir = build_options.fuzz_corpus,
+        .seed = @as(u64, @intCast(std.time.timestamp())) ^ 0xDEADBEEF,
+        .save_crashes = true,
+    };
 
     std.debug.print("KausalDB Fuzzing Framework\n", .{});
     std.debug.print("Target: {s}\n", .{@tagName(target)});

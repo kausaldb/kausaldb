@@ -9,9 +9,8 @@ Quick start guide for KausalDB contributors.
 git clone https://github.com/kausaldb/kausaldb
 cd kausaldb
 
-# Install toolchain and git hooks
+# Install toolchain
 ./scripts/install_zig.sh
-./scripts/setup_hooks.sh
 ```
 
 ## Development Workflow

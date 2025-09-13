@@ -12,7 +12,6 @@ Model your codebase as a directed graph of dependencies and relationships. Built
 ```bash
 # Setup
 ./scripts/install_zig.sh
-./scripts/setup_hooks.sh
 
 # Build and run
 ./zig/zig build test
