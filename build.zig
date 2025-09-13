@@ -136,6 +136,20 @@ fn build_executable(build_options: BuildOptions) void {
 
     build_options.b.installArtifact(exe);
 
+    // Build integration test binary for valgrind analysis
+    const test_exe = build_options.b.addTest(.{
+        .name = "test",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/integration_tests.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+
+    test_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(test_exe.root_module, build_options);
+    build_options.b.installArtifact(test_exe);
+
     const run_cmd = build_options.b.addRunArtifact(exe);
     run_cmd.step.dependOn(build_options.b.getInstallStep());
     if (build_options.b.args) |args| {
