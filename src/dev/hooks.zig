@@ -31,7 +31,7 @@ const Hook = enum {
             \\
             \\# Check code formatting
             \\echo "Checking code formatting..."
-            \\./zig/zig build fmt
+            \\./zig/zig build fmt-check
             \\
             \\# Check naming conventions and style rules
             \\echo "Checking style rules..."
