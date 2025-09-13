@@ -126,7 +126,7 @@ pub fn recover_from_segment(
     stats.entries_written += entries_recovered;
 
     if (entries_recovered > 0) {
-        log.info("Recovered {d} entries from segment: {s}", .{ entries_recovered, file_path });
+        log.debug("Recovered {d} entries from segment: {s}", .{ entries_recovered, file_path });
     } else {
         log.debug("No entries found in segment: {s}", .{file_path});
     }
