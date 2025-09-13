@@ -90,7 +90,6 @@ jobs:
       - name: Run E2E Tests
         run: ./zig/zig build test-e2e -Dseed=${{ matrix.seed }}
 
-
       - name: Upload Test Artifacts on Failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -100,7 +99,6 @@ jobs:
             zig-out/
             test-logs/
           retention-days: 7
-
 
   # Valgrind memory analysis (separate job due to significant slowdown)
   valgrind:
@@ -272,46 +270,6 @@ jobs:
             fuzz-corpus/crashes/
             fuzz-corpus/hangs/
           retention-days: 30
-
-  # Code coverage reporting
-  coverage:
-    name: Code Coverage
-    needs: test-matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Install Coverage Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lcov
-
-      - name: Run Tests with Coverage
-        run: |
-          ./zig/zig build test-all \
-            -Dcoverage=true \
-            -Dcoverage-dir=coverage-reports \
-            -Dseed=0xDEADBEEF
-
-      - name: Generate Coverage Report
-        run: |
-          lcov --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' --output-file coverage.info
-          lcov --list coverage.info
-
-      - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.info
-          flags: unittests
-          fail_ci_if_error: false
 
   # Release build verification
   release:
