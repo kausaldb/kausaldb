@@ -176,6 +176,7 @@ jobs:
             -Dbench-iterations=10000 \
             -Dbench-warmup=1000 \
             -Dbench-baseline=bench-baseline.json \
+            -- --json \
             | tee bench-results.txt
 
       - name: Check for Performance Regressions
@@ -197,9 +198,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: |
-            bench-results.txt
-            bench-baseline.json
+          path: bench-results.txt
           retention-days: 30
 
       - name: Comment PR with Benchmark Results

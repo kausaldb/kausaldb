@@ -189,6 +189,7 @@ jobs:
             -Dbench-iterations=100000 \
             -Dbench-warmup=10000 \
             -Dbench-baseline=bench-baseline.json \
+            -- --json \
             | tee perf-history/bench-${{ github.run_number }}.txt
 
           # Extract JSON results
