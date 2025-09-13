@@ -31,7 +31,6 @@ comptime {
     _ = @import("core/state_machines.zig");
     _ = @import("core/types.zig");
     _ = @import("core/vfs.zig");
-    _ = @import("dev/commit_msg_validator.zig");
     _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/tidy.zig");
     _ = @import("ingestion/ingest_directory.zig");
