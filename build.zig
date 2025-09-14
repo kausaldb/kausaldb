@@ -161,18 +161,18 @@ fn build_executable(build_options: BuildOptions) void {
 }
 
 fn build_tests(build_options: BuildOptions, test_options: TestOptions) void {
-    const unit_tests = build_test_artifact(build_options, "src/unit_tests.zig", "unit-tests");
-    const unit_run = build_test_runner(build_options, unit_tests, test_options);
+    const unit_tests = build_test_artifact(build_options, "src/unit_tests.zig", "unit-tests", test_options);
+    const unit_run = build_options.b.addRunArtifact(unit_tests);
     const unit_step = build_options.b.step("test-unit", "Run unit tests");
     unit_step.dependOn(&unit_run.step);
 
-    const integration_tests = build_test_artifact(build_options, "src/integration_tests.zig", "integration-tests");
-    const integration_run = build_test_runner(build_options, integration_tests, test_options);
+    const integration_tests = build_test_artifact(build_options, "src/integration_tests.zig", "integration-tests", test_options);
+    const integration_run = build_options.b.addRunArtifact(integration_tests);
     const integration_step = build_options.b.step("test-integration", "Run integration tests");
     integration_step.dependOn(&integration_run.step);
 
-    const e2e_tests = build_test_artifact(build_options, "tests/e2e_tests.zig", "e2e-tests");
-    const e2e_run = build_test_runner(build_options, e2e_tests, test_options);
+    const e2e_tests = build_test_artifact(build_options, "tests/e2e_tests.zig", "e2e-tests", test_options);
+    const e2e_run = build_options.b.addRunArtifact(e2e_tests);
     const e2e_step = build_options.b.step("test-e2e", "Run end-to-end tests");
     e2e_step.dependOn(&e2e_run.step);
 
@@ -357,7 +357,12 @@ fn add_internal_module(module: *std.Build.Module, build_options: BuildOptions) v
     module.addImport("internal", internal_module);
 }
 
-fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, name: []const u8) *std.Build.Step.Compile {
+fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, name: []const u8, test_options: TestOptions) *std.Build.Step.Compile {
+    const filters = if (test_options.filter) |filter|
+        build_options.b.allocator.dupe([]const u8, &[_][]const u8{filter}) catch @panic("OOM")
+    else
+        &[_][]const u8{};
+
     const test_exe = build_options.b.addTest(.{
         .name = name,
         .root_module = build_options.b.createModule(.{
@@ -365,23 +370,11 @@ fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, nam
             .target = build_options.target,
             .optimize = build_options.optimize,
         }),
+        .filters = filters,
     });
 
     test_exe.root_module.addImport("build_options", build_options.options.createModule());
     add_internal_module(test_exe.root_module, build_options);
 
     return test_exe;
-}
-
-fn build_test_runner(
-    build_options: BuildOptions,
-    test_exe: *std.Build.Step.Compile,
-    test_options: TestOptions,
-) *std.Build.Step.Run {
-    const run = build_options.b.addRunArtifact(test_exe);
-    if (test_options.filter) |filter| {
-        run.addArg("--test-filter");
-        run.addArg(filter);
-    }
-    return run;
 }

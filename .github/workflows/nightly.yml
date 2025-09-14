@@ -114,28 +114,28 @@ jobs:
               # Simulate sustained high write throughput
               ./zig/zig build test-integration \
                 -Dseed=0xBA1CAFED \
-                -Dtest-filter="heavy_write" \
+                -Dfilter="heavy" \
                 -Dtest-iterations=100
               ;;
             compaction-stress)
               # Force aggressive compaction scenarios
               ./zig/zig build test-integration \
                 -Dseed=0xC0FFEE01 \
-                -Dtest-filter="compaction" \
+                -Dfilter="compaction" \
                 -Dtest-iterations=50
               ;;
             memory-pressure)
               # Test under memory constraints
               ./zig/zig build test-integration \
                 -Dseed=0xFEEDFACE \
-                -Dtest-filter="memory" \
+                -Dfilter="memory" \
                 -Dtest-iterations=50
               ;;
             crash-recovery)
               # Systematic crash recovery testing
               ./zig/zig build test-integration \
                 -Dseed=0xDEADBEEF \
-                -Dtest-filter="recovery" \
+                -Dfilter="recovery" \
                 -Dtest-iterations=100
               ;;
           esac
@@ -198,9 +198,10 @@ jobs:
       - name: Analyze Performance Trends
         run: |
           # Simple trend analysis
-          if [ -f perf-history/bench-$((github.run_number - 1)).txt ]; then
+          PREV_RUN=$((${{ github.run_number }} - 1))
+          if [ -f perf-history/bench-${PREV_RUN}.txt ]; then
             echo "Comparing with previous nightly run:"
-            diff -u perf-history/bench-$((github.run_number - 1)).txt \
+            diff -u perf-history/bench-${PREV_RUN}.txt \
                     perf-history/bench-${{ github.run_number }}.txt || true
           fi
 
@@ -277,9 +278,9 @@ jobs:
 
           # Use appropriate zig command based on version
           if [[ "${{ matrix.zig_version }}" == "master" ]]; then
-            zig-master/zig build test -Dseed=0xNIGHTLY1
+            zig-master/zig build test -Dseed=0xBADCAFE2
           else
-            ./zig/zig build test -Dseed=0xNIGHTLY1
+            ./zig/zig build test -Dseed=0xBADCAFE1
           fi
 
       - name: Report Compatibility Issues
