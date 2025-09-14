@@ -824,6 +824,14 @@ pub const StorageEngine = struct {
         };
     }
 
+    /// Disable WAL write verification for simulation tests with intentional corruption.
+    /// This prevents WAL write verification from failing when corruption is
+    /// intentionally injected during testing.
+    pub fn disable_wal_verification_for_simulation(self: *StorageEngine) void {
+        concurrency.assert_main_thread();
+        self.memtable_manager.wal.disable_write_verification_for_simulation();
+    }
+
     /// Get current memory usage information for testing and monitoring.
     /// Returns basic memory statistics useful for tests and debugging.
     pub fn memory_usage(self: *const StorageEngine) MemoryUsage {
@@ -1171,6 +1179,7 @@ pub const TypedStorageCoordinator = struct {
             error_context.log_storage_error(err, error_context.file_context("read_file_size_open", path));
             return err;
         };
+
         defer file.close();
         return file.file_size() catch |err| {
             error_context.log_storage_error(err, error_context.file_context("read_file_size_stat", path));
@@ -1178,6 +1187,22 @@ pub const TypedStorageCoordinator = struct {
         };
     }
 };
+
+test "StorageEngine disable WAL verification for simulation" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test_storage");
+    defer engine.deinit();
+
+    try engine.startup();
+    defer engine.shutdown() catch {};
+
+    // This should not fail - just verify the method can be called
+    engine.disable_wal_verification_for_simulation();
+}
 
 test "storage engine initialization and cleanup" {
     const allocator = testing.allocator;
