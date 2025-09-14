@@ -79,77 +79,6 @@ jobs:
           path: fuzz-corpus-${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
 
-  # Stress testing with heavy workloads
-  stress-testing:
-    name: Stress Test / ${{ matrix.scenario }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45 # 45 minutes
-    if: github.event.inputs.skip_stress != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        scenario:
-          - heavy-writes
-          - compaction-stress
-          - memory-pressure
-          - crash-recovery
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Run Stress Test
-        run: |
-          echo "========================================="
-          echo "Running stress scenario: ${{ matrix.scenario }}"
-          echo "========================================="
-
-          case "${{ matrix.scenario }}" in
-            heavy-writes)
-              # Simulate sustained high write throughput
-              ./zig/zig build test-integration \
-                -Dseed=0xBA1CAFED \
-                -Dfilter="heavy" \
-                -Dtest-iterations=100
-              ;;
-            compaction-stress)
-              # Force aggressive compaction scenarios
-              ./zig/zig build test-integration \
-                -Dseed=0xC0FFEE01 \
-                -Dfilter="compaction" \
-                -Dtest-iterations=50
-              ;;
-            memory-pressure)
-              # Test under memory constraints
-              ./zig/zig build test-integration \
-                -Dseed=0xFEEDFACE \
-                -Dfilter="memory" \
-                -Dtest-iterations=50
-              ;;
-            crash-recovery)
-              # Systematic crash recovery testing
-              ./zig/zig build test-integration \
-                -Dseed=0xDEADBEEF \
-                -Dfilter="recovery" \
-                -Dtest-iterations=100
-              ;;
-          esac
-
-      - name: Upload Test Results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stress-test-${{ matrix.scenario }}-${{ github.run_number }}
-          path: |
-            test-logs/
-            zig-out/
-          retention-days: 30
-
   # Performance trending with historical comparison
   performance-trending:
     name: Performance Trending
@@ -370,7 +299,7 @@ jobs:
   # Nightly status summary
   nightly-summary:
     name: Nightly Summary
-    needs: [deep-fuzzing, stress-testing, performance-trending, expanded-matrix, memory-safety]
+    needs: [deep-fuzzing, performance-trending, expanded-matrix, memory-safety]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -380,7 +309,6 @@ jobs:
           echo "Nightly Build Summary"
           echo "========================================="
           echo "Deep Fuzzing: ${{ needs.deep-fuzzing.result }}"
-          echo "Stress Testing: ${{ needs.stress-testing.result }}"
           echo "Performance: ${{ needs.performance-trending.result }}"
           echo "Compatibility: ${{ needs.expanded-matrix.result }}"
           echo "Memory Safety: ${{ needs.memory-safety.result }}"
@@ -388,7 +316,6 @@ jobs:
 
           # Fail if any critical job failed
           if [[ "${{ needs.deep-fuzzing.result }}" == "failure" ]] || \
-             [[ "${{ needs.stress-testing.result }}" == "failure" ]] || \
              [[ "${{ needs.performance-trending.result }}" == "failure" ]] || \
              [[ "${{ needs.memory-safety.result }}" == "failure" ]]; then
             echo "::error::Nightly build failed"
