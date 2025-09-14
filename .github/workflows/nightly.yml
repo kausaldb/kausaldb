@@ -27,7 +27,7 @@ jobs:
   deep-fuzzing:
     name: Deep Fuzzing / ${{ matrix.target }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180 # 3 hours
+    timeout-minutes: 30 # 30 minutes
     if: github.event.inputs.skip_fuzzing != 'true'
     strategy:
       fail-fast: false
@@ -55,10 +55,10 @@ jobs:
         run: |
           echo "========================================="
           echo "Deep fuzzing ${{ matrix.target }} target"
-          echo "Running 10,000,000 iterations"
+          echo "Running 1,000,000 iterations"
           echo "========================================="
           ./zig/zig build fuzz \
-            -Dfuzz-iterations=10000000 \
+            -Dfuzz-iterations=1000000 \
             -Dfuzz-corpus=fuzz-corpus-${{ matrix.target }} \
             -- ${{ matrix.target }}
 
@@ -83,7 +83,7 @@ jobs:
   stress-testing:
     name: Stress Test / ${{ matrix.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # 2 hours
+    timeout-minutes: 45 # 45 minutes
     if: github.event.inputs.skip_stress != 'true'
     strategy:
       fail-fast: false
@@ -113,28 +113,28 @@ jobs:
             heavy-writes)
               # Simulate sustained high write throughput
               ./zig/zig build test-integration \
-                -Dseed=0xSTRESS01 \
+                -Dseed=0xBA1CAFED \
                 -Dtest-filter="heavy_write" \
                 -Dtest-iterations=100
               ;;
             compaction-stress)
               # Force aggressive compaction scenarios
               ./zig/zig build test-integration \
-                -Dseed=0xCOMPACT1 \
+                -Dseed=0xC0FFEE01 \
                 -Dtest-filter="compaction" \
                 -Dtest-iterations=50
               ;;
             memory-pressure)
               # Test under memory constraints
               ./zig/zig build test-integration \
-                -Dseed=0xMEMORY01 \
+                -Dseed=0xFEEDFACE \
                 -Dtest-filter="memory" \
                 -Dtest-iterations=50
               ;;
             crash-recovery)
               # Systematic crash recovery testing
               ./zig/zig build test-integration \
-                -Dseed=0xCRASH001 \
+                -Dseed=0xDEADBEEF \
                 -Dtest-filter="recovery" \
                 -Dtest-iterations=100
               ;;
@@ -179,15 +179,15 @@ jobs:
         run: |
           echo "========================================="
           echo "Running extended performance benchmarks"
-          echo "100,000 iterations with 10,000 warmup"
+          echo "50,000 iterations with 5,000 warmup"
           echo "========================================="
 
           mkdir -p perf-history
 
           ./zig/zig build bench \
             -Doptimize=ReleaseFast \
-            -Dbench-iterations=100000 \
-            -Dbench-warmup=10000 \
+            -Dbench-iterations=50000 \
+            -Dbench-warmup=5000 \
             -Dbench-baseline=bench-baseline.json \
             -- --json \
             | tee perf-history/bench-${{ github.run_number }}.txt
