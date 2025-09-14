@@ -124,6 +124,8 @@ jobs:
         run: ./zig/zig build -Doptimize=Debug -Dseed=0xDEADBEEF
 
       - name: Run Valgrind Memory Check
+        env:
+          SKIP_PERFORMANCE_TESTS: "1"
         run: |
           valgrind \
             --tool=memcheck \

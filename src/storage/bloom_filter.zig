@@ -412,6 +412,11 @@ test "Bloom filter performance characteristics" {
     const max_add_time = base_add_time * debug_multiplier;
     const max_lookup_time = base_lookup_time * debug_multiplier;
 
+    // Skip performance assertions when running under slow analysis tools
+    if (std.posix.getenv("SKIP_PERFORMANCE_TESTS") != null) {
+        return;
+    }
+
     try std.testing.expect(add_duration < max_add_time);
     try std.testing.expect(lookup_duration < max_lookup_time);
 }

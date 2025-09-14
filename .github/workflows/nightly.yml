@@ -310,6 +310,8 @@ jobs:
         run: ./zig/zig build -Doptimize=Debug
 
       - name: Run Valgrind Memcheck
+        env:
+          SKIP_PERFORMANCE_TESTS: "1"
         run: |
           echo "Running comprehensive memory analysis on test suite..."
           valgrind \
@@ -325,6 +327,8 @@ jobs:
             ./zig/zig build test-all -Dseed=0xDEADBEEF
 
       - name: Run Valgrind Helgrind (Thread Safety)
+        env:
+          SKIP_PERFORMANCE_TESTS: "1"
         run: |
           echo "Checking for threading issues in test suite..."
           valgrind \
