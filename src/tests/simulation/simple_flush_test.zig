@@ -8,19 +8,19 @@ const testing = std.testing;
 
 // Core imports
 const types = @import("../../core/types.zig");
-const vfs = @import("../../core/vfs.zig");
 
 // Storage imports
 const storage_engine = @import("../../storage/engine.zig");
 
 // Simulation imports
 const simulation_framework = @import("../../testing/simulation_framework.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 
 // Type aliases
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const StorageEngine = storage_engine.StorageEngine;
-const SimulationVFS = vfs.SimulationVFS;
+const SimulationVFS = simulation_vfs.SimulationVFS;
 
 const log = std.log.scoped(.simple_flush_test);
 
@@ -28,7 +28,7 @@ test "flush preserves all data" {
     const allocator = testing.allocator;
 
     // Test owns the storage lifecycle
-    var sim_vfs = try SimulationVFS.init(allocator, 0x1234);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test");
@@ -68,7 +68,7 @@ test "flush preserves all data" {
 test "multiple flushes maintain consistency" {
     const allocator = testing.allocator;
 
-    var sim_vfs = try SimulationVFS.init(allocator, 0x2345);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test");
@@ -111,7 +111,7 @@ test "multiple flushes maintain consistency" {
 test "flush with mixed operations" {
     const allocator = testing.allocator;
 
-    var sim_vfs = try SimulationVFS.init(allocator, 0x3456);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test");
@@ -155,7 +155,7 @@ test "flush with mixed operations" {
 test "recovery after flush preserves data" {
     const allocator = testing.allocator;
 
-    var sim_vfs = try SimulationVFS.init(allocator, 0x4567);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var model = simulation_framework.TestModel.init(allocator);
@@ -213,7 +213,7 @@ test "recovery after flush preserves data" {
 test "memory bounds after flush" {
     const allocator = testing.allocator;
 
-    var sim_vfs = try SimulationVFS.init(allocator, 0x5678);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test");
@@ -250,7 +250,7 @@ test "memory bounds after flush" {
 test "concurrent flush and operations" {
     const allocator = testing.allocator;
 
-    var sim_vfs = try SimulationVFS.init(allocator, 0x6789);
+    var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
     var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test");

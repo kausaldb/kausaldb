@@ -15,72 +15,82 @@ pub const std_options = .{
 };
 
 comptime {
+    // Simulation tests - deterministic property-based testing framework
+    _ = @import("tests/simulation/corruption_recovery.zig");
+    _ = @import("tests/simulation/flush_test.zig");
+    _ = @import("tests/simulation/liveness.zig");
+    _ = @import("tests/simulation/metrics.zig");
+    _ = @import("tests/simulation/network.zig");
+    _ = @import("tests/simulation/ownership_hardening.zig");
     _ = @import("tests/simulation/property_test.zig");
-    // _ = @import("tests/simulation/corruption_recovery.zig"); // Temporarily disabled - missing simulation_harness.zig
+    _ = @import("tests/simulation/simple_flush_test.zig");
 
-    // MIGRATION: Temporarily disabled old tests to isolate new simulation framework
-    // These will be migrated to property-based simulation tests in phases.
+    // Simulation scenario tests
+    _ = @import("tests/simulation/scenarios/crash_recovery_test.zig");
+    _ = @import("tests/simulation/scenarios/scenario_test.zig");
+    _ = @import("tests/simulation/scenarios/workload_test.zig");
+
+    // MIGRATION: Kept essential tests not covered by simulation framework
+
+    // CLI and Server tests - external interface testing
+    _ = @import("tests/cli/command_interface.zig");
+    _ = @import("tests/server/protocol.zig");
+    _ = @import("tests/server/server_coordinator.zig");
+    _ = @import("tests/server/server_lifecycle.zig");
+
+    // Ingestion tests - complex edge cases not covered by simulation
+    _ = @import("tests/ingestion/cross_file_resolution_test.zig");
+    _ = @import("tests/ingestion/ingestion.zig");
+    _ = @import("tests/ingestion/zig_parser_integration.zig");
+
+    // Defensive tests - assertion and safety mechanisms
+    _ = @import("tests/defensive/assertion_validation.zig");
+    _ = @import("tests/defensive/corruption_injection.zig");
+    _ = @import("tests/defensive/fatal_assertion_validation.zig");
+    _ = @import("tests/defensive/performance_impact.zig");
+
+    // Memory tests - allocation patterns and corruption prevention
+    _ = @import("tests/memory/corruption_prevention_test.zig");
+    _ = @import("tests/memory/profiling_validation.zig");
+
+    // Performance tests - benchmarking and regression detection
+    _ = @import("tests/performance/large_block_benchmark.zig");
+    _ = @import("tests/performance/streaming_memory_benchmark.zig");
+
+    // Safety tests - defensive programming validation
+    _ = @import("tests/safety/fatal_safety_violations.zig");
+    _ = @import("tests/safety/memory_corruption.zig");
+    _ = @import("tests/safety/ownership_safety.zig");
+
+    // Query tests - complex algorithm edge cases
+    _ = @import("tests/query/algorithms_edge_cases.zig");
+    _ = @import("tests/query/streaming_optimizations.zig");
+    _ = @import("tests/query/traversal_advanced.zig");
+    _ = @import("tests/query/traversal_termination.zig");
+
+    // Recovery tests - specific WAL corruption edge cases
+    _ = @import("tests/recovery/wal_core_recovery.zig");
+    _ = @import("tests/recovery/wal_corruption_scenarios.zig");
+    _ = @import("tests/recovery/wal_streaming_advanced.zig");
+
+    // Storage tests - complex compaction edge cases
+    _ = @import("tests/storage/tiered_compaction_validation.zig");
+    _ = @import("tests/storage/enhanced_compaction_strategies.zig");
+
+    // VFS integration tests
+    _ = @import("tests/vfs/vfs_integration.zig");
+
+    // MIGRATION COMPLETED: Moved redundant tests to old_tests/
+    // Deleted categories (now in old_tests/):
+    // - fault_injection/* -> simulation framework fault injection
+    // - debug/* -> simulation framework validation
+    // - scenarios/* -> simulation/scenarios/ with code generators
+    // - stress/* -> simulation workload generation
+    // - storage/* (except edge cases) -> simulation property tests
     //
-    // _ = @import("tests/cli/command_interface.zig");
-    // _ = @import("tests/debug/arraylist_corruption.zig");
-    // _ = @import("tests/defensive/assertion_validation.zig");
-    // _ = @import("tests/defensive/corruption_injection.zig");
-    // _ = @import("tests/defensive/fatal_assertion_demo.zig");
-    // _ = @import("tests/defensive/fatal_assertion_validation.zig");
-    // _ = @import("tests/defensive/performance_impact.zig");
-    // _ = @import("tests/fault_injection/compaction_crashes.zig");
-    // _ = @import("tests/fault_injection/deserialization_faults.zig");
-    // _ = @import("tests/fault_injection/ingestion_faults.zig");
-    // _ = @import("tests/fault_injection/network_faults.zig");
-    // _ = @import("tests/fault_injection/query_faults.zig");
-    // _ = @import("tests/fault_injection/server_faults.zig");
-    // _ = @import("tests/fault_injection/storage_faults.zig");
-    // _ = @import("tests/fault_injection/traversal_faults.zig");
-    // _ = @import("tests/golden_masters_test.zig");
-    // _ = @import("tests/harness.zig");
-    // _ = @import("tests/ingestion/cross_file_resolution_test.zig");
-    // _ = @import("tests/ingestion/ingestion.zig");
-    // _ = @import("tests/ingestion/zig_parser_integration.zig");
-    // _ = @import("tests/memory/corruption_prevention_test.zig");
-    // _ = @import("tests/memory/profiling_validation.zig");
-    // _ = @import("tests/misc/lifecycle.zig");
-    // _ = @import("tests/performance/large_block_benchmark.zig");
-    // _ = @import("tests/performance/streaming_memory_benchmark.zig");
-    // _ = @import("tests/query/algorithms_edge_cases.zig");
-    // _ = @import("tests/query/complex_workloads.zig");
-    // _ = @import("tests/query/streaming_optimizations.zig");
-    // _ = @import("tests/query/traversal_advanced.zig");
-    // _ = @import("tests/query/traversal_termination.zig");
-    // _ = @import("tests/recovery/wal_core_recovery.zig");
-    // _ = @import("tests/recovery/wal_corruption_scenarios.zig");
-    // _ = @import("tests/recovery/wal_streaming_advanced.zig");
-    // _ = @import("tests/safety/fatal_safety_violations.zig");
-    // _ = @import("tests/safety/memory_corruption.zig");
-    // _ = @import("tests/safety/ownership_safety.zig");
-    // _ = @import("tests/scenarios/batch_deduplication.zig");
-    // _ = @import("tests/scenarios/corrupted_sstable_recovery.zig");
-    // _ = @import("tests/scenarios/missing_edges_traversal.zig");
-    // _ = @import("tests/scenarios/workspace_isolation.zig");
-    // _ = @import("tests/scenarios_test.zig");
-    // _ = @import("tests/server/protocol.zig");
-    // _ = @import("tests/server/server_coordinator.zig");
-    // _ = @import("tests/server/server_lifecycle.zig");
-    // _ = @import("tests/simulation/liveness.zig");
-    // _ = @import("tests/simulation/network.zig");
-    // _ = @import("tests/simulation/ownership_hardening.zig");
-    // _ = @import("tests/storage/bloom_filter_validation.zig");
-    // _ = @import("tests/storage/defensive_integration.zig");
-    // _ = @import("tests/storage/enhanced_compaction_strategies.zig");
-    // _ = @import("tests/storage/fuzz_tests.zig");
-    // _ = @import("tests/storage/memtable_simple_operations.zig");
-    // _ = @import("tests/storage/property_tests.zig");
-    // _ = @import("tests/storage/tiered_compaction_validation.zig");
-    // _ = @import("tests/storage/wal_entry_stream.zig");
-    // _ = @import("tests/storage/wal_streaming_writes.zig");
-    // _ = @import("tests/stress/allocator_torture.zig");
-    // _ = @import("tests/stress/arena_safety.zig");
-    // _ = @import("tests/stress/memory_fault_injection.zig");
-    // _ = @import("tests/stress/memory_pressure.zig");
-    // _ = @import("tests/stress/storage_load.zig");
-    // _ = @import("tests/vfs/vfs_integration.zig");
+    // Kept all essential tests per COVERAGE_ANALYSIS.md:
+    // - Complex edge cases not covered by simulation
+    // - External interfaces (CLI, server, ingestion)
+    // - Core defensive and memory management patterns
+    // - Advanced algorithms and platform-specific behavior
 }

@@ -57,6 +57,50 @@ pub const FlushConfig = struct {
     enable_operation_trigger: bool = true,
 };
 
+/// Performance metrics tracking for simulation runs.
+pub const SimulationMetrics = struct {
+    operations_completed: u64 = 0,
+    operations_succeeded: u64 = 0,
+    operations_failed: u64 = 0,
+    flushes_triggered: u32 = 0,
+    flushes_succeeded: u32 = 0,
+    memory_peak_bytes: u64 = 0,
+    start_time: i64 = 0,
+    end_time: i64 = 0,
+
+    /// Calculate the success rate of operations.
+    pub fn calculate_success_rate(self: SimulationMetrics) f32 {
+        if (self.operations_completed == 0) return 1.0;
+        return @as(f32, @floatFromInt(self.operations_succeeded)) /
+            @as(f32, @floatFromInt(self.operations_completed));
+    }
+
+    /// Calculate operations per second.
+    pub fn operations_per_second(self: SimulationMetrics) f64 {
+        if (self.start_time == 0 or self.end_time == 0) return 0.0;
+        const duration_ns = @as(f64, @floatFromInt(self.end_time - self.start_time));
+        if (duration_ns == 0) return 0.0;
+        return @as(f64, @floatFromInt(self.operations_completed)) / (duration_ns / 1_000_000_000.0);
+    }
+
+    /// Log a summary of the metrics.
+    pub fn log_summary(self: SimulationMetrics) void {
+        log.info("Simulation Summary:", .{});
+        log.info("  Operations: {} completed, {} succeeded, {} failed", .{ self.operations_completed, self.operations_succeeded, self.operations_failed });
+        log.info("  Flushes: {}/{} succeeded", .{ self.flushes_succeeded, self.flushes_triggered });
+        log.info("  Peak memory: {} bytes", .{self.memory_peak_bytes});
+        log.info("  Success rate: {d:.1}%", .{self.calculate_success_rate() * 100.0});
+        log.info("  Throughput: {d:.0} ops/sec", .{self.operations_per_second()});
+    }
+
+    /// Update memory peak if current usage is higher.
+    pub fn update_memory_peak(self: *SimulationMetrics, current_bytes: u64) void {
+        if (current_bytes > self.memory_peak_bytes) {
+            self.memory_peak_bytes = current_bytes;
+        }
+    }
+};
+
 /// Predefined code graph scenarios for testing different patterns.
 pub const CodeGraphScenario = enum {
     monolithic_deep, // Deep call chains in monolithic codebases
@@ -428,6 +472,51 @@ pub fn run_test_scenario(
     try model.verify_against_storage(engine);
 }
 
+/// Run test scenario with metrics tracking.
+pub fn run_test_scenario_with_metrics(
+    engine: *StorageEngine,
+    model: *TestModel,
+    generator: *OperationGenerator,
+    operation_count: u64,
+    metrics: *SimulationMetrics,
+) !void {
+    assert(engine.state.can_write());
+
+    metrics.start_time = std.time.nanoTimestamp();
+    defer metrics.end_time = std.time.nanoTimestamp();
+
+    for (0..operation_count) |_| {
+        const op = try generator.generate_operation(70, 20, 10);
+
+        metrics.operations_completed += 1;
+        const success = try apply_operation_to_storage(engine, op);
+        if (success) {
+            metrics.operations_succeeded += 1;
+            try model.track_operation(op);
+        } else {
+            metrics.operations_failed += 1;
+        }
+
+        // Update memory peak periodically
+        if (metrics.operations_completed % 50 == 0) {
+            const usage = engine.memory_usage();
+            metrics.update_memory_peak(usage.total_bytes);
+        }
+
+        // Periodic verification
+        if (model.operation_count % 100 == 0) {
+            try PropertyChecks.check_no_data_loss(model, engine);
+        }
+    }
+
+    // Final memory peak update
+    const final_usage = engine.memory_usage();
+    metrics.update_memory_peak(final_usage.total_bytes);
+
+    // Final verification
+    try model.verify_against_storage(engine);
+}
+
 /// Run test scenario with specific operation mix.
 pub fn run_scenario_with_mix(
     engine: *StorageEngine,
@@ -451,6 +540,52 @@ pub fn run_scenario_with_mix(
             try PropertyChecks.check_no_data_loss(model, engine);
         }
     }
+
+    // Final verification
+    try model.verify_against_storage(engine);
+}
+
+/// Run test scenario with specific operation mix and metrics tracking.
+pub fn run_scenario_with_mix_and_metrics(
+    engine: *StorageEngine,
+    model: *TestModel,
+    generator: *OperationGenerator,
+    mix: OperationMix,
+    operation_count: u64,
+    metrics: *SimulationMetrics,
+) !void {
+    assert(engine.state.can_write());
+
+    metrics.start_time = std.time.nanoTimestamp();
+    defer metrics.end_time = std.time.nanoTimestamp();
+
+    for (0..operation_count) |_| {
+        const op = try generator.generate_operation_with_mix(mix);
+
+        metrics.operations_completed += 1;
+        const success = try apply_operation_to_storage(engine, op);
+        if (success) {
+            metrics.operations_succeeded += 1;
+            try model.track_operation(op);
+        } else {
+            metrics.operations_failed += 1;
+        }
+
+        // Update memory peak periodically
+        if (metrics.operations_completed % 50 == 0) {
+            const usage = engine.memory_usage();
+            metrics.update_memory_peak(usage.total_bytes);
+        }
+
+        // Periodic verification
+        if (model.operation_count % 100 == 0) {
+            try PropertyChecks.check_no_data_loss(model, engine);
+        }
+    }
+
+    // Final memory peak update
+    const final_usage = engine.memory_usage();
+    metrics.update_memory_peak(final_usage.total_bytes);
 
     // Final verification
     try model.verify_against_storage(engine);

@@ -67,7 +67,4 @@ comptime {
     _ = @import("storage/wal/recovery.zig");
     _ = @import("storage/wal/stream.zig");
     _ = @import("storage/wal/types.zig");
-    _ = @import("testing/defensive.zig");
-    _ = @import("testing/property_testing.zig");
-    _ = @import("testing/systematic_fuzzing.zig");
 }
