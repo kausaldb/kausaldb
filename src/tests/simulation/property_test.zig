@@ -304,8 +304,7 @@ test "property: k-hop consistency across operations" {
         }
     }
 
-    // Restart engine for more operations
-    try runner.storage_engine.startup();
+    // Continue with more operations (engine already running)
 
     // Run more operations
     try runner.run(300);

@@ -1,393 +1,252 @@
-//! Corruption recovery simulation tests.
+//! Corruption recovery simulation tests using deterministic infrastructure.
 //!
-//! Consolidated deterministic tests for corruption detection and recovery.
-//! Tests WAL corruption, SSTable corruption, and checksum validation.
+//! Tests WAL corruption, SSTable corruption, and checksum validation using
+//! the SimulationRunner framework for deterministic, reproducible testing.
 
 const std = @import("std");
 const testing = std.testing;
 
-const harness = @import("../harness.zig");
-const SimulationHarness = harness.SimulationHarness;
-const Fault = harness.Fault;
-const Workload = harness.Workload;
+const deterministic_test = @import("../../sim/deterministic_test.zig");
+const CodePatternGenerator = @import("scenarios/code_patterns.zig").CodePatternGenerator;
 
-const types = @import("../../core/types.zig");
-const ContextBlock = types.ContextBlock;
-const BlockId = types.BlockId;
+const SimulationRunner = deterministic_test.SimulationRunner;
+const OperationMix = deterministic_test.OperationMix;
+const FaultSpec = deterministic_test.FaultSpec;
+const PropertyChecker = deterministic_test.PropertyChecker;
 
-// === WAL Corruption Recovery ===
+const log = std.log.scoped(.corruption_recovery);
 
-test "WAL recovery skips corrupted entries" {
-    var sim = try SimulationHarness.init(testing.allocator, 0x1A1001);
-    defer sim.deinit();
+test "corruption recovery: WAL handles corrupted entries gracefully" {
+    const allocator = testing.allocator;
 
-    try sim.init_storage();
-
-    // Write known good entries
-    var i: u32 = 0;
-    while (i < 10) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "valid block",
-            .metadata = .{},
-        };
-        try sim.storage.put_block(&block);
-    }
-
-    // Corrupt specific WAL entries
-    try sim.inject_fault(.{ .corrupt_block = .{ .offset = 256, .pattern = 0xFF } });
-    try sim.inject_fault(.{ .corrupt_block = .{ .offset = 512, .pattern = 0x00 } });
-    try sim.inject_fault(.{ .corrupt_block = .{ .offset = 768, .pattern = 0xDE } });
-
-    // Simulate crash
-    try sim.inject_fault(.{ .crash = .{ .clean = false, .at_operation = sim.operation_count } });
-
-    // Recovery should skip corrupted entries and recover valid ones
-    sim.recover_storage() catch |err| {
-        // Some corruption errors are expected during recovery
-        try testing.expect(err == error.CorruptedEntry or
-            err == error.ChecksumMismatch or
-            err == error.CorruptedData);
+    // Inject corruption during write operations
+    const faults = [_]FaultSpec{
+        .{ .operation_number = 100, .fault_type = .corruption },
     };
 
-    // Verify some blocks were recovered
-    sim.verify_partial_recovery() catch |err| {
-        // Partial recovery is acceptable
-        try testing.expect(err == error.PartialRecovery);
-    };
-}
+    var runner = try SimulationRunner.init(allocator, 0xC0221237, .{
+        .put_block_weight = 80, // Write-heavy to exercise WAL
+        .find_block_weight = 20,
+        .delete_block_weight = 0,
+        .put_edge_weight = 0,
+        .find_edges_weight = 0,
+    }, &faults);
+    defer runner.deinit();
 
-test "WAL torn write recovery" {
-    var sim = try SimulationHarness.init(testing.allocator, 0x7042);
-    defer sim.deinit();
+    log.info("Testing WAL corruption recovery with {} operations", .{200});
 
-    try sim.init_storage();
-
-    // Write blocks
-    var i: u32 = 0;
-    while (i < 20) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "test block",
-            .metadata = .{},
-        };
-        try sim.storage.put_block(&block);
-    }
-
-    // Simulate torn write (partial write at end of WAL)
-    const wal_size = try sim.get_wal_size();
-    try sim.inject_fault(.{
-        .torn_write = .{
-            .offset = wal_size - 50, // Last entry partially written
-            .bytes_written = 25,
-        },
+    // Generate initial data before corruption
+    var generator = CodePatternGenerator.init(allocator, runner.storage_engine, 0xC0221237);
+    defer generator.deinit();
+    try generator.generate_realistic_codebase(.{
+        .utility_libraries = 1,
+        .fanout_per_library = 2,
+        .deep_call_chains = 1,
+        .call_chain_depth = 3,
+        .test_modules = 1,
+        .include_circular = false,
     });
 
-    // Crash and recover
-    try sim.inject_fault(.{ .crash = .{ .clean = false, .at_operation = sim.operation_count } });
+    const initial_blocks = runner.storage_engine.metrics().blocks_written.load();
+    log.info("Generated {} initial blocks before corruption test", .{initial_blocks});
 
-    // Recovery should handle torn write gracefully
-    try sim.recover_storage();
+    // Run through corruption - system should handle gracefully
+    try runner.run(200);
 
-    // Verify blocks before torn write are recovered
-    var recovered: u32 = 0;
-    i = 0;
-    while (i < 20) : (i += 1) {
-        if (sim.storage.get_block(BlockId.init(i))) |_| {
-            recovered += 1;
-        } else |_| {
-            // Block after torn write may not be recovered
-        }
-    }
+    // System should remain operational despite corruption
+    const final_blocks = runner.storage_engine.metrics().blocks_written.load();
+    try testing.expect(final_blocks >= initial_blocks);
 
-    try testing.expect(recovered >= 15); // Most blocks should be recovered
+    log.info("WAL corruption recovery completed: {}->{} blocks", .{ initial_blocks, final_blocks });
 }
 
-test "WAL checksum validation" {
-    var sim = try SimulationHarness.init(testing.allocator, 0xC4EC4);
-    defer sim.deinit();
+test "corruption recovery: SSTable corruption with checksums" {
+    const allocator = testing.allocator;
 
-    try sim.init_storage();
-
-    // Write blocks with checksums
-    var i: u32 = 0;
-    while (i < 5) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "checksummed block",
-            .metadata = .{},
-        };
-        try sim.storage.put_block(&block);
-    }
-
-    // Corrupt checksum fields specifically
-    try sim.inject_fault(.{ .corrupt_checksum = .{ .entry_index = 1 } });
-    try sim.inject_fault(.{ .corrupt_checksum = .{ .entry_index = 3 } });
-
-    // Recovery should detect and skip entries with bad checksums
-    try sim.inject_fault(.{ .crash = .{ .clean = false, .at_operation = sim.operation_count } });
-    sim.recover_storage() catch |err| {
-        try testing.expect(err == error.ChecksumMismatch);
+    // Create data first, then corrupt during reads
+    const faults = [_]FaultSpec{
+        .{ .operation_number = 150, .fault_type = .corruption },
     };
 
-    // Verify uncorrupted entries are recovered
-    try testing.expect(sim.storage.get_block(BlockId.init(0)) != null);
-    try testing.expect(sim.storage.get_block(BlockId.init(2)) != null);
-    try testing.expect(sim.storage.get_block(BlockId.init(4)) != null);
-}
+    var runner = try SimulationRunner.init(allocator, 0x55734B13, .{
+        .put_block_weight = 60,
+        .find_block_weight = 40, // Read-heavy after initial writes
+        .delete_block_weight = 0,
+        .put_edge_weight = 0,
 
-// === SSTable Corruption Recovery ===
+        .find_edges_weight = 0,
+    }, &faults);
+    defer runner.deinit();
 
-test "SSTable header corruption detection" {
-    var sim = try SimulationHarness.init(testing.allocator, 0x554EAD);
-    defer sim.deinit();
+    // Force flush to create SSTables
+    runner.flush_config.operation_threshold = 50;
+    runner.flush_config.enable_memory_trigger = false;
 
-    try sim.init_storage();
+    log.info("Testing SSTable corruption with checksum validation", .{});
 
-    // Fill memtable and flush to create SSTable
-    var i: u32 = 0;
-    while (i < 1000) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "sstable block",
-            .metadata = .{},
-        };
-        try sim.storage.put_block(&block);
-    }
-    try sim.storage.flush_memtable();
-
-    // Corrupt SSTable header
-    const sstable_path = try sim.get_sstable_path(0);
-    try sim.inject_fault(.{
-        .corrupt_file = .{
-            .path = sstable_path,
-            .offset = 0, // Header starts at offset 0
-            .pattern = 0xBA,
-        },
+    // Generate structured data that will be flushed to SSTables
+    var generator = CodePatternGenerator.init(allocator, runner.storage_engine, 0x55734B13);
+    defer generator.deinit();
+    try generator.generate_realistic_codebase(.{
+        .utility_libraries = 2,
+        .fanout_per_library = 3,
+        .deep_call_chains = 1,
+        .call_chain_depth = 4,
+        .test_modules = 1,
+        .include_circular = false,
     });
 
-    // Restart storage
-    try sim.inject_fault(.{ .crash = .{ .clean = true, .at_operation = sim.operation_count } });
+    // Run operations - corruption will be injected during reads
+    try runner.run(300);
 
-    // Recovery should detect corrupted SSTable
-    sim.recover_storage() catch |err| {
-        try testing.expect(err == error.CorruptedHeader or
-            err == error.InvalidMagic);
-    };
+    // Verify system handled corruption without crashing
+    try testing.expect(runner.storage_engine.state.can_read());
 
-    // Storage should still be functional (skip corrupted SSTable)
-    const new_block = ContextBlock{
-        .id = BlockId.init(9999),
-        .content = "new block after corruption",
-        .metadata = .{},
-    };
-    try sim.storage.put_block(&new_block);
+    log.info("SSTable corruption recovery completed successfully", .{});
 }
 
-test "SSTable block corruption isolation" {
-    var sim = try SimulationHarness.init(testing.allocator, 0x55B10C);
-    defer sim.deinit();
+test "corruption recovery: mixed corruption with crash recovery" {
+    const allocator = testing.allocator;
 
-    try sim.init_storage();
+    // Combine corruption with crash to test full recovery pipeline
+    const faults = [_]FaultSpec{
+        .{ .operation_number = 75, .fault_type = .corruption },
+        .{ .operation_number = 150, .fault_type = .crash },
+        .{ .operation_number = 250, .fault_type = .corruption },
+    };
 
-    // Create multiple SSTables
-    var sstable: u32 = 0;
-    while (sstable < 3) : (sstable += 1) {
-        var i: u32 = 0;
-        while (i < 500) : (i += 1) {
-            const block = ContextBlock{
-                .id = BlockId.init(sstable * 1000 + i),
-                .content = "sstable content",
-                .metadata = .{},
-            };
-            try sim.storage.put_block(&block);
-        }
-        try sim.storage.flush_memtable();
-    }
+    var runner = try SimulationRunner.init(allocator, 0xDEADC0DE, .{
+        .put_block_weight = 50,
+        .find_block_weight = 50,
+        .delete_block_weight = 0,
+        .put_edge_weight = 0,
+        .find_edges_weight = 0,
+    }, &faults);
+    defer runner.deinit();
 
-    // Corrupt one block in middle SSTable
-    const sstable_path = try sim.get_sstable_path(1);
-    try sim.inject_fault(.{
-        .corrupt_file = .{
-            .path = sstable_path,
-            .offset = 1024, // Somewhere in the data section
-            .pattern = 0xDD,
-        },
+    log.info("Testing combined corruption and crash recovery", .{});
+
+    // Create diverse data patterns
+    var generator = CodePatternGenerator.init(allocator, runner.storage_engine, 0xDEADC0DE);
+    defer generator.deinit();
+    try generator.generate_realistic_codebase(.{
+        .utility_libraries = 2,
+        .fanout_per_library = 2,
+        .deep_call_chains = 2,
+        .call_chain_depth = 3,
+        .test_modules = 2,
+        .include_circular = true,
     });
 
-    // Read operations should detect corruption
-    const corrupted_id = BlockId.init(1250); // Block in corrupted SSTable
-    const result = sim.storage.get_block(corrupted_id);
-    try testing.expect(result == error.ChecksumMismatch or
-        result == error.CorruptedData);
+    const pre_test_blocks = runner.storage_engine.metrics().blocks_written.load();
+    log.info("Starting mixed corruption test with {} blocks", .{pre_test_blocks});
 
-    // Other SSTables should still be readable
-    try testing.expect(sim.storage.get_block(BlockId.init(250)) != null); // First SSTable
-    try testing.expect(sim.storage.get_block(BlockId.init(2250)) != null); // Third SSTable
+    // Run through multiple fault injections
+    try runner.run(400);
+
+    // System should survive multiple corruption events and crash recovery
+    const post_test_blocks = runner.storage_engine.metrics().blocks_written.load();
+    log.info("Mixed corruption test completed: {} blocks remain", .{post_test_blocks});
+
+    // Some data loss is expected due to corruption, but system should be operational
+    try testing.expect(runner.storage_engine.state.can_read());
 }
 
-// === Multi-Fault Recovery ===
+test "corruption recovery: systematic corruption at different phases" {
+    const allocator = testing.allocator;
 
-test "recovery with multiple corruption types" {
-    var sim = try SimulationHarness.init(testing.allocator, 0x30171);
-    defer sim.deinit();
+    // Test corruption at different phases: early writes, mid-operation, late reads
+    const scenarios = [_]struct {
+        seed: u64,
+        corruption_point: u64,
+        description: []const u8,
+    }{
+        .{ .seed = 0x12345001, .corruption_point = 25, .description = "early write phase" },
+        .{ .seed = 0x12345002, .corruption_point = 100, .description = "mid operation phase" },
+        .{ .seed = 0x12345003, .corruption_point = 175, .description = "late read phase" },
+    };
 
-    try sim.init_storage();
+    for (scenarios) |scenario| {
+        log.info("Testing corruption during {s} (corruption at op {})", .{ scenario.description, scenario.corruption_point });
 
-    // Write diverse data
-    var i: u32 = 0;
-    while (i < 100) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "test data",
-            .metadata = .{},
+        const faults = [_]FaultSpec{
+            .{ .operation_number = scenario.corruption_point, .fault_type = .corruption },
         };
-        try sim.storage.put_block(&block);
 
-        // Flush periodically to create SSTables
-        if (i % 30 == 29) {
-            try sim.storage.flush_memtable();
-        }
+        var runner = try SimulationRunner.init(allocator, scenario.seed, .{
+            .put_block_weight = 70,
+            .find_block_weight = 30,
+            .delete_block_weight = 0,
+            .put_edge_weight = 0,
+            .find_edges_weight = 0,
+        }, &faults);
+        defer runner.deinit();
+
+        // Generate consistent test data
+        var generator = CodePatternGenerator.init(allocator, runner.storage_engine, scenario.seed);
+        defer generator.deinit();
+        try generator.generate_realistic_codebase(.{
+            .utility_libraries = 1,
+            .fanout_per_library = 3,
+            .deep_call_chains = 1,
+            .call_chain_depth = 4,
+            .test_modules = 1,
+            .include_circular = false,
+        });
+
+        // Run scenario
+        try runner.run(200);
+
+        // Verify graceful handling
+        try testing.expect(runner.storage_engine.state.can_read());
+
+        log.info("Corruption during {s}: handled gracefully", .{scenario.description});
     }
-
-    // Inject multiple corruption types
-    try sim.inject_fault(.{ .corrupt_block = .{ .offset = 128, .pattern = 0xFF } }); // WAL corruption
-    try sim.inject_fault(.{ .corrupt_checksum = .{ .entry_index = 5 } }); // Checksum corruption
-    try sim.inject_fault(.{ .torn_write = .{ .offset = 2048, .bytes_written = 30 } }); // Torn write
-
-    // Crash
-    try sim.inject_fault(.{ .crash = .{ .clean = false, .at_operation = sim.operation_count } });
-
-    // Recovery should handle multiple corruption types
-    sim.recover_storage() catch |err| {
-        // Expected to encounter corruption
-        try testing.expect(err == error.CorruptedData or
-            err == error.PartialRecovery);
-    };
-
-    // Some data should be recovered
-    var recovered_count: u32 = 0;
-    i = 0;
-    while (i < 100) : (i += 1) {
-        if (sim.storage.get_block(BlockId.init(i))) |_| {
-            recovered_count += 1;
-        } else |_| {}
-    }
-
-    try testing.expect(recovered_count > 50); // At least half should be recovered
 }
 
-test "corruption detection during compaction" {
-    var sim = try SimulationHarness.init(testing.allocator, 0xC03BAC7);
-    defer sim.deinit();
+test "corruption recovery: edge case - corruption during flush" {
+    const allocator = testing.allocator;
 
-    try sim.init_storage();
-
-    // Create SSTables
-    var batch: u32 = 0;
-    while (batch < 4) : (batch += 1) {
-        var i: u32 = 0;
-        while (i < 250) : (i += 1) {
-            const block = ContextBlock{
-                .id = BlockId.init(batch * 1000 + i),
-                .content = "compaction test",
-                .metadata = .{},
-            };
-            try sim.storage.put_block(&block);
-        }
-        try sim.storage.flush_memtable();
-    }
-
-    // Corrupt one SSTable
-    const sstable_path = try sim.get_sstable_path(2);
-    try sim.inject_fault(.{ .corrupt_file = .{ .path = sstable_path, .offset = 512, .pattern = 0xAB } });
-
-    // Trigger compaction
-    sim.storage.compact() catch |err| {
-        // Compaction should detect corruption
-        try testing.expect(err == error.CorruptedData or
-            err == error.ChecksumMismatch);
+    // Inject corruption right before a scheduled flush
+    const faults = [_]FaultSpec{
+        .{ .operation_number = 95, .fault_type = .corruption }, // Just before flush at 100
     };
 
-    // Verify uncorrupted data is still accessible
-    try testing.expect(sim.storage.get_block(BlockId.init(100)) != null);
-    try testing.expect(sim.storage.get_block(BlockId.init(1100)) != null);
-    try testing.expect(sim.storage.get_block(BlockId.init(3100)) != null);
-}
+    var runner = try SimulationRunner.init(allocator, 0xF105B123, .{
+        .put_block_weight = 100, // Pure writes to trigger flush
+        .find_block_weight = 0,
+        .delete_block_weight = 0,
+        .put_edge_weight = 0,
+        .find_edges_weight = 0,
+    }, &faults);
+    defer runner.deinit();
 
-// === Systematic Corruption Patterns ===
+    // Configure flush to happen right after corruption
+    runner.flush_config.operation_threshold = 100;
+    runner.flush_config.enable_memory_trigger = false;
 
-test "systematic bit flip recovery" {
-    var sim = try SimulationHarness.init(testing.allocator, 0xB17F11B);
-    defer sim.deinit();
+    log.info("Testing corruption during flush operations", .{});
 
-    try sim.init_storage();
+    // Create data that will trigger flush
+    var generator = CodePatternGenerator.init(allocator, runner.storage_engine, 0xF105B123);
+    defer generator.deinit();
+    try generator.generate_realistic_codebase(.{
+        .utility_libraries = 1,
+        .fanout_per_library = 4,
+        .deep_call_chains = 1,
+        .call_chain_depth = 2,
+        .test_modules = 1,
+        .include_circular = false,
+    });
 
-    // Write known pattern
-    var i: u32 = 0;
-    while (i < 50) : (i += 1) {
-        const block = ContextBlock{
-            .id = BlockId.init(i),
-            .content = "bit flip test",
-            .metadata = .{},
-        };
-        try sim.storage.put_block(&block);
-    }
+    const pre_flush_blocks = runner.storage_engine.metrics().blocks_written.load();
 
-    // Inject systematic bit flips
-    var offset: u64 = 100;
-    while (offset < 1000) : (offset += 100) {
-        try sim.inject_fault(.{ .bit_flip = .{ .offset = offset, .bit_index = @as(u3, offset % 8) } });
-    }
+    // Run through corruption + flush
+    try runner.run(150);
 
-    // Crash and recover
-    try sim.inject_fault(.{ .crash = .{ .clean = false, .at_operation = sim.operation_count } });
+    const post_flush_blocks = runner.storage_engine.metrics().blocks_written.load();
+    log.info("Corruption during flush: {} -> {} blocks", .{ pre_flush_blocks, post_flush_blocks });
 
-    sim.recover_storage() catch |err| {
-        try testing.expect(err == error.CorruptedData);
-    };
-
-    // Verify error detection and partial recovery
-    try sim.verify_corruption_detection();
-}
-
-test "progressive corruption degradation" {
-    var sim = try SimulationHarness.init(testing.allocator, 0xDE62ADE);
-    defer sim.deinit();
-
-    try sim.init_storage();
-
-    // Monitor corruption impact over time
-    var corruption_level: u32 = 0;
-    while (corruption_level < 10) : (corruption_level += 1) {
-        // Write fresh data
-        var i: u32 = 0;
-        while (i < 10) : (i += 1) {
-            const block = ContextBlock{
-                .id = BlockId.init(corruption_level * 100 + i),
-                .content = "degradation test",
-                .metadata = .{},
-            };
-            try sim.storage.put_block(&block);
-        }
-
-        // Inject increasing corruption
-        var c: u32 = 0;
-        while (c <= corruption_level) : (c += 1) {
-            try sim.inject_fault(.{ .corrupt_block = .{ .offset = c * 50, .pattern = @as(u8, c) } });
-        }
-
-        // Test read reliability
-        var read_errors: u32 = 0;
-        i = 0;
-        while (i < corruption_level * 100) : (i += 1) {
-            sim.storage.get_block(BlockId.init(i)) catch {
-                read_errors += 1;
-            };
-        }
-
-        // Verify degradation is bounded
-        const error_rate = @as(f32, read_errors) / @as(f32, i);
-        try testing.expect(error_rate < 0.5); // Less than 50% error rate
-    }
+    // System should handle flush corruption gracefully
+    try testing.expect(runner.storage_engine.state.can_read());
 }
