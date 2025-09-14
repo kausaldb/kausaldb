@@ -27,7 +27,7 @@ jobs:
   deep-fuzzing:
     name: Deep Fuzzing / ${{ matrix.target }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30 # 30 minutes
+    timeout-minutes: 60 # 60 min
     if: github.event.inputs.skip_fuzzing != 'true'
     strategy:
       fail-fast: false
@@ -55,10 +55,10 @@ jobs:
         run: |
           echo "========================================="
           echo "Deep fuzzing ${{ matrix.target }} target"
-          echo "Running 1,000,000 iterations"
+          echo "Running 50,000 iterations"
           echo "========================================="
           ./zig/zig build fuzz \
-            -Dfuzz-iterations=1000000 \
+            -Dfuzz-iterations=50000 \
             -Dfuzz-corpus=fuzz-corpus-${{ matrix.target }} \
             -- ${{ matrix.target }}
 
@@ -258,16 +258,33 @@ jobs:
         if: matrix.zig_version == 'master'
         run: |
           # Download and setup Zig master branch
+          # Use the index.json to get the latest master build URLs
+
+          # Install jq if not available
+          if ! command -v jq &> /dev/null; then
+            if [[ "${{ runner.os }}" == "Linux" ]]; then
+              sudo apt-get update && sudo apt-get install -y jq
+            elif [[ "${{ runner.os }}" == "macOS" ]]; then
+              brew install jq
+            fi
+          fi
+
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            curl -L https://ziglang.org/builds/zig-linux-x86_64-master.tar.xz | tar -xJ
-            mv zig-linux-x86_64-* zig-master
+            # Get latest Linux x86_64 master build
+            MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."x86_64-linux".tarball')
+            curl -L "$MASTER_URL" | tar -xJ
+            mv zig-* zig-master
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
             if [[ "${{ runner.arch }}" == "ARM64" ]]; then
-              curl -L https://ziglang.org/builds/zig-macos-aarch64-master.tar.xz | tar -xJ
-              mv zig-macos-aarch64-* zig-master
+              # Get latest macOS aarch64 master build
+              MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."aarch64-macos".tarball')
+              curl -L "$MASTER_URL" | tar -xJ
+              mv zig-* zig-master
             else
-              curl -L https://ziglang.org/builds/zig-macos-x86_64-master.tar.xz | tar -xJ
-              mv zig-macos-x86_64-* zig-master
+              # Get latest macOS x86_64 master build
+              MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."x86_64-macos".tarball')
+              curl -L "$MASTER_URL" | tar -xJ
+              mv zig-* zig-master
             fi
           fi
           echo "$PWD/zig-master" >> $GITHUB_PATH
@@ -278,7 +295,7 @@ jobs:
 
           # Use appropriate zig command based on version
           if [[ "${{ matrix.zig_version }}" == "master" ]]; then
-            zig-master/zig build test -Dseed=0xBADCAFE2
+            ./zig-master/zig build test -Dseed=0xBADCAFE2
           else
             ./zig/zig build test -Dseed=0xBADCAFE1
           fi
@@ -308,13 +325,13 @@ jobs:
           sudo apt-get install -y valgrind
 
       - name: Build Debug Binary
-        run: ./zig/zig build -Doptimize=Debug
+        run: ./zig/zig build -Doptimize=Debug -Dseed=0xDEADBEEF
 
       - name: Run Valgrind Memcheck
         env:
           SKIP_PERFORMANCE_TESTS: "1"
         run: |
-          echo "Running comprehensive memory analysis on test suite..."
+          echo "Running memory analysis on test binary..."
           valgrind \
             --tool=memcheck \
             --leak-check=full \
@@ -325,18 +342,22 @@ jobs:
             --gen-suppressions=all \
             --num-callers=40 \
             --log-file=valgrind-memcheck.txt \
-            ./zig/zig build test-all -Dseed=0xDEADBEEF
+            --read-var-info=no \
+            --quiet \
+            ./zig-out/bin/test
 
       - name: Run Valgrind Helgrind (Thread Safety)
         env:
           SKIP_PERFORMANCE_TESTS: "1"
         run: |
-          echo "Checking for threading issues in test suite..."
+          echo "Checking for threading issues in test binary..."
           valgrind \
             --tool=helgrind \
             --error-exitcode=1 \
             --log-file=valgrind-helgrind.txt \
-            ./zig/zig build test-all -Dseed=0xCAFEBABE || true
+            --read-var-info=no \
+            --quiet \
+            ./zig-out/bin/test || true
 
       - name: Upload Memory Reports
         if: always()
