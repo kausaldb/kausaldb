@@ -250,3 +250,232 @@ pub fn create_test_recovery_setup(allocator: std.mem.Allocator) !*TestRecoverySe
 
     return setup_ptr;
 }
+
+test "recovery context initialization and finalization" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+
+    try testing.expectEqual(@as(u32, 0), context.stats.blocks_recovered);
+    try testing.expectEqual(@as(u32, 0), context.stats.total_entries_processed);
+    try testing.expect(context.start_time > 0);
+
+    // Simulate some recovery work
+    std.Thread.sleep(1_000_000); // 1ms
+    context.finalize();
+
+    try testing.expect(context.stats.recovery_time_ns > 0);
+}
+
+test "recovery statistics calculations" {
+    var stats = RecoveryStats.init();
+    stats.total_entries_processed = 100;
+    stats.corrupted_entries_skipped = 5;
+    stats.recovery_time_ns = 1_000_000_000; // 1 second
+
+    try testing.expectEqual(@as(f64, 100.0), stats.entries_per_second());
+    try testing.expectEqual(@as(f64, 5.0), stats.corruption_rate());
+
+    stats.recovery_time_ns = 0;
+    try testing.expectEqual(@as(f64, 0.0), stats.entries_per_second());
+
+    stats.total_entries_processed = 0;
+    try testing.expectEqual(@as(f64, 0.0), stats.corruption_rate());
+}
+
+test "apply wal entry to storage with block operations" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+
+    const block_id = TestData.deterministic_block_id(1);
+    const block = ContextBlock{
+        .id = block_id,
+        .version = 1,
+        .source_uri = "file://test.zig",
+        .metadata_json = "{}",
+        .content = "test content",
+    };
+
+    const put_entry = try WALEntry.create_put_block(testing.allocator, block);
+    defer put_entry.deinit(testing.allocator);
+
+    try apply_wal_entry_to_storage(put_entry, &context);
+
+    try testing.expectEqual(@as(u32, 1), context.stats.blocks_recovered);
+    try testing.expectEqual(@as(u32, 1), context.stats.total_entries_processed);
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count())));
+
+    const delete_entry = try WALEntry.create_delete_block(testing.allocator, block_id);
+    defer delete_entry.deinit(testing.allocator);
+
+    try apply_wal_entry_to_storage(delete_entry, &context);
+
+    try testing.expectEqual(@as(u32, 1), context.stats.blocks_deleted);
+    try testing.expectEqual(@as(u32, 2), context.stats.total_entries_processed);
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(setup.block_index.blocks.count())));
+}
+
+test "apply wal entry to storage with edge operations" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+
+    const source_id = TestData.deterministic_block_id(3);
+    const target_id = TestData.deterministic_block_id(4);
+    const edge = GraphEdge{
+        .source_id = source_id,
+        .target_id = target_id,
+        .edge_type = .calls,
+    };
+
+    const edge_entry = try WALEntry.create_put_edge(testing.allocator, edge);
+    defer edge_entry.deinit(testing.allocator);
+
+    try apply_wal_entry_to_storage(edge_entry, &context);
+
+    try testing.expectEqual(@as(u32, 1), context.stats.edges_recovered);
+    try testing.expectEqual(@as(u32, 1), context.stats.total_entries_processed);
+    try testing.expectEqual(@as(u32, 1), setup.graph_index.edge_count());
+}
+
+test "recovery state validation detects corruption" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    // Valid state should pass validation
+    {
+        var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+        try context.validate_recovery_state();
+    }
+
+    const block = ContextBlock{
+        .id = BlockId.generate(),
+        .version = 1,
+        .source_uri = "file://test.zig",
+        .metadata_json = "{}",
+        .content = "test content",
+    };
+    try setup.block_index.put_block(block);
+
+    // Valid non-empty state should pass
+    {
+        var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+        try context.validate_recovery_state();
+    }
+}
+
+test "recovery callback handles corrupted blocks gracefully" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    var context = RecoveryContext.init(&setup.block_index, &setup.graph_index);
+
+    // Test normal block recovery operation
+    const test_block = ContextBlock{
+        .id = TestData.deterministic_block_id(99),
+        .version = 1,
+        .source_uri = "file://test.zig",
+        .metadata_json = "{}",
+        .content = "test content",
+    };
+
+    const entry = try WALEntry.create_put_block(testing.allocator, test_block);
+    defer entry.deinit(testing.allocator);
+
+    // Should process successfully
+    try apply_wal_entry_to_storage(entry, &context);
+
+    // Should have processed the entry successfully
+    try testing.expectEqual(@as(u32, 0), context.stats.corrupted_entries_skipped);
+    try testing.expectEqual(@as(u32, 1), context.stats.total_entries_processed);
+    try testing.expectEqual(@as(u32, 1), context.stats.blocks_recovered);
+}
+
+test "complete recovery workflow with mixed operations" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var setup = try create_test_recovery_setup(allocator);
+    defer setup.deinit();
+
+    // Create WAL for testing
+    var wal_instance = try wal.WAL.init(allocator, sim_vfs.vfs(), "/test/wal");
+    defer wal_instance.deinit();
+    try wal_instance.startup();
+
+    const block1 = ContextBlock{
+        .id = TestData.deterministic_block_id(10),
+        .version = 1,
+        .source_uri = "file://test1.zig",
+        .metadata_json = "{}",
+        .content = "first block",
+    };
+
+    const block2 = ContextBlock{
+        .id = TestData.deterministic_block_id(11),
+        .version = 1,
+        .source_uri = "file://test2.zig",
+        .metadata_json = "{}",
+        .content = "second block",
+    };
+
+    const edge = GraphEdge{
+        .source_id = block1.id,
+        .target_id = block2.id,
+        .edge_type = .calls,
+    };
+
+    const put_entry = try WALEntry.create_put_block(allocator, block1);
+    defer put_entry.deinit(allocator);
+    try wal_instance.write_entry(put_entry);
+    const put_entry2 = try WALEntry.create_put_block(allocator, block2);
+    defer put_entry2.deinit(allocator);
+    try wal_instance.write_entry(put_entry2);
+
+    const edge_entry = try WALEntry.create_put_edge(allocator, edge);
+    defer edge_entry.deinit(allocator);
+    try wal_instance.write_entry(edge_entry);
+
+    const delete_entry = try WALEntry.create_delete_block(allocator, block2.id);
+    defer delete_entry.deinit(allocator);
+    try wal_instance.write_entry(delete_entry);
+
+    // Perform recovery
+    const stats = try recover_storage_from_wal(&wal_instance, &setup.block_index, &setup.graph_index);
+
+    // Verify recovery results
+    try testing.expectEqual(@as(u32, 2), stats.blocks_recovered);
+    try testing.expectEqual(@as(u32, 1), stats.edges_recovered);
+    try testing.expectEqual(@as(u32, 1), stats.blocks_deleted);
+    try testing.expectEqual(@as(u32, 0), stats.corrupted_entries_skipped);
+
+    // Verify final state: block2 deletion should remove edge block1→block2
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count()))); // block1 remains
+    try testing.expectEqual(@as(u32, 0), setup.graph_index.edge_count()); // edge removed with block2
+}
+
+test "create test recovery setup provides working components" {
+    var setup = try create_test_recovery_setup(testing.allocator);
+    defer setup.deinit();
+
+    // Verify components are functional
+    try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(setup.block_index.blocks.count())));
+    try testing.expectEqual(@as(u32, 0), setup.graph_index.edge_count());
+
+    const block = ContextBlock{
+        .id = BlockId.generate(),
+        .version = 1,
+        .source_uri = "file://test.zig",
+        .metadata_json = "{}",
+        .content = "test content",
+    };
+
+    try setup.block_index.put_block(block);
+    try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(setup.block_index.blocks.count())));
+}

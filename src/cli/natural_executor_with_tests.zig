@@ -1017,3 +1017,71 @@ fn show_command_help(topic: []const u8) void {
 }
 
 // === Unit Tests ===
+
+test "natural command parsing validation" {
+    // Test that relation types validate correctly
+    try std.testing.expect(natural_commands.validate_relation_type("callers"));
+    try std.testing.expect(natural_commands.validate_relation_type("callees"));
+    try std.testing.expect(natural_commands.validate_relation_type("references"));
+    try std.testing.expect(!natural_commands.validate_relation_type("invalid"));
+
+    // Test that trace directions validate correctly
+    try std.testing.expect(natural_commands.validate_direction("callers"));
+    try std.testing.expect(natural_commands.validate_direction("callees"));
+    try std.testing.expect(natural_commands.validate_direction("references"));
+    try std.testing.expect(natural_commands.validate_direction("both"));
+    try std.testing.expect(!natural_commands.validate_direction("invalid"));
+}
+
+test "execution context initialization" {
+    const allocator = std.testing.allocator;
+
+    // Create temporary directory for test
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const test_data_dir = try tmp_dir.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(test_data_dir);
+
+    var context = try NaturalExecutionContext.init(allocator, test_data_dir);
+    defer context.deinit();
+
+    try std.testing.expect(context.storage_engine == null);
+    try std.testing.expect(context.query_engine == null);
+    try std.testing.expect(context.workspace_manager == null);
+
+    // Test lazy initialization
+    try context.ensure_storage_initialized();
+    try std.testing.expect(context.storage_engine != null);
+
+    try context.ensure_query_initialized();
+    try std.testing.expect(context.query_engine != null);
+
+    try context.ensure_workspace_initialized();
+    try std.testing.expect(context.workspace_manager != null);
+}
+
+test "extract entity name from block content" {
+    const test_block = ContextBlock{
+        .id = try types.BlockId.from_hex("11111111111111111111111111111111"),
+        .version = 1,
+        .source_uri = "test://example.zig#my_function",
+        .metadata_json = "{\"name\": \"my_function\", \"type\": \"function\"}",
+        .content = "fn my_function() {}",
+    };
+
+    const extracted = extract_entity_name(test_block);
+    try std.testing.expectEqualStrings("my_function", extracted);
+
+    // Test fallback to source URI
+    const uri_fallback_block = ContextBlock{
+        .id = try types.BlockId.from_hex("22222222222222222222222222222222"),
+        .version = 1,
+        .source_uri = "test://example.zig#fallback_name",
+        .metadata_json = "{}",
+        .content = "some content",
+    };
+
+    const uri_extracted = extract_entity_name(uri_fallback_block);
+    try std.testing.expectEqualStrings("fallback_name", uri_extracted);
+}

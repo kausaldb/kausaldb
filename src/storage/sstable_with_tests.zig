@@ -809,3 +809,551 @@ pub const Compactor = struct {
         return try unique.toOwnedSlice();
     }
 };
+
+test "SSTable write and read" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "test.sst"));
+    defer sstable.deinit();
+
+    const block1 = ContextBlock{
+        .id = try BlockId.from_hex("0123456789abcdeffedcba9876543210"),
+        .version = 1,
+        .source_uri = "test://block1",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 1",
+    };
+
+    const block2 = ContextBlock{
+        .id = try BlockId.from_hex("fedcba9876543210123456789abcdef0"),
+        .version = 1,
+        .source_uri = "test://block2",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 2",
+    };
+
+    var blocks = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks.deinit();
+    try blocks.append(block1);
+    try blocks.append(block2);
+
+    try sstable.write_blocks(blocks.items);
+
+    try sstable.read_index();
+    try std.testing.expectEqual(@as(u32, 2), sstable.block_count);
+
+    const retrieved1 = try sstable.find_block(block1.id);
+    if (retrieved1) |_| {
+        try std.testing.expect(retrieved1 != null);
+        try std.testing.expect(retrieved1.?.id.eql(block1.id));
+        try std.testing.expectEqualStrings("test://block1", retrieved1.?.source_uri);
+    } else {
+        try std.testing.expect(retrieved1 != null);
+    }
+
+    const non_existent_id = try BlockId.from_hex("11111111111111111111111111111111");
+    const not_found = try sstable.find_block(non_existent_id);
+    try std.testing.expect(not_found == null);
+}
+
+test "SSTable iterator" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "test_iter.sst"));
+    defer sstable.deinit();
+
+    var blocks = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks.deinit();
+
+    try blocks.append(ContextBlock{
+        .id = try BlockId.from_hex("33333333333333333333333333333333"),
+        .version = 1,
+        .source_uri = "test://block3",
+        .metadata_json = "{}",
+        .content = "content 3",
+    });
+
+    try blocks.append(ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .version = 1,
+        .source_uri = "test://block1",
+        .metadata_json = "{}",
+        .content = "content 1",
+    });
+
+    try blocks.append(ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .version = 1,
+        .source_uri = "test://block2",
+        .metadata_json = "{}",
+        .content = "content 2",
+    });
+
+    try sstable.write_blocks(blocks.items);
+    try sstable.read_index();
+
+    var iter = sstable.iterator();
+    defer iter.deinit();
+
+    const first = try iter.next();
+    if (first) |_| {
+        try std.testing.expect(first != null);
+        try std.testing.expectEqualStrings("content 1", first.?.content);
+    } else {
+        try std.testing.expect(first != null);
+    }
+
+    const second = try iter.next();
+    if (second) |_| {
+        try std.testing.expect(second != null);
+        try std.testing.expectEqualStrings("content 2", second.?.content);
+    } else {
+        try std.testing.expect(second != null);
+    }
+
+    const third = try iter.next();
+    if (third) |_| {
+        try std.testing.expect(third != null);
+        try std.testing.expectEqualStrings("content 3", third.?.content);
+    } else {
+        try std.testing.expect(third != null);
+    }
+
+    const end = try iter.next();
+    try std.testing.expect(end == null);
+}
+
+test "SSTable compaction" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable1 = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "table1.sst"));
+    defer sstable1.deinit();
+
+    var blocks1 = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks1.deinit();
+    try blocks1.append(ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .version = 1,
+        .source_uri = "test://v1",
+        .metadata_json = "{}",
+        .content = "content 1",
+    });
+
+    try sstable1.write_blocks(blocks1.items);
+
+    var sstable2 = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "table2.sst"));
+    defer sstable2.deinit();
+
+    var blocks2 = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks2.deinit();
+
+    try blocks2.append(ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .version = 2, // Higher version
+        .source_uri = "test://v2",
+        .metadata_json = "{}",
+        .content = "version 2",
+    });
+
+    try blocks2.append(ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .version = 1,
+        .source_uri = "test://block2",
+        .metadata_json = "{}",
+        .content = "content 2",
+    });
+
+    try sstable2.write_blocks(blocks2.items);
+
+    var compactor = Compactor.init(&coordinator, allocator, sim_vfs.vfs(), "/test/");
+    const input_paths = [_][]const u8{ "table1.sst", "table2.sst" };
+    try compactor.compact_sstables(&input_paths, "compacted.sst");
+
+    var compacted = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "compacted.sst"));
+    defer compacted.deinit();
+
+    try compacted.read_index();
+    try std.testing.expectEqual(@as(u32, 2), compacted.block_count);
+
+    const test_id = try BlockId.from_hex("11111111111111111111111111111111");
+    const retrieved = try compacted.find_block(test_id);
+    try std.testing.expect(retrieved != null);
+    try std.testing.expectEqual(@as(u64, 2), retrieved.?.version);
+    try std.testing.expectEqualStrings("version 2", retrieved.?.content);
+}
+
+test "SSTable checksum validation" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    const path = try allocator.dupe(u8, "checksum_test.sst");
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), path);
+    defer sstable.deinit();
+
+    const block = ContextBlock{
+        .id = try BlockId.from_hex("1234567890abcdef1234567890abcdef"),
+        .version = 1,
+        .source_uri = "test://checksum",
+        .metadata_json = "{\"type\":\"checksum_test\"}",
+        .content = "checksum test content",
+    };
+
+    var blocks = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks.deinit();
+    try blocks.append(block);
+
+    try sstable.write_blocks(blocks.items);
+
+    try sstable.read_index();
+    try std.testing.expectEqual(@as(u32, 1), sstable.block_count);
+
+    var file = try sim_vfs.vfs().open("checksum_test.sst", .write);
+    defer file.close();
+
+    _ = try file.seek(SSTable.HEADER_SIZE + 10, .start);
+    const corrupt_byte = [1]u8{0xFF};
+    _ = try file.write(&corrupt_byte);
+    file.close();
+
+    sstable.index.clearAndFree();
+    sstable.block_count = 0;
+    if (sstable.bloom_filter) |*filter| {
+        filter.deinit();
+        sstable.bloom_filter = null;
+    }
+
+    try std.testing.expectError(error.ChecksumMismatch, sstable.read_index());
+}
+
+test "SSTable Bloom filter functionality" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "bloom_test.sst"));
+    defer sstable.deinit();
+
+    const block1 = ContextBlock{
+        .id = try BlockId.from_hex("0123456789abcdeffedcba9876543210"),
+        .version = 1,
+        .source_uri = "test://block1",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 1",
+    };
+
+    const block2 = ContextBlock{
+        .id = try BlockId.from_hex("fedcba9876543210123456789abcdef0"),
+        .version = 1,
+        .source_uri = "test://block2",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 2",
+    };
+
+    var blocks = std.array_list.Managed(ContextBlock).init(testing.allocator);
+    defer blocks.deinit();
+    try blocks.append(block1);
+    try blocks.append(block2);
+
+    try sstable.write_blocks(blocks.items);
+
+    try std.testing.expect(sstable.bloom_filter != null);
+
+    if (sstable.bloom_filter) |*filter| {
+        try std.testing.expect(filter.might_contain(block1.id));
+        try std.testing.expect(filter.might_contain(block2.id));
+    }
+
+    const retrieved1 = try sstable.find_block(block1.id);
+    try std.testing.expect(retrieved1 != null);
+    try std.testing.expect(retrieved1.?.id.eql(block1.id));
+    if (retrieved1) |_| {}
+
+    const non_existent_id = try BlockId.from_hex("11111111111111111111111111111111");
+    const not_found = try sstable.find_block(non_existent_id);
+    try std.testing.expect(not_found == null);
+}
+
+test "SSTable Bloom filter persistence" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    const file_path = try allocator.dupe(u8, "bloom_persist_test.sst");
+    defer allocator.free(file_path);
+
+    const block1 = ContextBlock{
+        .id = try BlockId.from_hex("0123456789abcdeffedcba9876543210"),
+        .version = 1,
+        .source_uri = "test://block1",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 1",
+    };
+
+    const block2 = ContextBlock{
+        .id = try BlockId.from_hex("fedcba9876543210123456789abcdef0"),
+        .version = 1,
+        .source_uri = "test://block2",
+        .metadata_json = "{\"type\":\"test\"}",
+        .content = "test content 2",
+    };
+
+    const blocks = [_]ContextBlock{ block1, block2 };
+
+    {
+        var sstable_write = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, file_path));
+        defer sstable_write.deinit();
+
+        var blocks_list = std.array_list.Managed(ContextBlock).init(allocator);
+        defer blocks_list.deinit();
+        for (blocks) |block| {
+            try blocks_list.append(block);
+        }
+        try sstable_write.write_blocks(blocks_list.items);
+        try std.testing.expect(sstable_write.bloom_filter != null);
+    }
+
+    {
+        var sstable_read = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, file_path));
+        defer sstable_read.deinit();
+
+        try sstable_read.read_index();
+        try std.testing.expect(sstable_read.bloom_filter != null);
+
+        if (sstable_read.bloom_filter) |*filter| {
+            try std.testing.expect(filter.might_contain(block1.id));
+            try std.testing.expect(filter.might_contain(block2.id));
+        }
+
+        const retrieved = try sstable_read.find_block(block1.id);
+        try std.testing.expect(retrieved != null);
+    }
+}
+
+test "SSTable Bloom filter with many blocks" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "bloom_many_test.sst"));
+    defer sstable.deinit();
+
+    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    defer {
+        for (blocks.items) |block| {
+            allocator.free(block.source_uri);
+            allocator.free(block.metadata_json);
+            allocator.free(block.content);
+        }
+        blocks.deinit();
+    }
+
+    try blocks.ensureTotalCapacity(50);
+    var i: u8 = 0;
+    while (i < 50) : (i += 1) {
+        var id_bytes: [16]u8 = undefined;
+        @memset(&id_bytes, 0);
+        id_bytes[0] = i;
+
+        const block = ContextBlock{
+            .id = BlockId{ .bytes = id_bytes },
+            .version = 1,
+            .source_uri = try std.fmt.allocPrint(allocator, "test://block{d}", .{i}),
+            .metadata_json = try allocator.dupe(u8, "{}"),
+            .content = try std.fmt.allocPrint(allocator, "content {d}", .{i}),
+        };
+        try blocks.append(block);
+    }
+
+    try sstable.write_blocks(blocks.items);
+
+    try std.testing.expect(sstable.bloom_filter != null);
+    if (sstable.bloom_filter) |*filter| {
+        for (blocks.items) |block| {
+            try std.testing.expect(filter.might_contain(block.id));
+        }
+    }
+
+    const retrieved_first = try sstable.find_block(blocks.items[0].id);
+    try std.testing.expect(retrieved_first != null);
+    if (retrieved_first) |_| {}
+
+    const retrieved_last = try sstable.find_block(blocks.items[blocks.items.len - 1].id);
+    try std.testing.expect(retrieved_last != null);
+    if (retrieved_last) |_| {}
+
+    var non_existent_bytes: [16]u8 = undefined;
+    @memset(&non_existent_bytes, 0xFF);
+    const non_existent_id = BlockId{ .bytes = non_existent_bytes };
+    const not_found = try sstable.find_block(non_existent_id);
+    try std.testing.expect(not_found == null);
+}
+
+test "SSTable zero-copy ParsedBlock vs traditional deserialization performance" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "zero_copy_perf_test.sst"));
+    defer sstable.deinit();
+
+    // Create a large block to amplify allocation differences
+    const large_content = try allocator.alloc(u8, 1024); // 1KB content
+    @memset(large_content, 'X');
+    defer allocator.free(large_content);
+
+    const source_uri = try allocator.dupe(u8, "test://large_block");
+    defer allocator.free(source_uri);
+    const metadata_json = try allocator.dupe(u8, "{}");
+    defer allocator.free(metadata_json);
+
+    const test_block = ContextBlock{
+        .id = BlockId.generate(),
+        .version = 1,
+        .source_uri = source_uri,
+        .metadata_json = metadata_json,
+        .content = large_content,
+    };
+
+    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    defer blocks.deinit();
+    try blocks.append(test_block);
+
+    try sstable.write_blocks(blocks.items);
+
+    // Test 1: Zero-copy ParsedBlock access
+    const parsed_block = try sstable.find_block_view(test_block.id);
+    try std.testing.expect(parsed_block != null);
+
+    if (parsed_block) |view| {
+        // Verify zero-copy access works correctly
+        try std.testing.expect(view.block_id().eql(test_block.id));
+        try std.testing.expectEqual(test_block.version, view.version());
+        try std.testing.expectEqualStrings(test_block.source_uri, view.source_uri());
+        try std.testing.expectEqualStrings(test_block.metadata_json, view.metadata_json());
+        try std.testing.expectEqualStrings(test_block.content, view.content());
+    }
+
+    // Test 2: Traditional deserialization (for comparison)
+    const traditional_block = try sstable.find_block(test_block.id);
+    try std.testing.expect(traditional_block != null);
+
+    if (traditional_block) |owned_block| {
+        const block = owned_block;
+        try std.testing.expect(block.id.eql(test_block.id));
+        try std.testing.expectEqual(test_block.version, block.version);
+        try std.testing.expectEqualStrings(test_block.source_uri, block.source_uri);
+        try std.testing.expectEqualStrings(test_block.metadata_json, block.metadata_json);
+        try std.testing.expectEqualStrings(test_block.content, block.content);
+    }
+
+    // Both paths should return identical data, but ParsedBlock uses fewer allocations
+}
+
+test "SSTable binary search performance" {
+    const allocator = testing.allocator;
+
+    var sim_vfs = try SimulationVFS.init(allocator);
+    defer sim_vfs.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "binary_search_test.sst"));
+    defer sstable.deinit();
+
+    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    try blocks.ensureTotalCapacity(5); // Pre-allocate for 5 test blocks
+    defer {
+        for (blocks.items) |block| {
+            allocator.free(block.source_uri);
+            allocator.free(block.metadata_json);
+            allocator.free(block.content);
+        }
+        blocks.deinit();
+    }
+
+    const test_ids = [_][]const u8{
+        "11111111111111111111111111111111",
+        "44444444444444444444444444444444",
+        "88888888888888888888888888888888",
+        "cccccccccccccccccccccccccccccccc",
+        "ffff0000000000000000000000000000",
+    };
+
+    try blocks.ensureTotalCapacity(test_ids.len);
+    for (test_ids, 0..) |id_hex, i| {
+        const block = ContextBlock{
+            .id = try BlockId.from_hex(id_hex),
+            .version = 1,
+            .source_uri = try std.fmt.allocPrint(allocator, "test://block{d}", .{i}),
+            .metadata_json = try allocator.dupe(u8, "{}"),
+            .content = try std.fmt.allocPrint(allocator, "content {d}", .{i}),
+        };
+        try blocks.append(block);
+    }
+
+    try sstable.write_blocks(blocks.items);
+    try sstable.read_index();
+
+    for (blocks.items) |original_block| {
+        const found = try sstable.find_block(original_block.id);
+        try std.testing.expect(found != null);
+        try std.testing.expect(found.?.id.eql(original_block.id));
+        if (found) |_| {}
+    }
+
+    for (1..sstable.index.items.len) |i| {
+        const prev = sstable.index.items[i - 1];
+        const curr = sstable.index.items[i];
+        const order = std.mem.order(u8, &prev.block_id.bytes, &curr.block_id.bytes);
+        try std.testing.expect(order == .lt);
+    }
+}

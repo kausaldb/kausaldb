@@ -41,6 +41,8 @@ comptime {
     _ = @import("tests/server/server_coordinator.zig");
     _ = @import("tests/server/server_lifecycle.zig");
 
+    // CLI tests - command execution and natural language processing
+
     // Ingestion tests - complex edge cases not covered by simulation
     _ = @import("tests/ingestion/cross_file_resolution.zig");
     _ = @import("tests/ingestion/ingestion.zig");
