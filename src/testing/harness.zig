@@ -1053,6 +1053,97 @@ pub const SimulationRunner = struct {
     }
 };
 
+// =============================================================================
+// Test Utilities (moved from test_utils.zig)
+// =============================================================================
+
+/// Create deterministic block ID from seed for reproducible tests
+pub fn create_deterministic_block_id(seed: u32) BlockId {
+    return BlockId.from_u64(@as(u64, seed) * 0x1234567890ABCDEF + 0xFEDCBA0987654321);
+}
+
+/// Test assertion helpers for performance and memory testing
+pub const TestAssertions = struct {
+    /// Assert operation completes within time bound
+    pub fn assert_operation_fast(duration_ns: u64, max_duration_ns: u64, operation_name: []const u8) void {
+        if (duration_ns > max_duration_ns) {
+            fatal_assert(false, "{s} took {d}ns, expected <{d}ns", .{ operation_name, duration_ns, max_duration_ns });
+        }
+    }
+
+    /// Assert memory usage is within bounds
+    pub fn assert_memory_bounded(current_bytes: u64, max_bytes: u64, context: []const u8) void {
+        if (current_bytes > max_bytes) {
+            fatal_assert(false, "{s} memory usage {d} bytes exceeds limit {d} bytes", .{ context, current_bytes, max_bytes });
+        }
+    }
+};
+
+/// Test data generator for consistent test block creation
+pub const TestDataGenerator = struct {
+    allocator: std.mem.Allocator,
+    prng: std.Random.DefaultPrng,
+
+    pub fn init(allocator: std.mem.Allocator, seed: u64) TestDataGenerator {
+        return TestDataGenerator{
+            .allocator = allocator,
+            .prng = std.Random.DefaultPrng.init(seed),
+        };
+    }
+
+    /// Create test block with deterministic content based on seed
+    pub fn create_test_block(self: *TestDataGenerator, id_seed: u32) !ContextBlock {
+        const random = self.prng.random();
+
+        const content = try std.fmt.allocPrint(
+            self.allocator,
+            "test_block_content_{d}_random_{d}",
+            .{ id_seed, random.int(u32) },
+        );
+
+        const metadata = try std.fmt.allocPrint(
+            self.allocator,
+            "{{\"test_id\":{d},\"type\":\"test_block\",\"seed\":{d}}}",
+            .{ id_seed, id_seed },
+        );
+
+        const uri = try std.fmt.allocPrint(
+            self.allocator,
+            "test://block/{d}",
+            .{id_seed},
+        );
+
+        return ContextBlock{
+            .id = create_deterministic_block_id(id_seed),
+            .version = 1,
+            .source_uri = uri,
+            .metadata_json = metadata,
+            .content = content,
+        };
+    }
+
+    /// Create batch of test blocks for batch testing
+    pub fn create_test_block_batch(self: *TestDataGenerator, count: u32, base_seed: u32) ![]ContextBlock {
+        const blocks = try self.allocator.alloc(ContextBlock, count);
+
+        for (blocks, 0..) |*block, i| {
+            block.* = try self.create_test_block(base_seed + @as(u32, @intCast(i)));
+        }
+
+        return blocks;
+    }
+
+    /// Free all allocated test data
+    pub fn cleanup_test_data(self: *TestDataGenerator, blocks: []ContextBlock) void {
+        for (blocks) |block| {
+            self.allocator.free(block.content);
+            self.allocator.free(block.metadata_json);
+            self.allocator.free(block.source_uri);
+        }
+        self.allocator.free(blocks);
+    }
+};
+
 test "simulation runner basic functionality" {
     const allocator = testing.allocator;
 

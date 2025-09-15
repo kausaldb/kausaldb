@@ -13,13 +13,12 @@ const std = @import("std");
 const testing = std.testing;
 
 const harness = @import("../../testing/harness.zig");
-const test_utils = @import("../../testing/test_utils.zig");
 const properties = @import("../../testing/properties.zig");
 const types = @import("../../core/types.zig");
 const batch_writer_mod = @import("../../storage/batch_writer.zig");
 
 const SimulationRunner = harness.SimulationRunner;
-const TestDataGenerator = test_utils.TestDataGenerator;
+const TestDataGenerator = harness.TestDataGenerator;
 const PropertyChecker = properties.PropertyChecker;
 const StorageEngine = harness.StorageEngine;
 const BlockId = types.BlockId;
@@ -127,7 +126,7 @@ fn execute_bloom_filter_performance(allocator: std.mem.Allocator, runner: *Simul
     defer allocator.free(non_existent_ids);
 
     for (non_existent_ids, 0..) |*id, i| {
-        id.* = test_utils.create_deterministic_block_id(@intCast(i + 50000)); // Guaranteed non-existent
+        id.* = harness.create_deterministic_block_id(@intCast(i + 50000)); // Guaranteed non-existent
     }
 
     // Measure lookup performance for non-existent blocks
@@ -141,7 +140,7 @@ fn execute_bloom_filter_performance(allocator: std.mem.Allocator, runner: *Simul
     const avg_lookup_time = total_duration / non_existent_ids.len;
 
     // Bloom filter should make non-existent lookups very fast (< 10µs average)
-    test_utils.TestAssertions.assert_operation_fast(
+    harness.TestAssertions.assert_operation_fast(
         avg_lookup_time,
         10_000, // 10µs threshold
         "bloom_filter_negative_lookup",
@@ -277,7 +276,7 @@ fn execute_metadata_indexing(allocator: std.mem.Allocator, runner: *SimulationRu
         );
 
         block.* = ContextBlock{
-            .id = test_utils.create_deterministic_block_id(@intCast(i + 60000)),
+            .id = harness.create_deterministic_block_id(@intCast(i + 60000)),
             .version = 1,
             .source_uri = try std.fmt.allocPrint(allocator, "test://metadata/{d}", .{i}),
             .metadata_json = metadata,
@@ -332,7 +331,7 @@ fn execute_resource_pool_efficiency(allocator: std.mem.Allocator, runner: *Simul
             const memory_growth = current_memory.total_bytes - initial_memory.total_bytes;
 
             // Memory growth should be bounded
-            test_utils.TestAssertions.assert_memory_bounded(
+            harness.TestAssertions.assert_memory_bounded(
                 memory_growth,
                 50 * 1024 * 1024, // 50MB
                 "resource_pool_efficiency",
@@ -351,7 +350,7 @@ fn execute_resource_pool_efficiency(allocator: std.mem.Allocator, runner: *Simul
     const final_growth = final_memory.total_bytes - initial_memory.total_bytes;
 
     // Verify effective cleanup
-    test_utils.TestAssertions.assert_memory_bounded(
+    harness.TestAssertions.assert_memory_bounded(
         final_growth,
         10 * 1024 * 1024, // 10MB acceptable residual
         "final_resource_cleanup",
@@ -368,7 +367,7 @@ fn execute_memory_arena_cleanup(allocator: std.mem.Allocator, runner: *Simulatio
     const operation_count = 500;
     for (0..operation_count) |i| {
         const simple_block = ContextBlock{
-            .id = test_utils.create_deterministic_block_id(@intCast(i + 80000)),
+            .id = harness.create_deterministic_block_id(@intCast(i + 80000)),
             .version = 1,
             .source_uri = "test://arena",
             .metadata_json = "{}",
@@ -392,7 +391,7 @@ fn execute_memory_arena_cleanup(allocator: std.mem.Allocator, runner: *Simulatio
     const cleanup_duration = @as(u64, @intCast(cleanup_end - cleanup_start));
 
     // Arena cleanup should be very fast (< 100µs for O(1) behavior)
-    test_utils.TestAssertions.assert_operation_fast(
+    harness.TestAssertions.assert_operation_fast(
         cleanup_duration,
         100_000, // 100µs threshold for O(1) cleanup
         "arena_memory_cleanup",
@@ -429,7 +428,7 @@ fn execute_wal_segment_rotation(allocator: std.mem.Allocator, runner: *Simulatio
 
     // Verify all blocks are still findable after WAL operations
     for (0..large_batch_count) |i| {
-        const expected_id = test_utils.create_deterministic_block_id(@intCast(i + 90000));
+        const expected_id = harness.create_deterministic_block_id(@intCast(i + 90000));
         const found = try runner.storage_engine.find_block(expected_id, .temporary);
         try testing.expect(found != null);
     }
@@ -468,7 +467,7 @@ fn execute_sstable_compaction_triggers(allocator: std.mem.Allocator, runner: *Si
 
     // Verify all blocks remain findable after compaction
     for (0..total_operations) |i| {
-        const expected_id = test_utils.create_deterministic_block_id(@intCast(i + 100000));
+        const expected_id = harness.create_deterministic_block_id(@intCast(i + 100000));
         const found = try runner.storage_engine.find_block(expected_id, .temporary);
         try testing.expect(found != null);
     }
@@ -476,7 +475,7 @@ fn execute_sstable_compaction_triggers(allocator: std.mem.Allocator, runner: *Si
     const final_memory = runner.storage_engine.memory_usage();
 
     // Memory usage should be reasonable despite many operations
-    test_utils.TestAssertions.assert_memory_bounded(
+    harness.TestAssertions.assert_memory_bounded(
         final_memory.total_bytes,
         initial_memory.total_bytes + 100 * 1024 * 1024, // 100MB growth limit
         "compaction_memory_management",

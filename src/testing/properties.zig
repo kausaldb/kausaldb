@@ -15,7 +15,7 @@ const assert_mod = @import("../core/assert.zig");
 const storage_engine_mod = @import("../storage/engine.zig");
 const types = @import("../core/types.zig");
 const model_mod = @import("model.zig");
-const test_utils = @import("test_utils.zig");
+const harness_mod = @import("harness.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
@@ -136,7 +136,7 @@ pub const PropertyChecker = struct {
         const batch_writer_mod = @import("../storage/batch_writer.zig");
 
         // Generate test batch using test utilities
-        var test_data_generator = test_utils.TestDataGenerator.init(model.allocator, 0x12345);
+        var test_data_generator = harness_mod.TestDataGenerator.init(model.allocator, 0x12345);
         const test_blocks = try test_data_generator.create_test_block_batch(batch_size, 1000);
         defer test_data_generator.cleanup_test_data(test_blocks);
 
@@ -213,7 +213,7 @@ pub const PropertyChecker = struct {
         const initial_memory = system.memory_usage();
 
         // Generate test data for memory operations
-        var test_data_generator = test_utils.TestDataGenerator.init(system.backing_allocator, 0x54321);
+        var test_data_generator = harness_mod.TestDataGenerator.init(system.backing_allocator, 0x54321);
 
         // Perform many operations to test memory patterns
         for (0..operation_count) |i| {
