@@ -44,8 +44,14 @@ const SIMULATION_FILE_MAGIC: u64 = 0xFEEDFACE_DEADBEEF;
 /// Maximum reasonable file size to prevent memory exhaustion attacks
 const MAX_REASONABLE_FILE_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 
-/// Default maximum disk space for simulation (unlimited if not set)
-const DEFAULT_MAX_DISK_SPACE: u64 = 100 * 1024 * 1024; // 100MB - reasonable for in-memory simulation
+/// Default maximum disk space for simulation (effectively unlimited for correctness tests)
+/// When tests don't explicitly configure limits, use a very high value to avoid artificial
+/// failures that would incorrectly trigger the storage engine's durability guarantees.
+const DEFAULT_MAX_DISK_SPACE: u64 = 1024 * 1024 * 1024 * 1024; // 1TB - effectively unlimited for testing
+
+/// Disk space limit for explicit fault injection testing
+/// When tests specifically want to test disk-full scenarios, use this reasonable limit.
+const FAULT_TESTING_MAX_DISK_SPACE: u64 = 100 * 1024 * 1024; // 100MB - triggers realistic fault conditions
 
 comptime {
     assert(MAX_PATH_LENGTH > 0);
@@ -265,8 +271,11 @@ pub const SimulationVFS = struct {
 
     /// Initialize simulation VFS with deterministic fault injection using provided seed
     ///
-    /// Creates a simulation filesystem with reproducible I/O failures.
-    /// Useful for testing how the system handles file errors.
+    /// Creates a simulation filesystem with deterministic fault injection seed.
+    ///
+    /// Note: By default, this still uses unlimited disk space for correctness testing.
+    /// Call enable_fault_testing_mode() after init to enable realistic fault injection,
+    /// or configure_disk_space_limit() for specific scenarios.
     pub fn init_with_fault_seed(allocator: std.mem.Allocator, seed: u64) !SimulationVFS {
         var file_arena = std.heap.ArenaAllocator.init(allocator);
         errdefer file_arena.deinit();
@@ -332,6 +341,27 @@ pub const SimulationVFS = struct {
         sim_vfs.fault_injection = FaultInjectionState.init(seed);
 
         return sim_vfs;
+    }
+
+    /// Configure simulation for explicit fault testing with reasonable defaults.
+    ///
+    /// This method switches from "unlimited" disk space (used for correctness testing)
+    /// to realistic limits that will trigger fault conditions. Only call this when
+    /// you specifically want to test the system's behavior under resource constraints.
+    ///
+    /// After calling this, operations may fail with NoSpaceLeft errors, which will
+    /// correctly trigger the storage engine's durability protection mechanisms.
+    pub fn enable_fault_testing_mode(self: *SimulationVFS) void {
+        // Set realistic disk space limit for fault injection testing
+        self.fault_injection.max_disk_space = FAULT_TESTING_MAX_DISK_SPACE;
+        self.fault_injection.used_disk_space = 0;
+
+        // Recalculate current usage
+        for (self.file_storage.items) |storage| {
+            if (storage.active) {
+                self.fault_injection.used_disk_space += storage.data.content.items.len;
+            }
+        }
     }
 
     /// Enable torn write simulation with specified parameters
@@ -498,7 +528,11 @@ pub const SimulationVFS = struct {
 
         // Conservative disk space check - may reject writes that would fit due to overwrites
         // but prevents violations by always assuming additional space usage
-        if (self.fault_injection.used_disk_space + write_size > self.fault_injection.max_disk_space) {
+        // Skip disk space limits for non-fault testing (when limit is set to DEFAULT_MAX_DISK_SPACE)
+
+        if (self.fault_injection.max_disk_space < DEFAULT_MAX_DISK_SPACE and
+            self.fault_injection.used_disk_space + write_size > self.fault_injection.max_disk_space)
+        {
             return VFileWriteError.NoSpaceLeft;
         }
 

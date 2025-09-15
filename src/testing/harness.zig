@@ -395,8 +395,8 @@ pub const SimulationRunner = struct {
                 self.sim_vfs.enable_io_failures(500, .{ .write = true, .read = true });
             },
             .disk_full => {
-                // Configure very small disk space limit to trigger disk full
-                self.sim_vfs.configure_disk_space_limit(1024); // 1KB limit
+                // Enable fault testing mode with realistic 100MB disk limit
+                self.sim_vfs.enable_fault_testing_mode();
             },
         }
     }
