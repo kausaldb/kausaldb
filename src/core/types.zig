@@ -56,6 +56,11 @@ pub const BlockId = struct {
         return std.mem.eql(u8, &self.bytes, &other.bytes);
     }
 
+    /// Hash function for HashMap usage.
+    pub fn hash(self: BlockId) u64 {
+        return std.hash.Wyhash.hash(0, &self.bytes);
+    }
+
     /// Check if BlockId is zero (invalid).
     pub fn is_zero(self: BlockId) bool {
         const zero_bytes = [_]u8{0} ** 16;

@@ -12,7 +12,7 @@ const block_index = @import("block_index.zig");
 const concurrency = @import("../core/concurrency.zig");
 const context_block = @import("../core/types.zig");
 const graph_edge_index = @import("graph_edge_index.zig");
-const harness = @import("../tests/harness.zig");
+// const harness = @import("../tests/harness.zig"); // Removed - harness deleted
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
@@ -31,7 +31,12 @@ const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const TestData = harness.TestData;
+// Simple test data utility to replace deleted harness
+const TestData = struct {
+    pub fn deterministic_block_id(value: u32) BlockId {
+        return BlockId{ .bytes = [16]u8{ @intCast(value & 0xFF), @intCast((value >> 8) & 0xFF), @intCast((value >> 16) & 0xFF), @intCast((value >> 24) & 0xFF), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
+    }
+};
 const WALEntry = wal.WALEntry;
 
 /// Recovery statistics for monitoring and debugging.
