@@ -408,16 +408,13 @@ pub const SimulationRunner = struct {
         // Record state before crash (for potential future verification)
         _ = try self.model.active_block_count();
 
-        // Shutdown storage engine (simulates crash)
-        try self.storage_engine.shutdown();
+        // Hard crash simulation - no graceful shutdown
         self.storage_engine.deinit();
-
-        var vfs_sim = try SimulationVFS.init(self.allocator);
 
         // Recreate storage engine (simulates restart)
         self.storage_engine = try StorageEngine.init_default(
             self.allocator,
-            vfs_sim.vfs(),
+            self.sim_vfs.vfs(),
             "/test_db",
         );
         try self.storage_engine.startup();
