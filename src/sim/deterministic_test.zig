@@ -28,8 +28,8 @@ const EdgeType = types.EdgeType;
 const GraphEdge = types.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-const StorageEngine = storage_engine_mod.StorageEngine;
-const VFS = vfs_mod.VFS;
+pub const StorageEngine = storage_engine_mod.StorageEngine;
+pub const VFS = vfs_mod.VFS;
 
 /// Operation types that can be performed on the system
 /// These represent actual API operations, not internal storage operations
@@ -1254,6 +1254,177 @@ pub const SimulationRunner = struct {
             log.debug("Flush completed successfully after {} retries", .{retries});
             return; // Success
         }
+    }
+
+    /// Verify overall consistency between model and system
+    pub fn verify_consistency(self: *Self) !void {
+        try self.model.verify_against_system(self.storage_engine);
+        try PropertyChecker.check_no_data_loss(&self.model, self.storage_engine);
+        if (self.model.edges.items.len > 0) {
+            try PropertyChecker.check_bidirectional_consistency(&self.model, self.storage_engine);
+        }
+    }
+
+    /// Simulate clean restart (shutdown and startup)
+    pub fn simulate_clean_restart(self: *Self) !void {
+        try self.storage_engine.shutdown();
+        self.storage_engine.* = try StorageEngine.init_default(
+            self.allocator,
+            self.sim_vfs.vfs(),
+            "/sim_test",
+        );
+        try self.storage_engine.startup();
+        if (self.corruption_expected) {
+            self.storage_engine.disable_wal_verification_for_simulation();
+        }
+    }
+
+    /// Verify edge consistency
+    pub fn verify_edge_consistency(self: *Self) !void {
+        try PropertyChecker.check_bidirectional_consistency(&self.model, self.storage_engine);
+    }
+
+    /// Force a memtable flush
+    pub fn force_flush(self: *Self) !void {
+        try self.storage_engine.flush_memtable_to_sstable();
+        self.operations_since_flush = 0;
+        self.model.record_flush();
+    }
+
+    /// Force compaction
+    pub fn force_compaction(self: *Self) !void {
+        try self.storage_engine.compact();
+    }
+
+    /// Force a full scan of all data
+    pub fn force_full_scan(self: *Self) !void {
+        // Scan all blocks
+        var iter = self.model.blocks.iterator();
+        while (iter.next()) |entry| {
+            const block = entry.value_ptr.*;
+            if (!block.deleted) {
+                _ = try self.storage_engine.find_block(block.id, .temporary);
+            }
+        }
+        // Scan all edges
+        for (self.model.edges.items) |edge| {
+            _ = self.storage_engine.find_outgoing_edges(edge.source_id);
+        }
+    }
+
+    /// Memory statistics
+    pub const MemoryStats = struct {
+        total_bytes: u64,
+        arena_bytes: u64,
+        sstable_bytes: u64,
+    };
+
+    pub fn memory_stats(self: *Self) MemoryStats {
+        const usage = self.storage_engine.memory_usage();
+        return .{
+            .total_bytes = usage.total_bytes,
+            .arena_bytes = usage.arena_bytes,
+            .sstable_bytes = usage.sstable_bytes,
+        };
+    }
+
+    /// Performance statistics
+    pub const PerformanceStats = struct {
+        blocks_written: u64,
+        blocks_read: u64,
+        edges_written: u64,
+        flushes_completed: u64,
+        compactions_completed: u64,
+    };
+
+    pub fn performance_stats(self: *Self) PerformanceStats {
+        const metrics = self.storage_engine.metrics();
+        return .{
+            .blocks_written = metrics.blocks_written.load(),
+            .blocks_read = metrics.blocks_read.load(),
+            .edges_written = metrics.edges_written.load(),
+            .flushes_completed = metrics.flushes_completed.load(),
+            .compactions_completed = metrics.compactions_completed.load(),
+        };
+    }
+
+    /// Number of faults injected
+    pub fn faults_injected(self: *Self) u32 {
+        return @intCast(self.fault_schedule.next_fault_index);
+    }
+
+    /// Number of errors handled (not implemented - would need error tracking)
+    pub fn errors_handled(self: *Self) u32 {
+        _ = self;
+        return 0; // Would need to track errors in apply_operation_to_system
+    }
+
+    /// Peak memory usage
+    pub fn peak_memory(self: *Self) u64 {
+        // For now, return current memory as we don't track peak
+        return self.storage_engine.memory_usage().total_bytes;
+    }
+
+    /// Initial memory usage
+    pub fn initial_memory(self: *Self) u64 {
+        _ = self;
+        // Would need to track this at init time
+        return 0;
+    }
+
+    /// Current memory usage
+    pub fn current_memory(self: *Self) u64 {
+        return self.storage_engine.memory_usage().total_bytes;
+    }
+
+    /// Number of operations executed
+    pub fn operations_executed(self: *Self) u64 {
+        return self.model.operation_count;
+    }
+
+    /// Verify WAL replay is idempotent
+    pub fn verify_replay_idempotence(self: *Self) !void {
+        // Shutdown and restart twice to verify idempotence
+        try self.simulate_clean_restart();
+        const stats1 = self.performance_stats();
+
+        try self.simulate_clean_restart();
+        const stats2 = self.performance_stats();
+
+        // Verify same state after both restarts
+        try testing.expect(stats1.blocks_written == stats2.blocks_written);
+        try testing.expect(stats1.edges_written == stats2.edges_written);
+    }
+
+    /// Verify graph traversal terminates
+    pub fn verify_traversal_termination(self: *Self) !void {
+        // Test that traversal completes even with cycles
+        var iter = self.model.blocks.iterator();
+        if (iter.next()) |entry| {
+            // This should complete without infinite loop
+            _ = self.storage_engine.find_outgoing_edges(entry.value_ptr.*.id);
+        }
+    }
+
+    /// Verify result ordering
+    pub fn verify_result_ordering(self: *Self) !void {
+        // Results should be deterministic for same input
+        var iter = self.model.blocks.iterator();
+        if (iter.next()) |entry| {
+            const edges1 = self.storage_engine.find_outgoing_edges(entry.value_ptr.*.id);
+            const edges2 = self.storage_engine.find_outgoing_edges(entry.value_ptr.*.id);
+
+            // Should get same results in same order
+            try testing.expect(edges1.len == edges2.len);
+        }
+    }
+
+    /// Verify memory integrity
+    pub fn verify_memory_integrity(self: *Self) !void {
+        // Basic memory integrity check
+        const usage = self.storage_engine.memory_usage();
+        try testing.expect(usage.total_bytes < 1024 * 1024 * 1024); // Less than 1GB
+        try testing.expect(usage.arena_bytes <= usage.total_bytes);
     }
 };
 

@@ -30,6 +30,15 @@ comptime {
     _ = @import("tests/simulation/scenarios/scenario_test.zig");
     _ = @import("tests/simulation/scenarios/crash_recovery_test.zig");
 
+    // Temporarily disabled - requires extended SimulationRunner methods
+    // _ = @import("tests/scenarios/comprehensive_storage_scenarios.zig");
+    // _ = @import("tests/scenarios/query_scenarios.zig");
+    // _ = @import("tests/scenarios/ingestion_scenarios.zig");
+    // _ = @import("tests/scenarios/unified_runner.zig");
+    // _ = @import("tests/scenarios/storage_scenarios.zig");
+    // _ = @import("tests/properties/storage_properties.zig");
+    // _ = @import("tests/regression/issue_reproductions.zig");
+
     // Core tests - component integration testing
     _ = @import("tests/core/production_vfs.zig");
 
