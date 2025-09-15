@@ -100,7 +100,7 @@ pub const PropertyChecker = struct {
 
             // Verify content integrity by comparing hashes
             const expected_hash = model_block.content_hash;
-            const actual_hash = ModelBlock.simple_hash(system_block.?.block.content);
+            const actual_hash = ModelBlock.cryptographic_hash(system_block.?.block.content);
             if (actual_hash != expected_hash) {
                 corrupted_blocks += 1;
             }
