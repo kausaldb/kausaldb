@@ -743,8 +743,8 @@ fn generate_test_block(allocator: Allocator, index: usize) !ContextBlock {
     return ContextBlock{
         .id = id,
         .version = 1,
-        .source_uri = "benchmark://test",
-        .metadata_json = "{}",
+        .source_uri = source_uri,
+        .metadata_json = metadata,
         .content = content,
     };
 }
