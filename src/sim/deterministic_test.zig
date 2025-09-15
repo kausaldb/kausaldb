@@ -1342,9 +1342,9 @@ pub const SimulationRunner = struct {
         return .{
             .blocks_written = metrics.blocks_written.load(),
             .blocks_read = metrics.blocks_read.load(),
-            .edges_written = metrics.edges_written.load(),
-            .flushes_completed = metrics.flushes_completed.load(),
-            .compactions_completed = metrics.compactions_completed.load(),
+            .edges_written = metrics.edges_added.load(),
+            .flushes_completed = metrics.wal_flushes.load(),
+            .compactions_completed = metrics.compactions.load(),
         };
     }
 

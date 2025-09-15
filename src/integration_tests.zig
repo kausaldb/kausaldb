@@ -39,6 +39,9 @@ comptime {
     // _ = @import("tests/properties/storage_properties.zig");
     // _ = @import("tests/regression/issue_reproductions.zig");
 
+    // Simple migration demonstration - works with current SimulationRunner
+    _ = @import("tests/scenarios/storage_metrics_test.zig");
+
     // Core tests - component integration testing
     _ = @import("tests/core/production_vfs.zig");
 

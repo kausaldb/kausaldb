@@ -83,47 +83,6 @@ test "storage engine startup and basic operations" {
     try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(engine.memtable_manager.block_index.blocks.count())));
 }
 
-test "storage metrics track operations accurately" {
-    const allocator = testing.allocator;
-
-    var sim_vfs = try SimulationVFS.init(allocator);
-    defer sim_vfs.deinit();
-
-    var engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test/metrics");
-    defer engine.deinit();
-
-    try engine.startup();
-
-    const initial_metrics = engine.metrics();
-    const initial_blocks_written = initial_metrics.blocks_written.load();
-    const initial_edges_added = initial_metrics.edges_added.load();
-
-    // Perform operations
-    const block = ContextBlock{
-        .id = BlockId.generate(),
-        .version = 1,
-        .source_uri = "file://metrics_test.zig",
-        .metadata_json = "{}",
-        .content = "metrics test content",
-    };
-
-    try engine.put_block(block);
-
-    const edge = GraphEdge{
-        .source_id = block.id,
-        .target_id = BlockId.generate(),
-        .edge_type = EdgeType.imports,
-    };
-
-    try engine.put_edge(edge);
-
-    // Check metrics
-    const final_metrics = engine.metrics();
-    try testing.expectEqual(initial_blocks_written + 1, final_metrics.blocks_written.load());
-    try testing.expectEqual(initial_edges_added + 1, final_metrics.edges_added.load());
-    try testing.expect(final_metrics.total_write_time_ns.load() > 0);
-}
-
 test "block iterator with empty storage" {
     const allocator = testing.allocator;
 
