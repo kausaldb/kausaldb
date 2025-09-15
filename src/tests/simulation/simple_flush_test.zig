@@ -278,7 +278,7 @@ test "concurrent flush and operations" {
 
         // Deterministic flush after each batch to ensure consistency
         log.info("Flush cycle {} - flushing {} tracked operations", .{ flush_cycle, model.operation_count });
-        
+
         // Only flush if engine is in a state that allows it
         if (engine.state.can_write()) {
             try engine.flush_memtable_to_sstable();

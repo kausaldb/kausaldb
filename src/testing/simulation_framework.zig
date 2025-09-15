@@ -214,11 +214,11 @@ pub const TestModel = struct {
     /// Clone a block's string fields to the arena allocator for proper ownership.
     fn clone_block_to_arena(self: *TestModel, block: ContextBlock) !ContextBlock {
         const arena_allocator = self.arena.allocator();
-        
+
         const cloned_source_uri = try arena_allocator.dupe(u8, block.source_uri);
         const cloned_metadata_json = try arena_allocator.dupe(u8, block.metadata_json);
         const cloned_content = try arena_allocator.dupe(u8, block.content);
-        
+
         return ContextBlock{
             .id = block.id,
             .source_uri = cloned_source_uri,
@@ -275,12 +275,12 @@ pub const OperationGenerator = struct {
     pub fn generate_block(self: *OperationGenerator) !ContextBlock {
         const id = self.next_block_id;
         self.next_block_id += 1;
-        
+
         // Create a simple block with static data that doesn't need cleanup
         var id_bytes: [16]u8 = undefined;
         std.mem.writeInt(u64, id_bytes[0..8], id, .little);
         std.mem.writeInt(u64, id_bytes[8..16], 0, .little);
-        
+
         return ContextBlock{
             .id = BlockId.from_bytes(id_bytes),
             .version = 1,
