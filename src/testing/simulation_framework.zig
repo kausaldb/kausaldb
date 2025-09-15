@@ -166,14 +166,14 @@ pub const OperationMix = struct {
 pub const TestModel = struct {
     allocator: Allocator,
     blocks: std.AutoHashMap(BlockId, ContextBlock),
-    edges: std.ArrayList(GraphEdge),
+    edges: std.array_list.Managed(GraphEdge),
     operation_count: u64,
 
     pub fn init(allocator: Allocator) TestModel {
         return .{
             .allocator = allocator,
             .blocks = std.AutoHashMap(BlockId, ContextBlock).init(allocator),
-            .edges = std.ArrayList(GraphEdge).init(allocator),
+            .edges = std.array_list.Managed(GraphEdge).init(allocator),
             .operation_count = 0,
         };
     }
@@ -254,16 +254,16 @@ pub const OperationGenerator = struct {
 
         return ContextBlock{
             .id = BlockId.from_bytes(id_bytes),
-            .uri = try std.fmt.allocPrint(self.allocator, "/test/block_{}.txt", .{id}),
+            .source_uri = try std.fmt.allocPrint(self.allocator, "/test/block_{}.txt", .{id}),
             .content = content,
-            .metadata = "{}",
+            .metadata_json = "{}",
             .version = 1,
         };
     }
 
     /// Generate a simple test edge.
     pub fn generate_edge(self: *OperationGenerator, source_id: BlockId, target_id: BlockId) GraphEdge {
-        const edge_types = [_]EdgeType{ .imports, .calls, .defines, .references };
+        const edge_types = [_]EdgeType{ .imports, .calls, .defined_in, .references };
         const random = self.rng.random();
         const edge_type = edge_types[random.uintLessThan(usize, edge_types.len)];
 
@@ -287,7 +287,7 @@ pub const OperationGenerator = struct {
                 .block = block,
             };
         } else if (roll < mix.put_block_weight + mix.find_block_weight) {
-            const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id));
+            const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id)) + 1;
             var id_bytes: [16]u8 = undefined;
             std.mem.writeInt(u64, id_bytes[0..8], id, .little);
             std.mem.writeInt(u64, id_bytes[8..16], 0, .little);
@@ -297,7 +297,7 @@ pub const OperationGenerator = struct {
                 .block_id = BlockId.from_bytes(id_bytes),
             };
         } else if (roll < mix.put_block_weight + mix.find_block_weight + mix.delete_block_weight) {
-            const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id));
+            const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id)) + 1;
             var id_bytes: [16]u8 = undefined;
             std.mem.writeInt(u64, id_bytes[0..8], id, .little);
             std.mem.writeInt(u64, id_bytes[8..16], 0, .little);
@@ -332,7 +332,7 @@ pub const OperationGenerator = struct {
         }
 
         // Default to find_edges
-        const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id));
+        const id = self.rng.random().uintLessThan(u64, @max(1, self.next_block_id)) + 1;
         var id_bytes: [16]u8 = undefined;
         std.mem.writeInt(u64, id_bytes[0..8], id, .little);
         std.mem.writeInt(u64, id_bytes[8..16], 0, .little);
@@ -390,7 +390,7 @@ pub fn apply_operation_to_storage(engine: *StorageEngine, op: Operation) !bool {
             return true;
         },
         .find_edges => if (op.block_id) |id| {
-            _ = try engine.find_edges_from(id, .query_engine);
+            _ = engine.find_outgoing_edges(id);
             return true;
         },
     }
@@ -432,7 +432,7 @@ pub const PropertyChecks = struct {
     /// Check memory usage is within bounds.
     pub fn check_memory_bounds(engine: *StorageEngine, max_per_op: u64) !void {
         const usage = engine.memory_usage();
-        const operations = engine.metrics.writes_completed + engine.metrics.reads_completed;
+        const operations = usage.block_count;
 
         if (operations == 0) return;
 

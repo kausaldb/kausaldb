@@ -55,14 +55,14 @@ test "flush preserves all data" {
     }
 
     // Manually trigger flush
-    try engine.coordinate_memtable_flush();
+    try engine.flush_memtable_to_sstable();
 
     // Verify all blocks still accessible after flush
     try simulation_framework.PropertyChecks.check_no_data_loss(&model, &engine);
 
     // Verify memory was reset
     const memory_after = engine.memory_usage();
-    try testing.expect(memory_after.memtable_bytes < 1024 * 1024); // Should be nearly empty
+    try testing.expect(memory_after.total_bytes < 1024 * 1024); // Should be nearly empty
 }
 
 test "multiple flushes maintain consistency" {
@@ -97,7 +97,7 @@ test "multiple flushes maintain consistency" {
         }
 
         // Flush
-        try engine.coordinate_memtable_flush();
+        try engine.flush_memtable_to_sstable();
 
         // Verify consistency after each flush
         try simulation_framework.PropertyChecks.check_no_data_loss(&model, &engine);
@@ -136,7 +136,7 @@ test "flush with mixed operations" {
     }
 
     // Flush in the middle of operations
-    try engine.coordinate_memtable_flush();
+    try engine.flush_memtable_to_sstable();
 
     // More operations after flush
     for (0..100) |_| {
@@ -181,7 +181,7 @@ test "recovery after flush preserves data" {
         }
 
         // Flush to SSTables
-        try engine.coordinate_memtable_flush();
+        try engine.flush_memtable_to_sstable();
 
         // Add more blocks after flush (will be in WAL)
         for (0..25) |_| {
@@ -235,13 +235,13 @@ test "memory bounds after flush" {
 
     // Memory should have grown
     const before_flush = engine.memory_usage();
-    try testing.expect(before_flush.memtable_bytes > initial_memory.memtable_bytes);
+    try testing.expect(before_flush.total_bytes > initial_memory.total_bytes);
 
     // Flush should reset memtable memory
-    try engine.coordinate_memtable_flush();
+    try engine.flush_memtable_to_sstable();
 
     const after_flush = engine.memory_usage();
-    try testing.expect(after_flush.memtable_bytes < before_flush.memtable_bytes);
+    try testing.expect(after_flush.total_bytes < before_flush.total_bytes);
 
     // Memory per operation should be reasonable
     try simulation_framework.PropertyChecks.check_memory_bounds(&engine, 2048);
@@ -278,7 +278,7 @@ test "concurrent flush and operations" {
             // Flush at specific intervals
             if (model.operation_count % 50 == 0 and model.operation_count > 0) {
                 log.info("Triggering flush at operation {}", .{model.operation_count});
-                engine.coordinate_memtable_flush() catch |err| {
+                engine.flush_memtable_to_sstable() catch |err| {
                     // Flush might fail due to concurrent operations, that's OK
                     log.info("Flush failed (expected): {}", .{err});
                 };

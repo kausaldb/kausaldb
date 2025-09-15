@@ -81,6 +81,9 @@ pub fn build(b: *std.Build) void {
     options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
     options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
     options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
+    options.addOption(bool, "sanitizers_active", b.option(bool, "sanitizers-active", "Enable sanitizers") orelse false);
+    options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log", "Log level") orelse .warn);
+    options.addOption(bool, "debug_tests", b.option(bool, "debug-tests", "Enable debug tests") orelse true);
 
     const build_options = BuildOptions{
         .b = b,
