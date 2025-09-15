@@ -16,13 +16,8 @@ const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const storage_engine_mod = @import("../../storage/engine.zig");
 const types = @import("../../core/types.zig");
 
-const ModelState = harness.ModelState;
-const Operation = harness.Operation;
 const OperationMix = harness.OperationMix;
-const OperationType = harness.OperationType;
-const PropertyChecker = harness.PropertyChecker;
 const SimulationRunner = harness.SimulationRunner;
-const WorkloadGenerator = harness.WorkloadGenerator;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;

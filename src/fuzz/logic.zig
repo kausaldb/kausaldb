@@ -14,6 +14,7 @@ const main = @import("main.zig");
 const internal = @import("internal");
 
 const WorkloadGenerator = internal.WorkloadGenerator;
+const WorkloadConfig = internal.WorkloadConfig;
 const ModelState = internal.ModelState;
 const PropertyChecker = internal.PropertyChecker;
 const OperationMix = internal.OperationMix;
@@ -90,12 +91,13 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
         fuzzer.allocator,
         fuzzer.config.seed,
         config.operation_mix,
+        WorkloadConfig{}, // Use default workload configuration
     );
 
     // Main loop runs for thousands of operations on the SAME engine instance
     for (0..config.total_operations) |op_index| {
         const op = try generator.generate_operation();
-        defer generator.cleanup_operation(op);
+        defer generator.cleanup_operation(&op);
 
         // Apply operation to the real system
         const success = apply_operation_to_system(&storage, op) catch |err| {
@@ -112,7 +114,7 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
 
         // If the system succeeded, update the model
         if (success) {
-            try model.apply_operation(op);
+            try model.apply_operation(&op);
         }
 
         // Verify properties after each operation

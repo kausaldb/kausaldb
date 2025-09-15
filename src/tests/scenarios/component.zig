@@ -93,7 +93,7 @@ fn execute_bloom_filter_accuracy(allocator: std.mem.Allocator, runner: *Simulati
     // Trigger flush to create SSTables with bloom filters
     try runner.storage_engine.flush_memtable_to_sstable();
 
-    // Create test block IDs including both existing and non-existing
+    // Create array of all test block IDs for bloom filter validation
     var test_block_ids = try allocator.alloc(BlockId, test_blocks.len);
     defer allocator.free(test_block_ids);
 
@@ -101,8 +101,11 @@ fn execute_bloom_filter_accuracy(allocator: std.mem.Allocator, runner: *Simulati
         test_block_ids[i] = block.id;
     }
 
-    // Validate bloom filter accuracy properties
-    try PropertyChecker.check_bloom_filter_accuracy(&runner.storage_engine, test_block_ids);
+    // Use consolidated PropertyChecker for comprehensive bloom filter validation
+    // This verifies:
+    // 1. Zero false negatives (critical for correctness)
+    // 2. Low false positive rate (< 1% for performance)
+    try PropertyChecker.check_bloom_filter_properties(&runner.storage_engine, test_block_ids);
 }
 
 /// Execute bloom filter performance characteristics scenario

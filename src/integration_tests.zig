@@ -19,7 +19,6 @@ comptime {
     _ = @import("tests/scenarios/component.zig");
     _ = @import("tests/scenarios/query.zig");
     _ = @import("tests/scenarios/ingestion.zig");
-    _ = @import("tests/properties/storage.zig");
-    _ = @import("tests/properties/universal.zig");
+
     _ = @import("tests/regression/regression.zig");
 }

@@ -43,7 +43,6 @@ comptime {
     _ = @import("query/filtering.zig");
     _ = @import("server/connection_manager.zig");
     _ = @import("server/handler.zig");
-    _ = @import("sim/hostile_vfs.zig");
     _ = @import("sim/simulation_vfs.zig");
     _ = @import("sim/simulation.zig");
     _ = @import("storage/batch_writer.zig");

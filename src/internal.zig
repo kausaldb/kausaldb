@@ -55,8 +55,11 @@ pub const simulation = @import("sim/simulation.zig");
 pub const harness = @import("testing/harness.zig");
 pub const SimulationVFS = simulation_vfs.SimulationVFS;
 pub const WorkloadGenerator = harness.WorkloadGenerator;
+pub const WorkloadConfig = harness.WorkloadConfig;
 pub const OperationMix = harness.OperationMix;
 pub const Operation = harness.Operation;
+pub const ModelState = harness.ModelState;
+pub const PropertyChecker = harness.PropertyChecker;
 
 // Ingestion pipeline
 pub const ingestion = struct {
