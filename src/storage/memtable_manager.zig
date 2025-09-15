@@ -14,6 +14,7 @@ const std = @import("std");
 
 const concurrency = @import("../core/concurrency.zig");
 const context_block = @import("../core/types.zig");
+const error_context = @import("../core/error_context.zig");
 const graph_edge_index = @import("graph_edge_index.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
@@ -130,22 +131,32 @@ pub const MemtableManager = struct {
             // Streaming writes eliminate WALEntry buffer allocation for multi-MB blocks
             if (block.content.len >= 512 * 1024) {
                 self.wal.write_block_streaming(block) catch |err| {
-                    fatal_assert(false, "WAL streaming write failed before memtable update: {}", .{err});
+                    // WAL write failure due to resource constraints (e.g. disk full) is recoverable.
+                    // Log the error and propagate it to the client rather than crashing the system.
+                    error_context.log_storage_error(err, error_context.StorageContext{
+                        .operation = "wal_write_block_streaming",
+                        .block_id = block.id,
+                    });
                     return err;
                 };
             } else {
                 const wal_entry = try WALEntry.create_put_block(self.backing_allocator, block);
                 defer wal_entry.deinit(self.backing_allocator);
                 self.wal.write_entry(wal_entry) catch |err| {
-                    fatal_assert(false, "WAL entry write failed before memtable update: {}", .{err});
+                    // WAL write failure due to resource constraints (e.g. disk full) is recoverable.
+                    // Log the error and propagate it to the client rather than crashing the system.
+                    error_context.log_storage_error(err, error_context.StorageContext{
+                        .operation = "wal_write_entry",
+                        .block_id = block.id,
+                    });
                     return err;
                 };
             }
             break :blk true;
         };
 
-        // Validate WAL operation succeeded before proceeding to memtable
-        fatal_assert(wal_succeeded, "WAL write did not complete successfully before memtable update", .{});
+        // WAL operation succeeded, safe to proceed to memtable update
+        assert(wal_succeeded);
 
         // Skip per-operation validation to prevent performance regression
         // Validation is expensive (allocator testing + memory calculation)
@@ -173,7 +184,12 @@ pub const MemtableManager = struct {
         const wal_entry = try WALEntry.create_delete_block(self.backing_allocator, block_id);
         defer wal_entry.deinit(self.backing_allocator);
         self.wal.write_entry(wal_entry) catch |err| {
-            fatal_assert(false, "WAL delete entry write failed before memtable update: {}", .{err});
+            // WAL write failure due to resource constraints (e.g. disk full) is recoverable.
+            // Log the error and propagate it to the client rather than crashing the system.
+            error_context.log_storage_error(err, error_context.StorageContext{
+                .operation = "wal_write_delete_entry",
+                .block_id = block_id,
+            });
             return err;
         };
 
