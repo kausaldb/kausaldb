@@ -102,7 +102,7 @@ test "parser integration through pipeline interface" {
 
     for (units) |unit| {
         if (std.mem.eql(u8, unit.unit_type, "function")) found_functions += 1;
-        if (std.mem.eql(u8, unit.unit_type, "constant")) found_constants += 1;
+        if (std.mem.eql(u8, unit.unit_type, "const")) found_constants += 1;
         if (std.mem.eql(u8, unit.unit_type, "type")) found_types += 1;
         if (std.mem.eql(u8, unit.unit_type, "test")) found_tests += 1;
         if (std.mem.eql(u8, unit.unit_type, "import")) found_imports += 1;

@@ -14,6 +14,7 @@ const builtin = @import("builtin");
 const assert_mod = @import("../core/assert.zig");
 const types = @import("../core/types.zig");
 const vfs = @import("../core/vfs.zig");
+const ownership = @import("../core/ownership.zig");
 
 // Storage imports
 const storage_engine = @import("../storage/engine.zig");
@@ -29,6 +30,7 @@ const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
+const OwnedBlock = ownership.OwnedBlock;
 const StorageEngine = storage_engine.StorageEngine;
 const SimulationVFS = vfs.SimulationVFS;
 const VFS = vfs.VFS;
@@ -163,22 +165,27 @@ pub const OperationMix = struct {
 };
 
 /// Lightweight model for tracking expected state.
+/// Uses OwnedBlock storage pattern to match production ownership semantics.
 pub const TestModel = struct {
     allocator: Allocator,
-    blocks: std.AutoHashMap(BlockId, ContextBlock),
+    blocks: std.AutoHashMap(BlockId, OwnedBlock),
     edges: std.array_list.Managed(GraphEdge),
     operation_count: u64,
+    arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: Allocator) TestModel {
         return .{
             .allocator = allocator,
-            .blocks = std.AutoHashMap(BlockId, ContextBlock).init(allocator),
+            .blocks = std.AutoHashMap(BlockId, OwnedBlock).init(allocator),
             .edges = std.array_list.Managed(GraphEdge).init(allocator),
             .operation_count = 0,
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
     pub fn deinit(self: *TestModel) void {
+        // Arena cleanup automatically handles all block content strings
+        self.arena.deinit();
         self.blocks.deinit();
         self.edges.deinit();
     }
@@ -189,7 +196,10 @@ pub const TestModel = struct {
 
         switch (op.op_type) {
             .put_block => if (op.block) |block| {
-                try self.blocks.put(block.id, block);
+                // Create owned block using arena for proper memory management
+                const arena_block = try self.clone_block_to_arena(block);
+                const owned_block = OwnedBlock.take_ownership(arena_block, .simulation_test);
+                try self.blocks.put(block.id, owned_block);
             },
             .delete_block => if (op.block_id) |id| {
                 _ = self.blocks.remove(id);
@@ -199,6 +209,23 @@ pub const TestModel = struct {
             },
             else => {},
         }
+    }
+
+    /// Clone a block's string fields to the arena allocator for proper ownership.
+    fn clone_block_to_arena(self: *TestModel, block: ContextBlock) !ContextBlock {
+        const arena_allocator = self.arena.allocator();
+        
+        const cloned_source_uri = try arena_allocator.dupe(u8, block.source_uri);
+        const cloned_metadata_json = try arena_allocator.dupe(u8, block.metadata_json);
+        const cloned_content = try arena_allocator.dupe(u8, block.content);
+        
+        return ContextBlock{
+            .id = block.id,
+            .source_uri = cloned_source_uri,
+            .metadata_json = cloned_metadata_json,
+            .content = cloned_content,
+            .version = block.version,
+        };
     }
 
     /// Count active (non-deleted) blocks.
@@ -216,7 +243,8 @@ pub const TestModel = struct {
         // Check all model blocks exist in storage
         var iterator = self.blocks.iterator();
         while (iterator.next()) |entry| {
-            const model_block = entry.value_ptr.*;
+            const owned_block = entry.value_ptr.*;
+            const model_block = owned_block.read(.simulation_test);
             const found = try engine.find_block(model_block.id, .query_engine);
 
             if (found == null) {
@@ -241,23 +269,24 @@ pub const OperationGenerator = struct {
         };
     }
 
-    /// Generate a simple test block.
+    /// Generate a simple test block with minimal temporary data.
+    /// Returns a ContextBlock with static/stack-allocated strings to avoid leaks.
+    /// TestModel will clone this properly into its arena allocator.
     pub fn generate_block(self: *OperationGenerator) !ContextBlock {
         const id = self.next_block_id;
         self.next_block_id += 1;
-
+        
+        // Create a simple block with static data that doesn't need cleanup
         var id_bytes: [16]u8 = undefined;
         std.mem.writeInt(u64, id_bytes[0..8], id, .little);
         std.mem.writeInt(u64, id_bytes[8..16], 0, .little);
-
-        const content = try std.fmt.allocPrint(self.allocator, "Test block content {}", .{id});
-
+        
         return ContextBlock{
             .id = BlockId.from_bytes(id_bytes),
-            .source_uri = try std.fmt.allocPrint(self.allocator, "/test/block_{}.txt", .{id}),
-            .content = content,
-            .metadata_json = "{}",
             .version = 1,
+            .source_uri = "test://generated.zig",
+            .metadata_json = "{\"type\":\"generated\"}",
+            .content = "Generated test content",
         };
     }
 
@@ -411,7 +440,8 @@ pub const PropertyChecks = struct {
         var iterator = model.blocks.iterator();
 
         while (iterator.next()) |entry| {
-            const model_block = entry.value_ptr.*;
+            const owned_block = entry.value_ptr.*;
+            const model_block = owned_block.read(.simulation_test);
             const found = engine.find_block(model_block.id, .query_engine) catch |err| {
                 log.err("Error finding block {}: {}", .{ model_block.id, err });
                 return err;

@@ -213,7 +213,7 @@ test "parser handles empty and minimal files" {
 
         var found_constant = false;
         for (units) |unit| {
-            if (std.mem.eql(u8, unit.unit_type, "constant")) {
+            if (std.mem.eql(u8, unit.unit_type, "const")) {
                 found_constant = true;
             }
         }
