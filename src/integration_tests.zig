@@ -17,7 +17,7 @@ pub const std_options = .{
 comptime {
     // All simulation tests are enabled - deterministic property-based testing
     _ = @import("tests/simulation/property_test.zig");
-    _ = @import("tests/simulation/flush_test.zig");
+    _ = @import("tests/simulation/flush.zig");
     _ = @import("tests/simulation/simple_flush_test.zig");
     _ = @import("tests/simulation/corruption_recovery.zig");
     _ = @import("tests/simulation/metrics.zig");
@@ -30,14 +30,19 @@ comptime {
     _ = @import("tests/simulation/scenarios/scenario_test.zig");
     _ = @import("tests/simulation/scenarios/crash_recovery_test.zig");
 
-    // CLI and Server tests - external interface testing
-    _ = @import("tests/cli/command_interface.zig");
+    // Core tests - component integration testing
+    _ = @import("tests/core/production_vfs.zig");
+
+    // Storage tests - cross-component integration testing
+    _ = @import("tests/storage/engine_integration.zig");
+
+    // Server tests - external interface testing
     _ = @import("tests/server/protocol.zig");
     _ = @import("tests/server/server_coordinator.zig");
     _ = @import("tests/server/server_lifecycle.zig");
 
     // Ingestion tests - complex edge cases not covered by simulation
-    _ = @import("tests/ingestion/cross_file_resolution_test.zig");
+    _ = @import("tests/ingestion/cross_file_resolution.zig");
     _ = @import("tests/ingestion/ingestion.zig");
     _ = @import("tests/ingestion/zig_parser_integration.zig");
 
@@ -48,7 +53,7 @@ comptime {
     _ = @import("tests/defensive/performance_impact.zig");
 
     // Memory tests - allocation patterns and corruption prevention
-    _ = @import("tests/memory/corruption_prevention_test.zig");
+    _ = @import("tests/memory/corruption_prevention.zig");
     _ = @import("tests/memory/profiling_validation.zig");
 
     // Query tests - complex algorithm edge cases
@@ -77,18 +82,4 @@ comptime {
     // Performance tests - benchmarking and memory profiling
     _ = @import("tests/performance/streaming_memory_benchmark.zig");
     _ = @import("tests/performance/large_block_benchmark.zig");
-
-    // DELETED: Tests covered by simulation framework or unit tests
-    // - fault_injection/* - covered by simulation framework fault injection
-    // - debug/* - basic debugging, redundant with simulation
-    // - scenarios/* - covered by simulation scenarios
-    // - stress/* - covered by simulation stress testing
-    // - safety/* - covered by defensive tests and simulation
-    // - storage/bloom_filter_validation.zig - redundant with unit tests
-    // - storage/defensive_integration.zig - covered by defensive tests
-    // - storage/fuzz_tests.zig - covered by simulation framework
-    // - storage/memtable_simple_operations.zig - covered by unit tests
-    // - storage/property_tests.zig - replaced by simulation property tests
-    // - storage/wal_entry_stream.zig - covered by recovery tests
-    // - storage/wal_streaming_writes.zig - covered by recovery tests
 }
