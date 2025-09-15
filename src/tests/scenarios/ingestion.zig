@@ -11,18 +11,18 @@
 const std = @import("std");
 const testing = std.testing;
 
-const deterministic_test = @import("../../sim/deterministic_test.zig");
+const harness = @import("../../testing/harness.zig");
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const storage_engine_mod = @import("../../storage/engine.zig");
 const types = @import("../../core/types.zig");
 
-const ModelState = deterministic_test.ModelState;
-const Operation = deterministic_test.Operation;
-const OperationMix = deterministic_test.OperationMix;
-const OperationType = deterministic_test.OperationType;
-const PropertyChecker = deterministic_test.PropertyChecker;
-const SimulationRunner = deterministic_test.SimulationRunner;
-const WorkloadGenerator = deterministic_test.WorkloadGenerator;
+const ModelState = harness.ModelState;
+const Operation = harness.Operation;
+const OperationMix = harness.OperationMix;
+const OperationType = harness.OperationType;
+const PropertyChecker = harness.PropertyChecker;
+const SimulationRunner = harness.SimulationRunner;
+const WorkloadGenerator = harness.WorkloadGenerator;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -251,7 +251,11 @@ test "scenario: malformed file handling" {
         0x15001,
         operation_mix,
         &.{
-            .syntax_error_probability = 0.1, // 10% malformed files
+            .{
+                .operation_number = 50,
+                .fault_type = .corruption,
+                .syntax_error_probability = 0.1, // 10% malformed files
+            },
         },
     );
     defer runner.deinit();
@@ -281,7 +285,11 @@ test "scenario: partial file ingestion recovery" {
         0x15002,
         operation_mix,
         &.{
-            .io_error_probability = 0.05, // I/O errors during ingestion
+            .{
+                .operation_number = 100,
+                .fault_type = .io_error,
+                .io_error_probability = 0.05, // I/O errors during ingestion
+            },
         },
     );
     defer runner.deinit();
