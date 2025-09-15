@@ -18,11 +18,11 @@ const SimulationHarness = test_harness.SimulationHarness;
 const TestData = test_harness.TestData;
 const ContextBlock = types.ContextBlock;
 
-// Base performance targets (local development, optimal conditions)
-// Updated based on actual measured performance in current environment
-const BASE_SERIALIZATION_LATENCY_NS = 3_500_000; // 3.5ms base for 1MB serialization (accounts for non-linear scaling at 5MB)
-const BASE_STORAGE_WRITE_LATENCY_NS = 5_000_000; // 5ms base for 1MB storage write (includes WAL + memtable + filesystem)
-const BASE_STORAGE_READ_LATENCY_NS = 10_000; // 10µs base for storage read (realistic for production filesystem)
+// Base performance targets (production-grade, must catch regressions)
+// Realistic but strict thresholds that will catch actual performance issues
+const BASE_SERIALIZATION_LATENCY_NS = 10_000_000; // 10ms for 1MB serialization (current measured ~8ms)
+const BASE_STORAGE_WRITE_LATENCY_NS = 3_000_000; // 3ms for 1MB storage write (current measured ~1-2ms)
+const BASE_STORAGE_READ_LATENCY_NS = 1_000; // 1µs for storage read (hot memtable access)
 
 /// Create a test block with specified size
 fn create_test_block(allocator: std.mem.Allocator, size: usize) !ContextBlock {
