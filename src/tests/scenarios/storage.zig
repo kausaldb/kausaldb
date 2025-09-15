@@ -685,12 +685,16 @@ test "scenario: metrics tracked accurately" {
     const initial_stats = runner.performance_stats();
 
     // Run operations that should generate blocks and edges
-    try runner.run(10);
+    try runner.run(500);
 
     const final_stats = runner.performance_stats();
 
     // Verify metrics increased
     try testing.expect(final_stats.blocks_written > initial_stats.blocks_written);
 
-    // Only checking blocks written as edges_written has compilation issue in SimulationRunner
+    // Verify edge metrics are tracked when edge operations occur
+    // The operation mix includes 30% put_edge operations, so we should see edges written
+    if (operation_mix.put_edge_weight > 0) {
+        try testing.expect(final_stats.edges_written > initial_stats.edges_written);
+    }
 }

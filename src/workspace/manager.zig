@@ -27,7 +27,6 @@ const ContextBlock = context_block.ContextBlock;
 const IngestionConfig = ingest_directory.IngestionConfig;
 const IngestionStats = ingest_directory.IngestionStats;
 const StorageEngine = storage.StorageEngine;
-const VFS = vfs.VFS;
 
 const log = std.log.scoped(.manager);
 

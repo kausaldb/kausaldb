@@ -16,7 +16,6 @@ const internal = @import("internal");
 const BenchmarkHarness = main.BenchmarkHarness;
 const StorageEngine = internal.StorageEngine;
 const SimulationVFS = internal.SimulationVFS;
-const VFS = internal.vfs.VFS;
 const ContextBlock = internal.ContextBlock;
 const GraphEdge = internal.GraphEdge;
 const BlockId = internal.BlockId;

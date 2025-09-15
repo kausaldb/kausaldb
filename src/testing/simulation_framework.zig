@@ -33,7 +33,6 @@ const EdgeType = types.EdgeType;
 const OwnedBlock = ownership.OwnedBlock;
 const StorageEngine = storage_engine.StorageEngine;
 const SimulationVFS = vfs.SimulationVFS;
-const VFS = vfs.VFS;
 
 /// Simple operation for applying to storage.
 pub const Operation = struct {

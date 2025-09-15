@@ -23,7 +23,6 @@ const EdgeType = internal.EdgeType;
 const StorageEngine = internal.StorageEngine;
 const Config = internal.Config;
 const SimulationVFS = internal.SimulationVFS;
-const VFS = internal.vfs.VFS;
 const SSTable = internal.sstable.SSTable;
 const WAL = internal.wal.WAL;
 

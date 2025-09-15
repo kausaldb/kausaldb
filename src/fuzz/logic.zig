@@ -13,16 +13,13 @@ const std = @import("std");
 const main = @import("main.zig");
 const internal = @import("internal");
 
-const deterministic = internal.deterministic_test;
-
-const WorkloadGenerator = deterministic.WorkloadGenerator;
-const ModelState = deterministic.ModelState;
-const PropertyChecker = deterministic.PropertyChecker;
-const OperationMix = deterministic.OperationMix;
-const Operation = deterministic.Operation;
+const WorkloadGenerator = internal.WorkloadGenerator;
+const ModelState = internal.ModelState;
+const PropertyChecker = internal.PropertyChecker;
+const OperationMix = internal.OperationMix;
+const Operation = internal.Operation;
 const StorageEngine = internal.StorageEngine;
 const SimulationVFS = internal.SimulationVFS;
-const VFS = internal.vfs.VFS;
 const ContextBlock = internal.ContextBlock;
 const GraphEdge = internal.GraphEdge;
 const BlockId = internal.BlockId;

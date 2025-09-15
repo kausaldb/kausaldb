@@ -52,7 +52,6 @@ pub const Allocator = std.mem.Allocator;
 // These are exposed for internal development tools (benchmarks, fuzz tests)
 // but should not be used by external applications
 pub const dev = struct {
-    pub const QueryHarness = @import("tests/harness.zig").QueryHarness;
     pub const StatisticalSampler = @import("testing/performance_assertions.zig").StatisticalSampler;
     pub const WarmupUtils = @import("testing/performance_assertions.zig").WarmupUtils;
 };

@@ -51,12 +51,12 @@ pub const wal = @import("storage/wal.zig");
 
 // Simulation testing infrastructure
 pub const simulation_vfs = @import("sim/simulation_vfs.zig");
-pub const SimulationVFS = simulation_vfs.SimulationVFS;
 pub const simulation = @import("sim/simulation.zig");
-pub const deterministic_test = @import("sim/deterministic_test.zig");
-pub const WorkloadGenerator = deterministic_test.WorkloadGenerator;
-pub const OperationMix = deterministic_test.OperationMix;
-pub const Operation = deterministic_test.Operation;
+pub const harness = @import("testing/harness.zig");
+pub const SimulationVFS = simulation_vfs.SimulationVFS;
+pub const WorkloadGenerator = harness.WorkloadGenerator;
+pub const OperationMix = harness.OperationMix;
+pub const Operation = harness.Operation;
 
 // Ingestion pipeline
 pub const ingestion = struct {

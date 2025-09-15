@@ -1,0 +1,376 @@
+//! Workload generation for deterministic simulation testing.
+//!
+//! Provides deterministic, seeded generation of realistic operation sequences
+//! for property-based testing. Operations represent actual API calls that
+//! users would make, not internal storage operations.
+//!
+//! Design rationale: Realistic workloads expose bugs that artificial test
+//! patterns miss. Deterministic generation enables exact reproduction of
+//! failures using seeds.
+
+const std = @import("std");
+const testing = std.testing;
+
+const types = @import("../core/types.zig");
+
+const BlockId = types.BlockId;
+const ContextBlock = types.ContextBlock;
+const EdgeType = types.EdgeType;
+const GraphEdge = types.GraphEdge;
+
+/// Operation types that can be performed on the system
+/// These represent actual API operations, not internal storage operations
+pub const OperationType = enum {
+    put_block,
+    find_block,
+    delete_block,
+    put_edge,
+    find_edges,
+};
+
+/// Configuration for operation mix in workload generation
+/// Represents realistic API usage patterns, not internal storage operations
+pub const OperationMix = struct {
+    put_block_weight: u32 = 40, // Primary write operations
+    find_block_weight: u32 = 40, // Primary read operations
+    delete_block_weight: u32 = 5, // Occasional deletions
+    put_edge_weight: u32 = 10, // Graph relationship creation
+    find_edges_weight: u32 = 5, // Graph traversal queries
+
+    /// Calculate total weight for probability distribution
+    pub fn total_weight(self: OperationMix) u32 {
+        return self.put_block_weight +
+            self.find_block_weight +
+            self.delete_block_weight +
+            self.put_edge_weight +
+            self.find_edges_weight;
+    }
+};
+
+/// Single operation in the workload
+pub const Operation = struct {
+    op_type: OperationType,
+    block_id: ?BlockId = null,
+    block: ?ContextBlock = null,
+    edge: ?GraphEdge = null,
+    sequence_number: u64,
+};
+
+/// Deterministic workload generator for realistic operation patterns
+pub const WorkloadGenerator = struct {
+    allocator: std.mem.Allocator,
+    prng: std.Random.DefaultPrng,
+    operation_mix: OperationMix,
+    operation_count: u64,
+    block_counter: u32,
+    edge_counter: u32,
+    config: WorkloadConfig,
+
+    const Self = @This();
+
+    // Import WorkloadConfig from harness
+    const WorkloadConfig = @import("harness.zig").WorkloadConfig;
+
+    /// Initialize workload generator with deterministic seed
+    pub fn init(allocator: std.mem.Allocator, seed: u64, mix: OperationMix, config: WorkloadConfig) Self {
+        return Self{
+            .allocator = allocator,
+            .prng = std.Random.DefaultPrng.init(seed),
+            .operation_mix = mix,
+            .operation_count = 0,
+            .block_counter = 0,
+            .edge_counter = 0,
+            .config = config,
+        };
+    }
+
+    /// Update workload configuration after initialization
+    pub fn update_config(self: *Self, new_config: WorkloadConfig) void {
+        self.config = new_config;
+    }
+
+    /// Generate next operation in deterministic sequence
+    pub fn generate_operation(self: *Self) !Operation {
+        const random = self.prng.random();
+        const total = self.operation_mix.total_weight();
+        const choice = random.uintLessThan(u32, total);
+
+        var cumulative: u32 = 0;
+        const op_type: OperationType = blk: {
+            cumulative += self.operation_mix.put_block_weight;
+            if (choice < cumulative) break :blk .put_block;
+
+            cumulative += self.operation_mix.find_block_weight;
+            if (choice < cumulative) break :blk .find_block;
+
+            cumulative += self.operation_mix.delete_block_weight;
+            if (choice < cumulative) break :blk .delete_block;
+
+            cumulative += self.operation_mix.put_edge_weight;
+            if (choice < cumulative) break :blk .put_edge;
+
+            break :blk .find_edges;
+        };
+
+        const operation = switch (op_type) {
+            .put_block => try self.generate_put_block(),
+            .find_block => try self.generate_find_block(),
+            .delete_block => try self.generate_delete_block(),
+            .put_edge => try self.generate_put_edge(),
+            .find_edges => try self.generate_find_edges(),
+        };
+
+        self.operation_count += 1;
+        return operation;
+    }
+
+    /// Generate put_block operation with realistic test data
+    fn generate_put_block(self: *Self) !Operation {
+        self.block_counter += 1;
+        const block = try self.create_test_block(self.block_counter);
+        return Operation{
+            .op_type = .put_block,
+            .block = block,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Generate find_block operation for existing or random block
+    fn generate_find_block(self: *Self) !Operation {
+        const random = self.prng.random();
+        const block_id = if (self.block_counter > 0 and random.boolean())
+            self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
+        else
+            self.random_block_id();
+
+        return Operation{
+            .op_type = .find_block,
+            .block_id = block_id,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Generate delete_block operation for existing block
+    fn generate_delete_block(self: *Self) !Operation {
+        const random = self.prng.random();
+        const block_id = if (self.block_counter > 0)
+            self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
+        else
+            self.random_block_id();
+
+        return Operation{
+            .op_type = .delete_block,
+            .block_id = block_id,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Generate put_edge operation between blocks
+    fn generate_put_edge(self: *Self) !Operation {
+        const random = self.prng.random();
+
+        // Generate edge between potentially existing blocks
+        var source_id: BlockId = undefined;
+        var target_id: BlockId = undefined;
+
+        if (self.config.create_hub_nodes and self.block_counter > 10 and random.float(f32) < 0.3) {
+            // Create hub node pattern - many edges to/from central nodes
+            const hub_id = self.deterministic_block_id(1); // First block as hub
+            if (random.boolean()) {
+                source_id = hub_id;
+                target_id = if (self.block_counter > 1)
+                    self.deterministic_block_id(random.uintLessThan(u32, self.block_counter - 1) + 2)
+                else
+                    self.random_block_id();
+            } else {
+                source_id = if (self.block_counter > 1)
+                    self.deterministic_block_id(random.uintLessThan(u32, self.block_counter - 1) + 2)
+                else
+                    self.random_block_id();
+                target_id = hub_id;
+            }
+        } else {
+            // Normal edge generation
+            source_id = if (self.block_counter > 0 and random.boolean())
+                self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
+            else
+                self.random_block_id();
+
+            target_id = if (self.block_counter > 0 and random.boolean())
+                self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
+            else
+                self.random_block_id();
+        }
+
+        // Handle self-loops based on configuration
+        if (!self.config.create_self_loops and source_id.eql(target_id)) {
+            // Avoid self-loops
+            target_id = if (self.block_counter > 1)
+                self.deterministic_block_id((self.block_counter % 2) + 1)
+            else
+                self.random_block_id();
+        }
+
+        // Edge type selection based on configuration
+        var edge_types: []const EdgeType = undefined;
+        if (self.config.use_all_edge_types) {
+            edge_types = &[_]EdgeType{ .imports, .calls, .defined_in, .references, .depends_on };
+        } else {
+            edge_types = &[_]EdgeType{ .imports, .calls, .references };
+        }
+
+        const edge_type = edge_types[random.uintLessThan(usize, edge_types.len)];
+
+        const edge = GraphEdge{
+            .source_id = source_id,
+            .target_id = target_id,
+            .edge_type = edge_type,
+        };
+
+        self.edge_counter += 1;
+        return Operation{
+            .op_type = .put_edge,
+            .edge = edge,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Generate find_edges operation for graph traversal
+    fn generate_find_edges(self: *Self) !Operation {
+        const random = self.prng.random();
+        const block_id = if (self.block_counter > 0 and random.boolean())
+            self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
+        else
+            self.random_block_id();
+
+        return Operation{
+            .op_type = .find_edges,
+            .block_id = block_id,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Create test block with realistic content
+    fn create_test_block(self: *Self, block_number: u32) !ContextBlock {
+        const random = self.prng.random();
+
+        // Generate deterministic but varied content
+        const content_templates = [_][]const u8{
+            "pub fn test_function_{d}() void {{\n    // Test implementation\n}}",
+            "const TestStruct_{d} = struct {{\n    value: u32,\n}};",
+            "// Test comment block {d}\n// This is documentation",
+            "import std.testing;\ntest \"test_{d}\" {{\n    // Test body\n}}",
+        };
+
+        const template_index = random.uintLessThan(usize, content_templates.len);
+        var content = switch (template_index) {
+            0 => try std.fmt.allocPrint(self.allocator, "pub fn test_function_{d}() void {{\n    // Test implementation\n}}", .{block_number}),
+            1 => try std.fmt.allocPrint(self.allocator, "const TestStruct_{d} = struct {{\n    value: u32,\n}};", .{block_number}),
+            2 => try std.fmt.allocPrint(self.allocator, "// Test comment block {d}\n// This is documentation", .{block_number}),
+            3 => try std.fmt.allocPrint(self.allocator, "import std.testing;\ntest \"test_{d}\" {{\n    // Test body\n}}", .{block_number}),
+            else => try std.fmt.allocPrint(self.allocator, "pub fn test_function_{d}() void {{\n    // Test implementation\n}}", .{block_number}),
+        };
+
+        // Add unicode content if configured
+        if (self.config.generate_unicode_metadata and random.float(f32) < 0.3) {
+            const original_content = content;
+            content = try std.fmt.allocPrint(self.allocator, "{s}\n// Unicode: 测试内容 🚀", .{original_content});
+            self.allocator.free(original_content);
+        }
+
+        // Generate metadata based on configuration
+        var metadata: []const u8 = undefined;
+        if (self.config.generate_rich_metadata) {
+            metadata = try std.fmt.allocPrint(self.allocator, "{{\"function\": \"test_{d}\", \"line_count\": {d}, \"complexity\": {d}, \"language\": \"zig\"}}", .{ block_number, random.uintLessThan(u32, 50) + 1, random.uintLessThan(u32, 10) + 1 });
+        } else {
+            metadata = try std.fmt.allocPrint(self.allocator, "{{\"function\": \"test_{d}\"}}", .{block_number});
+        }
+
+        return ContextBlock{
+            .id = self.deterministic_block_id(block_number),
+            .source_uri = try std.fmt.allocPrint(self.allocator, "/test/file_{d}.zig", .{block_number}),
+            .content = content,
+            .metadata_json = metadata,
+            .version = 1,
+        };
+    }
+
+    /// Generate deterministic block ID from counter
+    fn deterministic_block_id(self: *Self, counter: u32) BlockId {
+        _ = self;
+        var bytes: [16]u8 = undefined;
+        std.mem.writeInt(u32, bytes[0..4], counter, .little);
+        std.mem.writeInt(u32, bytes[4..8], 0xDEADBEEF, .little);
+        std.mem.writeInt(u32, bytes[8..12], 0xCAFEBABE, .little);
+        std.mem.writeInt(u32, bytes[12..16], counter ^ 0xFFFFFFFF, .little);
+        return BlockId.from_bytes(bytes);
+    }
+
+    /// Generate random block ID for testing non-existent blocks
+    fn random_block_id(self: *Self) BlockId {
+        const random = self.prng.random();
+        var bytes: [16]u8 = undefined;
+        random.bytes(&bytes);
+        return BlockId.from_bytes(bytes);
+    }
+
+    /// Clean up operation-allocated resources
+    pub fn cleanup_operation(self: *Self, operation: *const Operation) void {
+        if (operation.block) |block| {
+            self.allocator.free(block.source_uri);
+            self.allocator.free(block.content);
+            self.allocator.free(block.metadata_json);
+        }
+    }
+};
+
+test "workload generator creates deterministic operations" {
+    const allocator = testing.allocator;
+
+    const mix = OperationMix{
+        .put_block_weight = 50,
+        .find_block_weight = 50,
+    };
+
+    const config = @import("harness.zig").WorkloadConfig{};
+    var generator = WorkloadGenerator.init(allocator, 0x12345, mix, config);
+
+    // Generate operations
+    const op1 = try generator.generate_operation();
+    const op2 = try generator.generate_operation();
+
+    // Should generate valid operations
+    try testing.expect(op1.sequence_number < op2.sequence_number);
+
+    // Clean up
+    generator.cleanup_operation(&op1);
+    generator.cleanup_operation(&op2);
+}
+
+test "operation mix calculates correct total weight" {
+    const mix = OperationMix{
+        .put_block_weight = 10,
+        .find_block_weight = 20,
+        .delete_block_weight = 5,
+        .put_edge_weight = 3,
+        .find_edges_weight = 7,
+    };
+
+    try testing.expectEqual(@as(u32, 45), mix.total_weight());
+}
+
+test "deterministic block ID generation" {
+    const allocator = testing.allocator;
+    const mix = OperationMix{};
+    const config = @import("harness.zig").WorkloadConfig{};
+    var generator = WorkloadGenerator.init(allocator, 0x12345, mix, config);
+
+    // Same counter should produce same ID
+    const id1 = generator.deterministic_block_id(42);
+    const id2 = generator.deterministic_block_id(42);
+    try testing.expect(id1.eql(id2));
+
+    // Different counters should produce different IDs
+    const id3 = generator.deterministic_block_id(43);
+    try testing.expect(!id1.eql(id3));
+}
