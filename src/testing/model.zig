@@ -24,7 +24,7 @@ const workload_mod = @import("workload.zig");
 
 const assert = assert_mod.assert;
 const fatal_assert = assert_mod.fatal_assert;
-const log = log.scoped(.model);
+const log = std.log.scoped(.model);
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;

@@ -199,7 +199,7 @@ pub const SimulationRunner = struct {
     seed: u64,
     workload: WorkloadGenerator,
     model: ModelState,
-    sim_vfs: SimulationVFS,
+    sim_vfs: *SimulationVFS,
     storage_engine: StorageEngine,
     fault_schedule: FaultSchedule,
     flush_config: FlushConfig,
@@ -219,7 +219,7 @@ pub const SimulationRunner = struct {
         operation_mix: OperationMix,
         faults: []const FaultSpec,
     ) !Self {
-        var sim_vfs = try SimulationVFS.init(allocator);
+        var sim_vfs = try SimulationVFS.heap_init(allocator);
 
         var storage_engine = try StorageEngine.init_default(
             allocator,
@@ -254,6 +254,7 @@ pub const SimulationRunner = struct {
         self.storage_engine.shutdown() catch {};
         self.storage_engine.deinit();
         self.sim_vfs.deinit();
+        self.allocator.destroy(self.sim_vfs);
         self.model.deinit();
     }
 
@@ -264,6 +265,7 @@ pub const SimulationRunner = struct {
 
         for (0..operation_count) |i| {
             const operation = try self.workload.generate_operation();
+            defer self.workload.cleanup_operation(&operation);
 
             // Check for fault injection
             if (self.fault_schedule.should_inject_fault(@intCast(i))) |fault_type| {
