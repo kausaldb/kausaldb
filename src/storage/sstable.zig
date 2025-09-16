@@ -713,18 +713,32 @@ pub const Compactor = struct {
     ) !void {
         assert_mod.assert(input_paths.len > 1);
 
-        var input_tables = try self.backing_allocator.alloc(SSTable, input_paths.len);
+        var input_tables = try self.backing_allocator.alloc(*SSTable, input_paths.len);
+        var tables_initialized: usize = 0;
         defer {
-            for (input_tables) |*table| {
+            // Only clean up successfully initialized tables
+            for (input_tables[0..tables_initialized]) |table| {
                 table.deinit();
+                self.backing_allocator.destroy(table);
             }
             self.backing_allocator.free(input_tables);
         }
 
         for (input_paths, 0..) |path, i| {
             const path_copy = try self.backing_allocator.dupe(u8, path);
-            input_tables[i] = SSTable.init(self.arena_coordinator, self.backing_allocator, self.filesystem, path_copy);
-            try input_tables[i].read_index();
+
+            const table = try self.backing_allocator.create(SSTable);
+            table.* = SSTable.init(self.arena_coordinator, self.backing_allocator, self.filesystem, path_copy);
+
+            // If read_index fails, clean up this table and return error
+            table.read_index() catch |err| {
+                table.deinit(); // This will free path_copy
+                self.backing_allocator.destroy(table);
+                return err;
+            };
+
+            input_tables[i] = table;
+            tables_initialized += 1;
         }
 
         const output_path_copy = try self.backing_allocator.dupe(u8, output_path);
@@ -735,12 +749,12 @@ pub const Compactor = struct {
         defer all_blocks.deinit();
 
         var total_capacity: u32 = 0;
-        for (input_tables) |*table| {
+        for (input_tables) |table| {
             total_capacity += table.block_count;
         }
         try all_blocks.ensureTotalCapacity(total_capacity);
 
-        for (input_tables) |*table| {
+        for (input_tables) |table| {
             var iter = table.iterator();
             defer iter.deinit();
 
