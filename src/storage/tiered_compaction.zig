@@ -116,7 +116,7 @@ pub const TieredCompactionManager = struct {
         total_size: u64 = 0,
 
         const SSTableInfo = struct {
-            path: []const u8, // Reference to path owned by SSTableManager
+            path: []const u8, // Owned copy of path string to avoid ArrayList invalidation
             size: u64,
             level: u8,
         };
@@ -128,23 +128,29 @@ pub const TieredCompactionManager = struct {
         }
 
         pub fn deinit(self: *TierState, allocator: std.mem.Allocator) void {
-            // Paths are owned by SSTableManager - no need to free them here
-            _ = allocator;
+            // Free owned path copies to prevent memory leaks
+            for (self.sstables.items) |info| {
+                allocator.free(info.path);
+            }
             self.sstables.deinit();
         }
 
         /// Add an SSTable to this tier with size tracking for compaction decisions
         ///
-        /// Stores path reference (no copying) and updates total tier size metrics.
-        /// Path ownership remains with SSTableManager.
+        /// Creates owned copy of path to avoid ArrayList invalidation issues.
+        /// TierState takes ownership of the path copy.
         pub fn add_sstable(
             self: *TierState,
+            allocator: std.mem.Allocator,
             path: []const u8,
             size: u64,
             level: u8,
         ) !void {
+            // CRITICAL: Create owned copy to avoid ArrayList invalidation
+            // SSTableManager's sstable_paths can be reallocated, invalidating slice references
+            const path_copy = try allocator.dupe(u8, path);
             try self.sstables.append(.{
-                .path = path, // Store reference, don't copy
+                .path = path_copy, // Store owned copy, not reference
                 .size = size,
                 .level = level,
             });
@@ -153,10 +159,10 @@ pub const TieredCompactionManager = struct {
 
         /// Remove an SSTable from this tier and update size tracking
         ///
-        /// Finds the SSTable by path and adjusts total tier size.
-        /// Path memory remains owned by SSTableManager.
+        /// Finds the SSTable by path, frees owned path copy, and adjusts total tier size.
         pub fn remove_sstable(
             self: *TierState,
+            allocator: std.mem.Allocator,
             path: []const u8,
         ) void {
             for (self.sstables.items, 0..) |info, i| {
@@ -164,6 +170,8 @@ pub const TieredCompactionManager = struct {
                     // Prevent size accounting underflow
                     fatal_assert(self.total_size >= info.size, "Tier size underflow: removing {} bytes from {} total", .{ info.size, self.total_size });
 
+                    // Free the owned path copy
+                    allocator.free(info.path);
                     self.total_size -= info.size;
                     _ = self.sstables.swapRemove(i);
                     return;
@@ -215,6 +223,20 @@ pub const TieredCompactionManager = struct {
         };
     }
 
+    /// Collect all SSTable paths across all tiers for iteration
+    /// Returns array list that caller must free
+    pub fn collect_all_sstable_paths(self: *const TieredCompactionManager, allocator: std.mem.Allocator) !std.array_list.Managed([]const u8) {
+        var paths = std.array_list.Managed([]const u8).init(allocator);
+
+        for (self.tiers) |tier| {
+            for (tier.sstables.items) |info| {
+                try paths.append(info.path);
+            }
+        }
+
+        return paths;
+    }
+
     pub fn deinit(self: *TieredCompactionManager) void {
         for (&self.tiers) |*tier| {
             tier.deinit(self.backing_allocator);
@@ -231,7 +253,7 @@ pub const TieredCompactionManager = struct {
         concurrency.assert_main_thread();
         assert(level < MAX_TIERS);
 
-        try self.tiers[level].add_sstable(path, size, level);
+        try self.tiers[level].add_sstable(self.backing_allocator, path, size, level);
     }
 
     /// Remove an SSTable from tracking using path reference
@@ -239,7 +261,7 @@ pub const TieredCompactionManager = struct {
         concurrency.assert_main_thread();
         assert(level < MAX_TIERS);
 
-        self.tiers[level].remove_sstable(path);
+        self.tiers[level].remove_sstable(self.backing_allocator, path);
     }
 
     /// Check if compaction is needed and return compaction job if so
@@ -333,8 +355,10 @@ pub const TieredCompactionManager = struct {
 
     fn create_l0_compaction_job(self: *TieredCompactionManager) CompactionJob {
         var input_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
+
         for (self.tiers[0].sstables.items) |info| {
-            input_paths.append(info.path) catch unreachable; // Safety: paths are pre-allocated strings
+            // Safety: Paths are stable owned copies from TierState
+            input_paths.append(info.path) catch unreachable;
         }
 
         return CompactionJob{
@@ -364,14 +388,16 @@ pub const TieredCompactionManager = struct {
 
         for (candidates.items) |idx| {
             const info = tier.sstables.items[idx];
-            input_paths.append(info.path) catch unreachable; // Safety: paths are pre-allocated strings
+
+            // Safety: Capacity ensured above via ensureTotalCapacity call
+            input_paths.append(info.path) catch unreachable;
             total_size += info.size;
         }
 
         return CompactionJob{
             .compaction_type = .tier_compaction,
             .input_level = level,
-            .output_level = level, // Same level for size-tiered compaction
+            .output_level = level,
             .input_paths = input_paths,
             .estimated_output_size = total_size,
         };
@@ -451,7 +477,7 @@ pub const CompactionJob = struct {
     };
 
     /// Clean up CompactionJob resources including input_paths ArrayList.
-    /// Must be called to prevent memory leaks from allocated path storage.
+    /// Path strings are owned by TierState, so only ArrayList cleanup is needed.
     pub fn deinit(self: *CompactionJob) void {
         self.input_paths.deinit();
     }
