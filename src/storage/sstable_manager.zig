@@ -213,17 +213,7 @@ pub const SSTableManager = struct {
             .{sstable_paths.items.len},
         );
 
-        // Collect all successfully loaded SSTables and their tombstones upfront
-        // This ensures consistency - we only search SSTables we can validate for tombstones
-        var loaded_sstables = std.array_list.Managed(SSTable).init(self.backing_allocator);
-        defer {
-            for (loaded_sstables.items) |*loaded_sstable| {
-                loaded_sstable.deinit();
-            }
-            loaded_sstables.deinit();
-        }
-
-        // Load all SSTables in reverse order (newer files first)
+        // Search in reverse order (newer files first) for proper tombstone precedence
         var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
@@ -236,40 +226,29 @@ pub const SSTableManager = struct {
                 self.vfs,
                 sstable_path_copy,
             );
+            defer sstable_file.deinit();
 
-            // Only include SSTables that load successfully
+            // Load index only if we need to search this SSTable
             sstable_file.read_index() catch {
-                continue;
+                continue; // Skip corrupted SSTables
             };
 
-            try loaded_sstables.append(sstable_file);
-        }
-
-        // Check all collected tombstones for the requested block
-        var total_tombstones_checked: u32 = 0;
-        for (loaded_sstables.items) |*sstable_file| {
-            total_tombstones_checked += @intCast(sstable_file.tombstone_index.items.len);
+            // Check tombstones first
             for (sstable_file.tombstone_index.items) |tombstone_record| {
                 if (tombstone_record.block_id.eql(block_id)) {
-                    return null;
+                    return null; // Block is tombstoned
                 }
             }
-        }
 
-        // Search for the block in the same SSTables we checked for tombstones
-        for (loaded_sstables.items) |*sstable_file| {
-            if (try sstable_file.find_block_view(block_id)) |parsed_block| {
-                // Debug: Verify we're not returning a tombstoned block
-                if (comptime builtin.mode == .Debug) {
-                    // Double-check that this SSTable doesn't have a tombstone for this block
-                    for (sstable_file.tombstone_index.items) |tombstone_record| {
-                        fatal_assert(
-                            !tombstone_record.block_id.eql(block_id),
-                            "CRITICAL BUG: Returning block {} that has tombstone in same SSTable",
-                            .{block_id},
-                        );
-                    }
+            // Use bloom filter if available
+            if (sstable_file.bloom_filter) |*bloom| {
+                if (!bloom.might_contain(block_id)) {
+                    continue; // Definitely not in this SSTable
                 }
+            }
+
+            // Search for the actual block
+            if (try sstable_file.find_block_view(block_id)) |parsed_block| {
                 return parsed_block;
             }
         }
@@ -278,6 +257,7 @@ pub const SSTableManager = struct {
     }
 
     /// Create a new SSTable from memtable flush with implicit ownership validation.
+    /// Automatically caches the new SSTable for immediate query availability.
     pub fn create_new_sstable_from_memtable(
         self: *SSTableManager,
         owned_blocks: []const OwnedBlock,

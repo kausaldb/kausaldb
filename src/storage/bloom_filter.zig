@@ -268,7 +268,7 @@ test "Bloom filter serialization" {
     const block3 = try BlockId.from_hex("11111111111111111111111111111111");
     const result = deserialized.might_contain(block3);
     // Note: This might be true (false positive) but should usually be false
-    std.debug.print("Absent block result: {}\n", .{result});
+    std.debug.print("Absent block result: {any}\n", .{result});
 }
 
 test "Bloom filter parameter calculation" {
@@ -488,6 +488,75 @@ test "Bloom filter parameter optimization" {
         try std.testing.expect(params.hash_count > 0);
         try std.testing.expect(params.hash_count <= test_case.expected_max_hash);
     }
+}
+
+test "Bloom filter property validation: false negatives and false positive rate" {
+    // This test validates the two critical properties of bloom filters:
+    // 1. ZERO false negatives (correctness requirement)
+    // 2. Low false positive rate (performance requirement)
+    const allocator = std.testing.allocator;
+
+    // Create a bloom filter sized for 10000 items with 1% FPR target
+    const params = BloomFilter.Params.calculate(10000, 0.01);
+    var filter = try BloomFilter.init(allocator, params);
+    defer filter.deinit();
+
+    // Generate test block IDs
+    const present_count = 5000;
+    const absent_count = 5000;
+
+    const present_ids = try allocator.alloc(BlockId, present_count);
+    defer allocator.free(present_ids);
+    const absent_ids = try allocator.alloc(BlockId, absent_count);
+    defer allocator.free(absent_ids);
+
+    // Generate present IDs (0..4999) and add to filter
+    for (present_ids, 0..) |*id, i| {
+        var id_bytes: [16]u8 = undefined;
+        std.mem.writeInt(u128, &id_bytes, i, .little);
+        id.* = BlockId{ .bytes = id_bytes };
+        filter.add(id.*);
+    }
+
+    // Generate absent IDs (5000..9999) - NOT added to filter
+    for (absent_ids, 0..) |*id, i| {
+        var id_bytes: [16]u8 = undefined;
+        std.mem.writeInt(u128, &id_bytes, i + present_count, .little);
+        id.* = BlockId{ .bytes = id_bytes };
+    }
+
+    // Property 1: ZERO false negatives (critical for correctness)
+    var false_negatives: u32 = 0;
+    for (present_ids) |id| {
+        if (!filter.might_contain(id)) {
+            false_negatives += 1;
+        }
+    }
+
+    try std.testing.expectEqual(@as(u32, 0), false_negatives);
+
+    // Property 2: Low false positive rate (< 1% for performance)
+    var false_positives: u32 = 0;
+    for (absent_ids) |id| {
+        if (filter.might_contain(id)) {
+            false_positives += 1;
+        }
+    }
+
+    const fp_rate = @as(f64, @floatFromInt(false_positives)) / @as(f64, @floatFromInt(absent_count));
+
+    // Log statistics for debugging
+    if (fp_rate > 0.01) {
+        std.debug.print("\nBloom filter statistics:\n", .{});
+        std.debug.print("  Present items: {d}\n", .{present_count});
+        std.debug.print("  Absent items tested: {d}\n", .{absent_count});
+        std.debug.print("  False positives: {d}\n", .{false_positives});
+        std.debug.print("  False positive rate: {d:.4}%\n", .{fp_rate * 100});
+        std.debug.print("  Filter parameters: {d} bits, {d} hashes\n", .{ params.bit_count, params.hash_count });
+    }
+
+    // Verify false positive rate is below threshold
+    try std.testing.expect(fp_rate <= 0.02); // Allow 2% to account for statistical variance
 }
 
 test "Bloom filter error handling" {
