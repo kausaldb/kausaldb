@@ -609,6 +609,23 @@ pub const GraphEdge = struct {
             .edge_type = edge_type,
         };
     }
+
+    /// Compare function for sorting edges in deterministic order.
+    /// Sorts by source_id, then target_id, then edge_type.
+    pub fn less_than(context: void, a: GraphEdge, b: GraphEdge) bool {
+        _ = context;
+
+        // First compare source_id
+        const source_cmp = std.mem.order(u8, &a.source_id.bytes, &b.source_id.bytes);
+        if (source_cmp != .eq) return source_cmp == .lt;
+
+        // Then compare target_id
+        const target_cmp = std.mem.order(u8, &a.target_id.bytes, &b.target_id.bytes);
+        if (target_cmp != .eq) return target_cmp == .lt;
+
+        // Finally compare edge_type
+        return @intFromEnum(a.edge_type) < @intFromEnum(b.edge_type);
+    }
 };
 
 test "BlockId basic operations" {

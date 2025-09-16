@@ -334,6 +334,32 @@ pub const GraphEdgeIndex = struct {
 
         // No arena memory to reset since GraphEdge data is stored by value
     }
+
+    /// Collect all edges from the index for SSTable persistence.
+    /// Returns array of all edges that must be freed by caller.
+    /// Used during memtable flush to extract edges before clearing.
+    pub fn collect_edges(self: *const GraphEdgeIndex, allocator: std.mem.Allocator) ![]const GraphEdge {
+        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+
+        const total_edges = self.edge_count();
+        if (total_edges == 0) {
+            return &[_]GraphEdge{};
+        }
+
+        var edges = std.array_list.Managed(GraphEdge).init(allocator);
+        defer edges.deinit();
+        try edges.ensureTotalCapacity(total_edges);
+
+        // Iterate through outgoing edges only to avoid duplicates
+        var iterator = self.outgoing_edges.iterator();
+        while (iterator.next()) |entry| {
+            for (entry.value_ptr.items) |owned_edge| {
+                try edges.append(owned_edge.edge);
+            }
+        }
+
+        return edges.toOwnedSlice();
+    }
 };
 
 const testing = std.testing;

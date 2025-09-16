@@ -37,6 +37,7 @@ const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const BloomFilter = bloom_filter.BloomFilter;
 const ContextBlock = context_block.ContextBlock;
+const EdgeType = context_block.EdgeType;
 const GraphEdge = context_block.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const ParsedBlock = context_block.ParsedBlock;
@@ -62,6 +63,8 @@ pub const SSTable = struct {
     index: std.array_list.Managed(IndexEntry),
     tombstone_count: u32,
     tombstone_index: std.array_list.Managed(TombstoneRecord),
+    edge_count: u32,
+    edge_index: std.array_list.Managed(EdgeIndexEntry),
     bloom_filter: ?BloomFilter,
 
     const MAGIC = [4]u8{ 'S', 'S', 'T', 'B' }; // "SSTB" for SSTable Blocks
@@ -123,27 +126,88 @@ pub const SSTable = struct {
         }
     };
 
+    /// Edge index entry pointing to an edge within the SSTable
+    const EdgeIndexEntry = struct {
+        source_id: BlockId,
+        target_id: BlockId,
+        edge_type: EdgeType,
+        offset: u16,
+
+        const SERIALIZED_SIZE = 16 + 16 + 2 + 2; // source_id + target_id + edge_type + offset
+
+        /// Serialize edge index entry to binary format for on-disk storage
+        pub fn serialize(self: EdgeIndexEntry, buffer: []u8) !void {
+            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+
+            var offset: usize = 0;
+
+            @memcpy(buffer[offset .. offset + 16], &self.source_id.bytes);
+            offset += 16;
+
+            @memcpy(buffer[offset .. offset + 16], &self.target_id.bytes);
+            offset += 16;
+
+            std.mem.writeInt(u16, buffer[offset..][0..2], @intFromEnum(self.edge_type), .little);
+            offset += 2;
+
+            std.mem.writeInt(u16, buffer[offset..][0..2], self.offset, .little);
+        }
+
+        /// Deserialize edge index entry from binary format stored on disk
+        pub fn deserialize(buffer: []const u8) !EdgeIndexEntry {
+            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+            if (buffer.len < SERIALIZED_SIZE) return error.BufferTooSmall;
+
+            var offset: usize = 0;
+
+            var source_bytes: [16]u8 = undefined;
+            @memcpy(&source_bytes, buffer[offset .. offset + 16]);
+            const source_id = BlockId.from_bytes(source_bytes);
+            offset += 16;
+
+            var target_bytes: [16]u8 = undefined;
+            @memcpy(&target_bytes, buffer[offset .. offset + 16]);
+            const target_id = BlockId.from_bytes(target_bytes);
+            offset += 16;
+
+            const edge_type_raw = std.mem.readInt(u16, buffer[offset..][0..2], .little);
+            const edge_type: EdgeType = @enumFromInt(edge_type_raw);
+            offset += 2;
+
+            const edge_offset = std.mem.readInt(u16, buffer[offset..][0..2], .little);
+
+            return EdgeIndexEntry{
+                .source_id = source_id,
+                .target_id = target_id,
+                .edge_type = edge_type,
+                .offset = edge_offset,
+            };
+        }
+    };
+
     /// File header structure (64-byte aligned)
-    const Header = struct {
+    const Header = extern struct {
         magic: [4]u8, // 4 bytes: "SSTB"
         format_version: u16, // 2 bytes: Major.minor versioning
         flags: u16, // 2 bytes: Feature flags
         index_offset: u64, // 8 bytes: Offset to index section
-        block_count: u32, // 4 bytes: Number of blocks
-        file_checksum: u32, // 4 bytes: CRC32 of entire file
         created_timestamp: u64, // 8 bytes: Unix timestamp
         bloom_filter_offset: u64, // 8 bytes: Offset to bloom filter
-        bloom_filter_size: u32, // 4 bytes: Size of serialized bloom filter
-        tombstone_count: u32, // 4 bytes: Number of tombstones
         tombstone_offset: u64, // 8 bytes: Offset to tombstone section
-        reserved: [8]u8, // 8 bytes: Reserved for future use
+        edge_offset: u64, // 8 bytes: Offset to edge section
+        block_count: u32, // 4 bytes: Number of blocks
+        file_checksum: u32, // 4 bytes: CRC32 of entire file
+        bloom_filter_size: u32, // 4 bytes: Size of serialized bloom filter
+        tombstone_count: u16, // 2 bytes: Number of tombstones (max 65K per SSTable)
+        edge_count: u16, // 2 bytes: Number of edges (max 65K per SSTable)
 
         comptime {
             comptime_assert(@sizeOf(Header) == 64, "SSTable Header must be exactly 64 bytes for cache-aligned performance");
             comptime_assert(HEADER_SIZE == @sizeOf(Header), "HEADER_SIZE constant must match actual Header struct size");
             comptime_assert(
-                4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u32) +
-                    @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + 8 == 64,
+                4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u64) +
+                    @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) +
+                    @sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) == 64,
                 "SSTable Header field sizes must sum to exactly 64 bytes",
             );
         }
@@ -169,28 +233,31 @@ pub const SSTable = struct {
             std.mem.writeInt(u64, buffer[offset..][0..8], self.index_offset, .little);
             offset += 8;
 
-            std.mem.writeInt(u32, buffer[offset..][0..4], self.block_count, .little);
-            offset += 4;
-
-            std.mem.writeInt(u32, buffer[offset..][0..4], self.file_checksum, .little);
-            offset += 4;
-
             std.mem.writeInt(u64, buffer[offset..][0..8], self.created_timestamp, .little);
             offset += 8;
 
             std.mem.writeInt(u64, buffer[offset..][0..8], self.bloom_filter_offset, .little);
             offset += 8;
 
-            std.mem.writeInt(u32, buffer[offset..][0..4], self.bloom_filter_size, .little);
-            offset += 4;
-
-            std.mem.writeInt(u32, buffer[offset..][0..4], self.tombstone_count, .little);
-            offset += 4;
-
             std.mem.writeInt(u64, buffer[offset..][0..8], self.tombstone_offset, .little);
             offset += 8;
 
-            @memset(buffer[offset .. offset + 8], 0);
+            std.mem.writeInt(u64, buffer[offset..][0..8], self.edge_offset, .little);
+            offset += 8;
+
+            std.mem.writeInt(u32, buffer[offset..][0..4], self.block_count, .little);
+            offset += 4;
+
+            std.mem.writeInt(u32, buffer[offset..][0..4], self.file_checksum, .little);
+            offset += 4;
+
+            std.mem.writeInt(u32, buffer[offset..][0..4], self.bloom_filter_size, .little);
+            offset += 4;
+
+            std.mem.writeInt(u16, buffer[offset..][0..2], self.tombstone_count, .little);
+            offset += 2;
+
+            std.mem.writeInt(u16, buffer[offset..][0..2], self.edge_count, .little);
         }
 
         /// Deserialize SSTable header from binary format during file loading
@@ -217,31 +284,31 @@ pub const SSTable = struct {
             const index_offset = std.mem.readInt(u64, buffer[offset..][0..8], .little);
             offset += 8;
 
-            const block_count = std.mem.readInt(u32, buffer[offset..][0..4], .little);
-            offset += 4;
-
-            const file_checksum = std.mem.readInt(u32, buffer[offset..][0..4], .little);
-            offset += 4;
-
             const created_timestamp = std.mem.readInt(u64, buffer[offset..][0..8], .little);
             offset += 8;
 
             const bloom_filter_offset = std.mem.readInt(u64, buffer[offset..][0..8], .little);
             offset += 8;
 
-            const bloom_filter_size = std.mem.readInt(u32, buffer[offset..][0..4], .little);
-            offset += 4;
-
-            const tombstone_count = std.mem.readInt(u32, buffer[offset..][0..4], .little);
-            offset += 4;
-
             const tombstone_offset = std.mem.readInt(u64, buffer[offset..][0..8], .little);
             offset += 8;
 
-            const reserved = buffer[offset .. offset + 8];
-            for (reserved) |byte| {
-                if (byte != 0) return error.InvalidReservedBytes;
-            }
+            const edge_offset = std.mem.readInt(u64, buffer[offset..][0..8], .little);
+            offset += 8;
+
+            const block_count = std.mem.readInt(u32, buffer[offset..][0..4], .little);
+            offset += 4;
+
+            const file_checksum = std.mem.readInt(u32, buffer[offset..][0..4], .little);
+            offset += 4;
+
+            const bloom_filter_size = std.mem.readInt(u32, buffer[offset..][0..4], .little);
+            offset += 4;
+
+            const tombstone_count = std.mem.readInt(u16, buffer[offset..][0..2], .little);
+            offset += 2;
+
+            const edge_count = std.mem.readInt(u16, buffer[offset..][0..2], .little);
 
             return Header{
                 .magic = MAGIC,
@@ -255,7 +322,8 @@ pub const SSTable = struct {
                 .bloom_filter_size = bloom_filter_size,
                 .tombstone_count = tombstone_count,
                 .tombstone_offset = tombstone_offset,
-                .reserved = [_]u8{0} ** 8,
+                .edge_count = edge_count,
+                .edge_offset = edge_offset,
             };
         }
     };
@@ -283,6 +351,8 @@ pub const SSTable = struct {
             .index = std.array_list.Managed(IndexEntry).init(backing),
             .tombstone_count = 0,
             .tombstone_index = std.array_list.Managed(TombstoneRecord).init(backing),
+            .edge_count = 0,
+            .edge_index = std.array_list.Managed(EdgeIndexEntry).init(backing),
             .bloom_filter = null,
         };
     }
@@ -293,10 +363,11 @@ pub const SSTable = struct {
         self.backing_allocator.free(self.file_path);
         self.index.deinit();
         self.tombstone_index.deinit();
+        self.edge_index.deinit();
     }
 
-    /// Write blocks and tombstones to SSTable file in sorted order
-    pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord) !void {
+    /// Write blocks, tombstones, and edges to SSTable file in sorted order
+    pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord, edges: []const GraphEdge) !void {
         const BlocksType = @TypeOf(blocks);
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
@@ -426,6 +497,32 @@ pub const SSTable = struct {
             try self.tombstone_index.append(tombstone_record);
         }
 
+        // Copy edges and sort them for deterministic storage order
+        const sorted_edges = try self.arena_coordinator.allocator().alloc(GraphEdge, edges.len);
+        defer self.arena_coordinator.allocator().free(sorted_edges);
+        @memcpy(sorted_edges, edges);
+
+        std.mem.sort(GraphEdge, sorted_edges, {}, GraphEdge.less_than);
+
+        // Store edge offset before writing edges
+        const edge_offset = current_offset;
+
+        // Write edges
+        for (sorted_edges) |edge| {
+            var edge_buffer: [EdgeIndexEntry.SERIALIZED_SIZE]u8 = undefined;
+            const edge_entry = EdgeIndexEntry{
+                .source_id = edge.source_id,
+                .target_id = edge.target_id,
+                .edge_type = edge.edge_type,
+                .offset = 0, // Offset within edge section (relative to edge_offset)
+            };
+            try edge_entry.serialize(&edge_buffer);
+            _ = try file.write(&edge_buffer);
+            current_offset += EdgeIndexEntry.SERIALIZED_SIZE;
+
+            try self.edge_index.append(edge_entry);
+        }
+
         const index_offset = current_offset;
         for (self.index.items) |entry| {
             var entry_buffer: [IndexEntry.SERIALIZED_SIZE]u8 = undefined;
@@ -462,15 +559,15 @@ pub const SSTable = struct {
             .format_version = VERSION,
             .flags = 0,
             .index_offset = index_offset,
-            // Safety: Block count bounded by storage limits, timestamp always fits in u32 range
-            .block_count = @intCast(context_blocks.len),
-            .file_checksum = file_checksum,
             .created_timestamp = @intCast(std.time.timestamp()),
             .bloom_filter_offset = bloom_filter_offset,
+            .tombstone_offset = if (sorted_tombstones.len > 0) tombstone_offset else 0,
+            .edge_offset = if (sorted_edges.len > 0) edge_offset else 0,
+            .block_count = @intCast(context_blocks.len),
+            .file_checksum = file_checksum,
             .bloom_filter_size = bloom_filter_size,
             .tombstone_count = @intCast(sorted_tombstones.len),
-            .tombstone_offset = if (sorted_tombstones.len > 0) tombstone_offset else 0,
-            .reserved = [_]u8{0} ** 8,
+            .edge_count = @intCast(sorted_edges.len),
         };
 
         try header.serialize(&header_buffer);
@@ -480,6 +577,7 @@ pub const SSTable = struct {
         // Safety: Block count bounded by storage format limits and fits in u32
         self.block_count = @intCast(context_blocks.len);
         self.tombstone_count = @intCast(sorted_tombstones.len);
+        self.edge_count = @intCast(sorted_edges.len);
 
         // Transfer ownership
         self.bloom_filter = new_bloom;
@@ -554,6 +652,7 @@ pub const SSTable = struct {
         const header = try Header.deserialize(&header_buffer);
         self.block_count = header.block_count;
         self.tombstone_count = header.tombstone_count;
+        self.edge_count = header.edge_count;
 
         if (header.file_checksum != 0) {
             const content_end = if (header.bloom_filter_size > 0)
@@ -612,6 +711,23 @@ pub const SSTable = struct {
 
                 const tombstone_record = try TombstoneRecord.deserialize(&tombstone_buffer);
                 try self.tombstone_index.append(tombstone_record);
+            }
+        }
+
+        // Load edges if present
+        if (header.edge_count > 0) {
+            // Safety: Edge offset validated during header parsing
+            _ = try file.seek(header.edge_offset, .start);
+
+            self.edge_index.clearRetainingCapacity();
+            try self.edge_index.ensureTotalCapacity(header.edge_count);
+
+            for (0..header.edge_count) |_| {
+                var edge_buffer: [EdgeIndexEntry.SERIALIZED_SIZE]u8 = undefined;
+                _ = try file.read(&edge_buffer);
+
+                const edge_entry = try EdgeIndexEntry.deserialize(&edge_buffer);
+                try self.edge_index.append(edge_entry);
             }
         }
     }
@@ -750,6 +866,46 @@ pub const SSTable = struct {
             );
         }
     }
+
+    /// Find all outgoing edges from a source block in this SSTable.
+    /// Returns edges as GraphEdge array that must be freed by caller.
+    pub fn find_outgoing_edges(self: *const SSTable, source_id: BlockId, allocator: std.mem.Allocator) ![]GraphEdge {
+        var edges = std.array_list.Managed(GraphEdge).init(allocator);
+        defer edges.deinit();
+
+        for (self.edge_index.items) |edge_entry| {
+            if (edge_entry.source_id.eql(source_id)) {
+                const edge = GraphEdge{
+                    .source_id = edge_entry.source_id,
+                    .target_id = edge_entry.target_id,
+                    .edge_type = edge_entry.edge_type,
+                };
+                try edges.append(edge);
+            }
+        }
+
+        return edges.toOwnedSlice();
+    }
+
+    /// Find all incoming edges to a target block in this SSTable.
+    /// Returns edges as GraphEdge array that must be freed by caller.
+    pub fn find_incoming_edges(self: *const SSTable, target_id: BlockId, allocator: std.mem.Allocator) ![]GraphEdge {
+        var edges = std.array_list.Managed(GraphEdge).init(allocator);
+        defer edges.deinit();
+
+        for (self.edge_index.items) |edge_entry| {
+            if (edge_entry.target_id.eql(target_id)) {
+                const edge = GraphEdge{
+                    .source_id = edge_entry.source_id,
+                    .target_id = edge_entry.target_id,
+                    .edge_type = edge_entry.edge_type,
+                };
+                try edges.append(edge);
+            }
+        }
+
+        return edges.toOwnedSlice();
+    }
 };
 
 /// Iterator for reading all blocks from an SSTable in sorted order
@@ -883,6 +1039,10 @@ pub const Compactor = struct {
         var all_tombstones = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
         defer all_tombstones.deinit();
 
+        // Collect edges from all input SSTables
+        var all_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
+        defer all_edges.deinit();
+
         var total_capacity: u32 = 0;
         for (input_tables) |table| {
             total_capacity += table.block_count;
@@ -901,16 +1061,28 @@ pub const Compactor = struct {
             for (table.tombstone_index.items) |tombstone_record| {
                 try all_tombstones.append(tombstone_record);
             }
+
+            // Collect edges from this table
+            for (table.edge_index.items) |edge_entry| {
+                const edge = GraphEdge{
+                    .source_id = edge_entry.source_id,
+                    .target_id = edge_entry.target_id,
+                    .edge_type = edge_entry.edge_type,
+                };
+                try all_edges.append(edge);
+            }
         }
 
         const unique_blocks = try self.dedup_blocks(all_blocks.items);
         const unique_tombstones = try self.dedup_and_gc_tombstones(all_tombstones.items);
+        const unique_edges = try self.dedup_edges(all_edges.items);
 
         defer self.backing_allocator.free(unique_blocks);
         defer self.backing_allocator.free(unique_tombstones);
+        defer self.backing_allocator.free(unique_edges);
         // Arena coordinator handles cleanup of cloned block strings automatically
 
-        try output_table.write_blocks(unique_blocks, unique_tombstones);
+        try output_table.write_blocks(unique_blocks, unique_tombstones, unique_edges);
 
         for (input_paths) |path| {
             self.filesystem.remove(path) catch |err| {
@@ -1001,17 +1173,50 @@ pub const Compactor = struct {
             if (prev_id != null and tombstone_record.block_id.eql(prev_id.?)) {
                 continue;
             }
-            
+
             // Skip tombstones that can be garbage collected
             if (tombstone_record.can_garbage_collect(current_timestamp, gc_grace_seconds)) {
                 continue;
             }
-            
+
             try unique.append(tombstone_record);
             prev_id = tombstone_record.block_id;
         }
 
         self.backing_allocator.free(sorted);
+        return unique.toOwnedSlice();
+    }
+
+    /// Deduplicate edges during compaction.
+    /// Sorts edges and removes duplicates to maintain consistent state.
+    fn dedup_edges(self: *Compactor, edges: []GraphEdge) ![]GraphEdge {
+        if (edges.len == 0) return try self.backing_allocator.alloc(GraphEdge, 0);
+
+        const sorted = try self.backing_allocator.dupe(GraphEdge, edges);
+        defer self.backing_allocator.free(sorted);
+
+        std.mem.sort(GraphEdge, sorted, {}, GraphEdge.less_than);
+
+        var unique = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
+        defer unique.deinit();
+
+        try unique.ensureTotalCapacity(sorted.len);
+
+        var prev_edge: ?GraphEdge = null;
+        for (sorted) |edge| {
+            // Skip exact duplicates
+            if (prev_edge != null and
+                edge.source_id.eql(prev_edge.?.source_id) and
+                edge.target_id.eql(prev_edge.?.target_id) and
+                edge.edge_type == prev_edge.?.edge_type)
+            {
+                continue;
+            }
+
+            try unique.append(edge);
+            prev_edge = edge;
+        }
+
         return unique.toOwnedSlice();
     }
 };

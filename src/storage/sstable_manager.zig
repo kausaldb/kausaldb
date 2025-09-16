@@ -35,6 +35,7 @@ const TombstoneRecord = tombstone.TombstoneRecord;
 const VFS = vfs.VFS;
 const ContextBlock = context_block.ContextBlock;
 const BlockId = context_block.BlockId;
+const GraphEdge = context_block.GraphEdge;
 const ParsedBlock = context_block.ParsedBlock;
 const SSTable = sstable.SSTable;
 const TieredCompactionManager = tiered_compaction.TieredCompactionManager;
@@ -154,7 +155,11 @@ pub const SSTableManager = struct {
         defer sstable_paths.deinit();
 
         // Basic safety validation for the collected paths
-        fatal_assert(sstable_paths.items.len < 10000, "Excessive SSTable count {} suggests corruption", .{sstable_paths.items.len});
+        fatal_assert(
+            sstable_paths.items.len < 10000,
+            "Excessive SSTable count {} suggests corruption",
+            .{sstable_paths.items.len},
+        );
 
         // Search in reverse order (newer files first) for better performance
         var i: usize = sstable_paths.items.len;
@@ -167,7 +172,10 @@ pub const SSTableManager = struct {
 
             // CRITICAL: Track SSTable index loading failures,
             sstable_file.read_index() catch |err| {
-                log.warn("SSTable index loading failed for '{s}': {any} - block lookup will fail for this SSTable", .{ sstable_path, err });
+                log.warn(
+                    "SSTable index loading failed for '{s}': {any} - block lookup will fail for this SSTable",
+                    .{ sstable_path, err },
+                );
                 continue; // Skip this SSTable but log the failure
             };
             defer sstable_file.deinit();
@@ -199,7 +207,11 @@ pub const SSTableManager = struct {
         defer sstable_paths.deinit();
 
         // Basic safety validation for the collected paths
-        fatal_assert(sstable_paths.items.len < 10000, "Excessive SSTable count {} suggests corruption", .{sstable_paths.items.len});
+        fatal_assert(
+            sstable_paths.items.len < 10000,
+            "Excessive SSTable count {} suggests corruption",
+            .{sstable_paths.items.len},
+        );
 
         // Collect all successfully loaded SSTables and their tombstones upfront
         // This ensures consistency - we only search SSTables we can validate for tombstones
@@ -218,7 +230,12 @@ pub const SSTableManager = struct {
             const sstable_path = sstable_paths.items[i];
 
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.vfs, sstable_path_copy);
+            var sstable_file = SSTable.init(
+                self.arena_coordinator,
+                self.arena_coordinator.allocator(),
+                self.vfs,
+                sstable_path_copy,
+            );
 
             // Only include SSTables that load successfully
             sstable_file.read_index() catch {
@@ -246,7 +263,11 @@ pub const SSTableManager = struct {
                 if (comptime builtin.mode == .Debug) {
                     // Double-check that this SSTable doesn't have a tombstone for this block
                     for (sstable_file.tombstone_index.items) |tombstone_record| {
-                        fatal_assert(!tombstone_record.block_id.eql(block_id), "CRITICAL BUG: Returning block {} that has tombstone in same SSTable", .{block_id});
+                        fatal_assert(
+                            !tombstone_record.block_id.eql(block_id),
+                            "CRITICAL BUG: Returning block {} that has tombstone in same SSTable",
+                            .{block_id},
+                        );
                     }
                 }
                 return parsed_block;
@@ -257,17 +278,22 @@ pub const SSTableManager = struct {
     }
 
     /// Create a new SSTable from memtable flush with implicit ownership validation.
-    pub fn create_new_sstable_from_memtable(self: *SSTableManager, owned_blocks: []const OwnedBlock, tombstones: []const TombstoneRecord) !void {
+    pub fn create_new_sstable_from_memtable(
+        self: *SSTableManager,
+        owned_blocks: []const OwnedBlock,
+        tombstones: []const TombstoneRecord,
+        edges: []const GraphEdge,
+    ) !void {
         concurrency.assert_main_thread();
 
-        if (owned_blocks.len == 0 and tombstones.len == 0) return; // Nothing to flush
+        if (owned_blocks.len == 0 and tombstones.len == 0 and edges.len == 0) return; // Nothing to flush
 
         // Validate that blocks can be read for SSTable creation from memtable
         for (owned_blocks) |*owned_block| {
             _ = owned_block.read(.memtable_manager);
         }
 
-        return self.create_new_sstable_internal(owned_blocks, tombstones, .memtable_manager);
+        return self.create_new_sstable_internal(owned_blocks, tombstones, edges, .memtable_manager);
     }
 
     /// Create a new SSTable from owned blocks with explicit access validation.
@@ -283,13 +309,14 @@ pub const SSTableManager = struct {
             _ = owned_block.read(accessor); // Validates access permission
         }
 
-        return self.create_new_sstable_internal(owned_blocks, &[_]TombstoneRecord{}, accessor);
+        return self.create_new_sstable_internal(owned_blocks, &[_]TombstoneRecord{}, &[_]GraphEdge{}, accessor);
     }
 
     fn create_new_sstable_internal(
         self: *SSTableManager,
         owned_blocks: []const OwnedBlock,
         tombstones: []const TombstoneRecord,
+        edges: []const GraphEdge,
         comptime accessor: BlockOwnership,
     ) !void {
         const sstable_filename = try std.fmt.allocPrint(
@@ -326,7 +353,7 @@ pub const SSTableManager = struct {
         const sstable_path_copy = try self.backing_allocator.dupe(u8, sstable_filename);
         var new_sstable = SSTable.init(self.arena_coordinator, self.backing_allocator, self.vfs, sstable_path_copy);
         defer new_sstable.deinit();
-        try new_sstable.write_blocks(sorted_blocks, tombstones);
+        try new_sstable.write_blocks(sorted_blocks, tombstones, edges);
 
         // Register path in single ownership system and get reference
         const path_index = try self.register_sstable_path(sstable_filename);
@@ -449,7 +476,8 @@ pub const SSTableManager = struct {
                 .operation = "sstable_magic_validation",
                 .file_path = file_path,
                 .expected_value = std.mem.readInt(u32, "SSTB", .little),
-                // Safety: Pointer cast with type compatibility validated\n                .actual_value = std.mem.readInt(u32, @ptrCast(magic), .little),
+                // Safety: Pointer cast with type compatibility validated
+                .actual_value = std.mem.readInt(u32, @ptrCast(magic), .little),
             };
             error_context.log_storage_error(error.InvalidMagic, context);
             return error.InvalidMagic;
@@ -510,7 +538,11 @@ pub const SSTableManager = struct {
 
             // Corruption tracking: Validate path before append
             if (builtin.mode == .Debug) {
-                fatal_assert(full_path.len > 0 and full_path.len < 4096, "Invalid path length: {}, path: '{s}'", .{ full_path.len, full_path });
+                fatal_assert(
+                    full_path.len > 0 and full_path.len < 4096,
+                    "Invalid path length: {}, path: '{s}'",
+                    .{ full_path.len, full_path },
+                );
                 fatal_assert(@intFromPtr(full_path.ptr) != 0, "Path pointer is null", .{});
             }
 
@@ -579,12 +611,18 @@ pub const SSTableManager = struct {
 
         if (self.sstable_paths.items.len > 0) {
             if (@intFromPtr(self.sstable_paths.items.ptr) == 0) {
-                log.err("CORRUPTION DETECTED [{s}]: ArrayList items pointer null with len={}", .{ context, self.sstable_paths.items.len });
+                log.err(
+                    "CORRUPTION DETECTED [{s}]: ArrayList items pointer null with len={}",
+                    .{ context, self.sstable_paths.items.len },
+                );
                 return error.CorruptedSSTablePaths;
             }
 
             if (self.sstable_paths.capacity < self.sstable_paths.items.len) {
-                log.err("CORRUPTION DETECTED [{s}]: ArrayList capacity {} < len {}", .{ context, self.sstable_paths.capacity, self.sstable_paths.items.len });
+                log.err(
+                    "CORRUPTION DETECTED [{s}]: ArrayList capacity {} < len {}",
+                    .{ context, self.sstable_paths.capacity, self.sstable_paths.items.len },
+                );
                 return error.CorruptedSSTablePaths;
             }
         }
@@ -618,56 +656,26 @@ pub const SSTableManager = struct {
             }
 
             if (total_chars > 0 and printable_chars * 100 / total_chars < 50) {
-                log.err("CORRUPTION DETECTED [{s}]: Path at index {} has {}% printable chars, likely corrupted: '{any}'", .{ context, i, printable_chars * 100 / total_chars, path[0..@min(path.len, 32)] });
+                log.err(
+                    "CORRUPTION DETECTED [{s}]: Path at index {} has {}% printable chars, likely corrupted: '{any}'",
+                    .{ context, i, printable_chars * 100 / total_chars, path[0..@min(path.len, 32)] },
+                );
                 return error.CorruptedSSTablePaths;
             }
         }
 
         // Log successful validation in debug mode
         if (builtin.mode == .Debug and self.sstable_paths.items.len > 0) {
-            log.debug("ArrayList integrity OK [{s}]: len={}, cap={}, ptr={}, first_path='{s}'", .{ context, self.sstable_paths.items.len, self.sstable_paths.capacity, @intFromPtr(self.sstable_paths.items.ptr), if (self.sstable_paths.items.len > 0) self.sstable_paths.items[0] else "none" });
-        }
-    }
-
-    /// Enhanced periodic validation that logs detailed memory state for corruption debugging.
-    /// Call this from various points to track when corruption occurs.
-    pub fn debug_validate_with_timing(
-        self: *const SSTableManager,
-        context: []const u8,
-        operation_details: []const u8,
-    ) void {
-        if (builtin.mode != .Debug) return;
-
-        const list_addr = @intFromPtr(&self.sstable_paths);
-        const items_ptr = if (self.sstable_paths.items.len > 0) @intFromPtr(self.sstable_paths.items.ptr) else 0;
-
-        log.debug("TIMING CHECK [{s}] {s}: ArrayList@0x{X} len={} cap={} items@0x{X}", .{ context, operation_details, list_addr, self.sstable_paths.items.len, self.sstable_paths.capacity, items_ptr });
-
-        // Quick corruption check without error propagation
-        if (self.sstable_paths.items.len > 1000000) {
-            log.err("CORRUPTION TIMING [{s}]: ArrayList len corrupted to {} during {s}", .{ context, self.sstable_paths.items.len, operation_details });
-            return;
-        }
-
-        // Sample first few paths for corruption
-        const sample_count = @min(self.sstable_paths.items.len, 3);
-        for (self.sstable_paths.items[0..sample_count], 0..) |path, i| {
-            if (path.len > 4096) {
-                log.err("CORRUPTION TIMING [{s}]: Path {} corrupted (len={}) during {s}", .{ context, i, path.len, operation_details });
-                return;
-            }
-
-            if (path.len > 0) {
-                var printable: u32 = 0;
-                const check_len = @min(path.len, 16);
-                for (path[0..check_len]) |c| {
-                    if (c >= 32 and c <= 126) printable += 1;
-                }
-                if (printable * 100 / check_len < 50) {
-                    log.err("CORRUPTION TIMING [{s}]: Path {} has garbled content during {s}: {any}", .{ context, i, operation_details, path[0..check_len] });
-                    return;
-                }
-            }
+            log.debug(
+                "ArrayList integrity OK [{s}]: len={}, cap={}, ptr={}, first_path='{s}'",
+                .{
+                    context, self.sstable_paths.items.len, self.sstable_paths.capacity,
+                    @intFromPtr(
+                        self.sstable_paths.items.ptr,
+                    ),
+                    if (self.sstable_paths.items.len > 0) self.sstable_paths.items[0] else "none",
+                },
+            );
         }
     }
 
@@ -724,6 +732,146 @@ pub const SSTableManager = struct {
             assert_fmt(self.data_dir.len < 4096, "Data directory path too long: {} bytes", .{self.data_dir.len});
             assert_fmt(@intFromPtr(self.data_dir.ptr) != 0, "Data directory pointer is null with length {}", .{self.data_dir.len});
         }
+    }
+
+    /// Find all outgoing edges from a source block across all SSTables.
+    /// Filters out edges to deleted blocks using tombstone validation.
+    pub fn find_outgoing_edges_in_sstables(
+        self: *const SSTableManager,
+        source_id: BlockId,
+        temp_allocator: std.mem.Allocator,
+    ) ![]GraphEdge {
+        var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
+        defer sstable_paths.deinit();
+
+        // Collect all SSTables and tombstones for validation
+        var loaded_sstables = std.array_list.Managed(SSTable).init(temp_allocator);
+        defer {
+            for (loaded_sstables.items) |*loaded_sstable| {
+                loaded_sstable.deinit();
+            }
+            loaded_sstables.deinit();
+        }
+
+        // Load all SSTables (newer files first for tombstone precedence)
+        var i: usize = sstable_paths.items.len;
+        while (i > 0) {
+            i -= 1;
+            const sstable_path = sstable_paths.items[i];
+
+            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
+
+            sstable_file.read_index() catch {
+                sstable_file.deinit();
+                continue;
+            };
+
+            try loaded_sstables.append(sstable_file);
+        }
+
+        var all_edges = std.array_list.Managed(GraphEdge).init(temp_allocator);
+        defer all_edges.deinit();
+
+        // Collect edges from all SSTables and filter against tombstones
+        for (loaded_sstables.items) |*sstable_file| {
+            const edges = try sstable_file.find_outgoing_edges(source_id, temp_allocator);
+            defer temp_allocator.free(edges);
+
+            edge_loop: for (edges) |edge| {
+                // Check if target block is tombstoned in any SSTable
+                for (loaded_sstables.items) |*check_sstable| {
+                    for (check_sstable.tombstone_index.items) |tombstone_record| {
+                        if (tombstone_record.block_id.eql(edge.target_id)) {
+                            continue :edge_loop; // Skip tombstoned target
+                        }
+                    }
+                }
+
+                // Also check if source block is tombstoned
+                for (loaded_sstables.items) |*check_sstable| {
+                    for (check_sstable.tombstone_index.items) |tombstone_record| {
+                        if (tombstone_record.block_id.eql(edge.source_id)) {
+                            continue :edge_loop; // Skip tombstoned source
+                        }
+                    }
+                }
+
+                try all_edges.append(edge);
+            }
+        }
+
+        return all_edges.toOwnedSlice();
+    }
+
+    /// Find all incoming edges to a target block across all SSTables.
+    /// Filters out edges from deleted blocks using tombstone validation.
+    pub fn find_incoming_edges_in_sstables(
+        self: *const SSTableManager,
+        target_id: BlockId,
+        temp_allocator: std.mem.Allocator,
+    ) ![]GraphEdge {
+        var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
+        defer sstable_paths.deinit();
+
+        // Collect all SSTables and tombstones for validation
+        var loaded_sstables = std.array_list.Managed(SSTable).init(temp_allocator);
+        defer {
+            for (loaded_sstables.items) |*loaded_sstable| {
+                loaded_sstable.deinit();
+            }
+            loaded_sstables.deinit();
+        }
+
+        // Load all SSTables (newer files first for tombstone precedence)
+        var i: usize = sstable_paths.items.len;
+        while (i > 0) {
+            i -= 1;
+            const sstable_path = sstable_paths.items[i];
+
+            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
+
+            sstable_file.read_index() catch {
+                sstable_file.deinit();
+                continue;
+            };
+
+            try loaded_sstables.append(sstable_file);
+        }
+
+        var all_edges = std.array_list.Managed(GraphEdge).init(temp_allocator);
+        defer all_edges.deinit();
+
+        // Collect edges from all SSTables and filter against tombstones
+        for (loaded_sstables.items) |*sstable_file| {
+            const edges = try sstable_file.find_incoming_edges(target_id, temp_allocator);
+            defer temp_allocator.free(edges);
+
+            edge_loop: for (edges) |edge| {
+                // Check if source block is tombstoned in any SSTable
+                for (loaded_sstables.items) |*check_sstable| {
+                    for (check_sstable.tombstone_index.items) |tombstone_record| {
+                        if (tombstone_record.block_id.eql(edge.source_id)) {
+                            continue :edge_loop; // Skip tombstoned source
+                        }
+                    }
+                }
+
+                // Also check if target block is tombstoned
+                for (loaded_sstables.items) |*check_sstable| {
+                    for (check_sstable.tombstone_index.items) |tombstone_record| {
+                        if (tombstone_record.block_id.eql(edge.target_id)) {
+                            continue :edge_loop; // Skip tombstoned target
+                        }
+                    }
+                }
+
+                try all_edges.append(edge);
+            }
+        }
+
+        return all_edges.toOwnedSlice();
     }
 };
 

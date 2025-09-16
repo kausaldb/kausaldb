@@ -37,7 +37,7 @@ pub const Config = struct {
     /// Maximum memory size for memtable before flushing to SSTable.
     /// Prevents unpredictable memory usage and potential OOM crashes with large blocks.
     memtable_max_size: u64 = DEFAULT_MEMTABLE_MAX_SIZE,
-    
+
     /// Tombstone garbage collection grace period in seconds.
     /// Tombstones older than this period are removed during compaction.
     /// Setting too low risks resurrection bugs; setting too high wastes disk space.

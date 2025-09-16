@@ -551,11 +551,53 @@ pub const MemtableManager = struct {
             try owned_blocks.append(owned_block_ptr.*);
         }
 
-        // Get tombstones before clearing memtable
+        // Get tombstones and edges before clearing memtable
         const tombstones = try self.block_index.collect_tombstones(self.backing_allocator);
         defer self.backing_allocator.free(tombstones);
 
-        try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, tombstones);
+        const edges = try self.graph_index.collect_edges(self.backing_allocator);
+        defer self.backing_allocator.free(edges);
+
+        // Validate that counts fit in u16 limits for SSTable format
+        const max_items_per_sstable = std.math.maxInt(u16);
+
+        if (tombstones.len > max_items_per_sstable or edges.len > max_items_per_sstable) {
+            // Split into multiple SSTables when counts exceed u16 limits
+            // This is a rare case that only happens with very large memtables
+
+            // First SSTable: all blocks + as many tombstones/edges as fit
+            const first_tombstones = tombstones[0..@min(tombstones.len, max_items_per_sstable)];
+            const first_edges = edges[0..@min(edges.len, max_items_per_sstable)];
+            try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, first_tombstones, first_edges);
+
+            // Additional SSTables for overflow tombstones/edges (no blocks)
+            var tombstone_offset = first_tombstones.len;
+            var edge_offset = first_edges.len;
+
+            while (tombstone_offset < tombstones.len or edge_offset < edges.len) {
+                const remaining_tombstones = tombstones.len - tombstone_offset;
+                const remaining_edges = edges.len - edge_offset;
+
+                const tombstone_slice = if (remaining_tombstones > 0)
+                    tombstones[tombstone_offset .. tombstone_offset + @min(remaining_tombstones, max_items_per_sstable)]
+                else
+                    &[_]tombstone.TombstoneRecord{};
+
+                const edge_slice = if (remaining_edges > 0)
+                    edges[edge_offset .. edge_offset + @min(remaining_edges, max_items_per_sstable)]
+                else
+                    &[_]context_block.GraphEdge{};
+
+                // Create overflow SSTable with no blocks
+                try sstable_manager.create_new_sstable_from_memtable(&[_]OwnedBlock{}, tombstone_slice, edge_slice);
+
+                tombstone_offset += tombstone_slice.len;
+                edge_offset += edge_slice.len;
+            }
+        } else {
+            // Normal case: everything fits in one SSTable
+            try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, tombstones, edges);
+        }
 
         self.clear();
 

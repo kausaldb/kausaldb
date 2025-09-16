@@ -38,6 +38,7 @@ const wal = @import("wal.zig");
 
 const assert_fmt = assert_mod.assert_fmt;
 const fatal_assert = assert_mod.fatal_assert;
+const log = std.log.scoped(.storage_engine);
 const testing = std.testing;
 
 const BlockHashMap = std.HashMap(BlockId, OwnedBlock, block_index_mod.BlockIndex.BlockIdContext, std.hash_map.default_max_load_percentage);
@@ -84,6 +85,10 @@ pub const StorageError = error{
     WriteStalled,
     /// Writes blocked due to excessive L0 pressure
     WriteBlocked,
+    /// Edge source block not found
+    EdgeSourceNotFound,
+    /// Edge target block not found
+    EdgeTargetNotFound,
 } || config_mod.ConfigError || wal.WALError || vfs.VFSError || vfs.VFileError;
 
 /// Command to flush memtable to SSTable with coordinated subsystem management.
@@ -821,6 +826,18 @@ pub const StorageEngine = struct {
             return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
         }
 
+        // Validate edge endpoints exist before insertion
+        // This prevents referential integrity violations that would cause model inconsistencies
+        const source_block = try self.find_block(edge.source_id, .temporary);
+        if (source_block == null) {
+            return error.EdgeSourceNotFound;
+        }
+
+        const target_block = try self.find_block(edge.target_id, .temporary);
+        if (target_block == null) {
+            return error.EdgeTargetNotFound;
+        }
+
         const start_time = std.time.nanoTimestamp();
         assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
 
@@ -903,10 +920,27 @@ pub const StorageEngine = struct {
         }
 
         // Check SSTables if not found in memtable
-        // NOTE: SSTable edge querying not yet implemented - edges currently memtable-only
-        // This maintains current behavior until full LSM-tree edge support is added
+        const sstable_edges = self.sstable_manager.find_outgoing_edges_in_sstables(source_id, self.backing_allocator) catch |err| {
+            log.warn("Failed to query outgoing edges from SSTables for source {}: {any}", .{ source_id, err });
+            return &[_]OwnedGraphEdge{};
+        };
+        defer self.backing_allocator.free(sstable_edges);
 
-        return &[_]OwnedGraphEdge{};
+        if (sstable_edges.len == 0) {
+            return &[_]OwnedGraphEdge{};
+        }
+
+        // Convert GraphEdge array to OwnedGraphEdge array
+        const owned_edges = self.backing_allocator.alloc(OwnedGraphEdge, sstable_edges.len) catch |err| {
+            log.warn("Failed to allocate memory for owned edges: {any}", .{err});
+            return &[_]OwnedGraphEdge{};
+        };
+
+        for (sstable_edges, 0..) |edge, i| {
+            owned_edges[i] = OwnedGraphEdge.init(edge, .sstable_manager);
+        }
+
+        return owned_edges;
     }
 
     /// Find all incoming edges to a target block.
@@ -931,9 +965,31 @@ pub const StorageEngine = struct {
         if (edges.len > 0) {
             fatal_assert(@intFromPtr(edges.ptr) != 0, "MemtableManager returned null edges pointer with non-zero length - heap corruption detected", .{});
             fatal_assert(std.mem.eql(u8, &edges[0].edge.target_id.bytes, &target_id.bytes), "First edge has wrong target_id - index corruption detected", .{});
+            return edges;
         }
 
-        return edges;
+        // Check SSTables if not found in memtable
+        const sstable_edges = self.sstable_manager.find_incoming_edges_in_sstables(target_id, self.backing_allocator) catch |err| {
+            log.warn("Failed to query incoming edges from SSTables for target {}: {any}", .{ target_id, err });
+            return &[_]OwnedGraphEdge{};
+        };
+        defer self.backing_allocator.free(sstable_edges);
+
+        if (sstable_edges.len == 0) {
+            return &[_]OwnedGraphEdge{};
+        }
+
+        // Convert GraphEdge array to OwnedGraphEdge array
+        const owned_edges = self.backing_allocator.alloc(OwnedGraphEdge, sstable_edges.len) catch |err| {
+            log.warn("Failed to allocate memory for owned edges: {any}", .{err});
+            return &[_]OwnedGraphEdge{};
+        };
+
+        for (sstable_edges, 0..) |edge, i| {
+            owned_edges[i] = OwnedGraphEdge.init(edge, .sstable_manager);
+        }
+
+        return owned_edges;
     }
 
     /// Get performance metrics for monitoring and debugging.
