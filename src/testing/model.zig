@@ -14,6 +14,7 @@
 //! builds through compile-time optimizations while providing comprehensive
 //! verification during testing and development phases.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const testing = std.testing;
 
@@ -580,6 +581,28 @@ pub const ModelState = struct {
 
             // Mathematical invariant: non-deleted blocks must be findable with correct content
             const system_block = try storage.find_block(model_block.id, .temporary);
+
+            // FORENSIC ANALYSIS: Capture comprehensive state before potential violation
+            if (system_block == null and builtin.mode == .Debug) {
+                log.warn("FORENSIC: Block existence check failed for model block", .{});
+                log.warn("  Block ID: {}", .{model_block.id});
+                log.warn("  Model sequence: {}", .{model_block.sequence_number});
+                log.warn("  Model global sequence: {}", .{self.global_sequence});
+                log.warn("  Operation count: {}", .{self.operation_count});
+                log.warn("  Content hash: 0x{x}", .{model_block.content_hash});
+                log.warn("  Creation timestamp: {}", .{model_block.creation_timestamp});
+                log.warn("  Version: {}", .{model_block.version});
+
+                // Check if this is a sequence divergence issue
+                const sequence_gap = @as(i64, @intCast(self.operation_count)) - @as(i64, @intCast(model_block.sequence_number));
+                log.warn("  Sequence gap (op_count - block_seq): {}", .{sequence_gap});
+
+                // Try to identify recent failed operations that might explain the gap
+                if (sequence_gap > 0) {
+                    log.warn("  POTENTIAL CAUSE: {} operations may have failed in storage but succeeded in sequence counting", .{sequence_gap});
+                }
+            }
+
             if (system_block == null) {
                 fatal_assert(false, "BLOCK EXISTENCE VIOLATION: Model block {} not found in system\n" ++
                     "  Expected version: {}\n" ++

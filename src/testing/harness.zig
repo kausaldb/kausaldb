@@ -7,8 +7,10 @@
 //! Design rationale: Separate core harness logic from workload generation,
 //! model state, and property checking to create focused, maintainable modules.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const testing = std.testing;
+const log = std.log.scoped(.harness);
 
 const assert_mod = @import("../core/assert.zig");
 const ownership = @import("../core/ownership.zig");
@@ -273,8 +275,45 @@ pub const SimulationRunner = struct {
                 try self.inject_fault(fault_type);
             }
 
+            // DEBUG: Log operation details before application
+            if (builtin.mode == .Debug) {
+                switch (operation.op_type) {
+                    .put_block, .update_block => {
+                        if (operation.block) |block| {
+                            log.debug("OP[{}] PUT_BLOCK id={} version={} content_len={}", .{ i, block.id, block.version, block.content.len });
+                        }
+                    },
+                    .delete_block => {
+                        if (operation.block_id) |id| {
+                            log.debug("OP[{}] DELETE_BLOCK id={}", .{ i, id });
+                        }
+                    },
+                    .put_edge => {
+                        if (operation.edge) |edge| {
+                            log.debug("OP[{}] PUT_EDGE src={} -> tgt={}", .{ i, edge.source_id, edge.target_id });
+                        }
+                    },
+                    else => {
+                        log.debug("OP[{}] OTHER type={}", .{ i, operation.op_type });
+                    },
+                }
+            }
+
+            // FORENSIC DEBUG: Log sequence number state before operation
+            if (builtin.mode == .Debug) {
+                log.debug("OP[{}] SEQUENCE_TRACKING: workload_seq={} model_global_seq={} workload_op_count={}", .{ i, operation.sequence_number, self.model.global_sequence, self.workload.operation_count });
+
+                // Track specific blocks that might cause issues
+                if (operation.op_type == .put_block or operation.op_type == .update_block) {
+                    if (operation.block) |block| {
+                        log.debug("OP[{}] BLOCK_TRACKING: id={} version={} content_len={}", .{ i, block.id, block.version, block.content.len });
+                    }
+                }
+            }
+
             // Apply to system first to track actual success/failure
             const success = self.apply_operation_to_system(&operation) catch |err| blk: {
+                log.debug("OP[{}] SYSTEM_ERROR: {any} (workload_seq={})", .{ i, err, operation.sequence_number });
                 // Handle expected failures that shouldn't update model
                 switch (err) {
                     error.WriteStalled, error.WriteBlocked => break :blk false,
@@ -282,13 +321,45 @@ pub const SimulationRunner = struct {
                 }
             };
 
+            // DEBUG: Log operation success/failure with sequence tracking
+            if (builtin.mode == .Debug) {
+                log.debug("OP[{}] SYSTEM_RESULT: success={} workload_seq={}", .{ i, success, operation.sequence_number });
+            }
+
             // Only update model if system operation succeeded
             if (success) {
+                const pre_model_seq = self.model.global_sequence;
                 try self.model.apply_operation(&operation);
+
+                // CRITICAL: Only increment workload counter when operation actually succeeds
+                self.workload.confirm_operation_success();
+
+                const post_model_seq = self.model.global_sequence;
+
+                if (builtin.mode == .Debug) {
+                    log.debug("OP[{}] MODEL_UPDATED: workload_seq={} model_seq_before={} model_seq_after={}", .{ i, operation.sequence_number, pre_model_seq, post_model_seq });
+
+                    // CRITICAL: Check for sequence divergence
+                    const expected_divergence = @as(i64, @intCast(self.workload.operation_count)) - @as(i64, @intCast(post_model_seq));
+                    if (expected_divergence != 0) {
+                        log.warn("OP[{}] SEQUENCE_DIVERGENCE: workload_count={} model_seq={} gap={}", .{ i, self.workload.operation_count, post_model_seq, expected_divergence });
+                    }
+                }
+            } else {
+                if (builtin.mode == .Debug) {
+                    const divergence = @as(i64, @intCast(self.workload.operation_count)) - @as(i64, @intCast(self.model.global_sequence));
+                    log.debug("OP[{}] MODEL_SKIPPED (system failed): workload_seq={} model_seq={} divergence_now={}", .{ i, operation.sequence_number, self.model.global_sequence, divergence });
+                }
             }
 
             // Update peak memory tracking
             self.update_peak_memory();
+
+            // Periodic model/storage consistency verification
+            if (i > 0 and i % 50 == 0 and !self.corruption_expected) {
+                try self.verify_sequence_consistency(@intCast(i));
+                try self.verify_immediate_consistency(@intCast(i));
+            }
 
             // Check flush triggers
             if (self.should_trigger_flush()) {
@@ -310,9 +381,15 @@ pub const SimulationRunner = struct {
         switch (operation.op_type) {
             .put_block, .update_block => {
                 if (operation.block) |block| {
-                    self.put_block_with_backpressure(block) catch {
+                    self.put_block_with_backpressure(block) catch |err| {
+                        if (builtin.mode == .Debug) {
+                            log.debug("PUT_BLOCK_FAILED id={} error={any}", .{ block.id, err });
+                        }
                         return false; // Report failure so model doesn't get updated
                     };
+                    if (builtin.mode == .Debug) {
+                        log.debug("PUT_BLOCK_SUCCESS id={}", .{block.id});
+                    }
                 }
                 return true;
             },
@@ -333,9 +410,15 @@ pub const SimulationRunner = struct {
             },
             .put_edge => {
                 if (operation.edge) |edge| {
-                    self.storage_engine.put_edge(edge) catch {
+                    self.storage_engine.put_edge(edge) catch |err| {
+                        if (builtin.mode == .Debug) {
+                            log.debug("PUT_EDGE_FAILED src={} tgt={} error={any}", .{ edge.source_id, edge.target_id, err });
+                        }
                         return false; // Report failure so model doesn't get updated
                     };
+                    if (builtin.mode == .Debug) {
+                        log.debug("PUT_EDGE_SUCCESS src={} -> tgt={}", .{ edge.source_id, edge.target_id });
+                    }
                 } else {
                     return false; // Null edge is a failure
                 }
@@ -402,6 +485,70 @@ pub const SimulationRunner = struct {
                 // Enable fault testing mode with realistic 100MB disk limit
                 self.sim_vfs.enable_fault_testing_mode();
             },
+        }
+    }
+
+    /// Verify sequence consistency between workload generator and model
+    /// to detect atomicity violations early in simulation
+    fn verify_sequence_consistency(self: *Self, current_operation: u32) !void {
+        const workload_count = self.workload.operation_count;
+        const model_sequence = self.model.global_sequence;
+        const expected_max_divergence = 100; // Allow some divergence due to failed ops
+
+        if (workload_count > model_sequence) {
+            const divergence = workload_count - model_sequence;
+            if (divergence > expected_max_divergence) {
+                log.warn("SEQUENCE DIVERGENCE DETECTED at operation {}", .{current_operation});
+                log.warn("  Workload operation count: {}", .{workload_count});
+                log.warn("  Model global sequence: {}", .{model_sequence});
+                log.warn("  Divergence: {} operations", .{divergence});
+                log.warn("  This may indicate atomicity violations", .{});
+
+                // In debug mode, provide additional forensics
+                if (builtin.mode == .Debug) {
+                    const model_blocks = try self.model.active_block_count();
+                    log.warn("  Active blocks in model: {}", .{model_blocks});
+                    log.warn("  Expected pattern: workload_count >= model_sequence due to failed ops", .{});
+
+                    if (divergence > expected_max_divergence * 2) {
+                        fatal_assert(false, "CRITICAL: Sequence divergence {} exceeds safety threshold {}", .{ divergence, expected_max_divergence * 2 });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Verify immediate model/storage consistency to catch atomicity violations early
+    fn verify_immediate_consistency(self: *Self, current_operation: u32) !void {
+        // Quick sample check: verify a few recent blocks still exist in both model and storage
+        const model_count = try self.model.active_block_count();
+        if (model_count == 0) return;
+
+        const sample_size = @min(model_count, 5);
+        var checked: u32 = 0;
+        var model_iter = self.model.blocks.iterator();
+
+        while (model_iter.next()) |entry| {
+            if (checked >= sample_size) break;
+
+            const model_block = entry.value_ptr;
+            if (model_block.deleted) continue;
+
+            const storage_result = self.storage_engine.find_block(model_block.id, .temporary) catch |err| {
+                log.warn("IMMEDIATE_CONSISTENCY[{}] ERROR: Failed to check block {} - {any}", .{ current_operation, model_block.id, err });
+                continue;
+            };
+
+            if (storage_result == null) {
+                log.warn("IMMEDIATE_CONSISTENCY[{}] VIOLATION: Model has block {} (seq={}) but storage doesn't", .{ current_operation, model_block.id, model_block.sequence_number });
+                // Don't fatal_assert here, just log for forensics
+            }
+
+            checked += 1;
+        }
+
+        if (checked > 0) {
+            log.debug("IMMEDIATE_CONSISTENCY[{}] VERIFIED: {}/{} sampled blocks consistent", .{ current_operation, checked, sample_size });
         }
     }
 

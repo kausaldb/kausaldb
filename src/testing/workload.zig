@@ -134,7 +134,6 @@ pub const WorkloadGenerator = struct {
             .find_edges => try self.generate_find_edges(),
         };
 
-        self.operation_count += 1;
         return operation;
     }
 
@@ -149,7 +148,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_block,
             .block = block,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -172,7 +171,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .update_block,
             .block = block,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -187,7 +186,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_block,
             .block_id = block_id,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -202,7 +201,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .delete_block,
             .block_id = block_id,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -241,7 +240,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_edge,
             .edge = edge,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -256,7 +255,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_edges,
             .block_id = block_id,
-            .sequence_number = self.operation_count,
+            .sequence_number = self.operation_count + 1,
         };
     }
 
@@ -373,6 +372,12 @@ pub const WorkloadGenerator = struct {
             self.allocator.free(block.content);
             self.allocator.free(block.metadata_json);
         }
+    }
+
+    /// Confirm operation success and increment counter
+    /// Only called by SimulationRunner when storage operation succeeds
+    pub fn confirm_operation_success(self: *Self) void {
+        self.operation_count += 1;
     }
 };
 
