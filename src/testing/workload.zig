@@ -65,6 +65,7 @@ pub const WorkloadGenerator = struct {
     block_counter: u32,
     edge_counter: u32,
     config: WorkloadConfig,
+    created_blocks: std.array_list.Managed(BlockId),
 
     const Self = @This();
 
@@ -81,7 +82,12 @@ pub const WorkloadGenerator = struct {
             .block_counter = 0,
             .edge_counter = 0,
             .config = config,
+            .created_blocks = std.array_list.Managed(BlockId).init(allocator),
         };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.created_blocks.deinit();
     }
 
     /// Update workload configuration after initialization
@@ -90,6 +96,7 @@ pub const WorkloadGenerator = struct {
     }
 
     /// Generate next operation in deterministic sequence
+    /// For edge operations, existing_blocks should contain valid block IDs to ensure referential integrity
     pub fn generate_operation(self: *Self) !Operation {
         const random = self.prng.random();
         const total = self.operation_mix.total_weight();
@@ -128,6 +135,10 @@ pub const WorkloadGenerator = struct {
     fn generate_put_block(self: *Self) !Operation {
         self.block_counter += 1;
         const block = try self.create_test_block(self.block_counter);
+
+        // Track this block so we can create edges to it later
+        try self.created_blocks.append(block.id);
+
         return Operation{
             .op_type = .put_block,
             .block = block,
@@ -167,58 +178,26 @@ pub const WorkloadGenerator = struct {
 
     /// Generate put_edge operation between blocks
     fn generate_put_edge(self: *Self) !Operation {
+        // If we don't have enough blocks yet, create a block instead
+        if (self.created_blocks.items.len < 2) {
+            return self.generate_put_block();
+        }
+
         const random = self.prng.random();
 
-        // Generate edge between potentially existing blocks
-        var source_id: BlockId = undefined;
-        var target_id: BlockId = undefined;
+        // Select source and target from created blocks
+        const source_idx = random.uintLessThan(usize, self.created_blocks.items.len);
+        var target_idx = random.uintLessThan(usize, self.created_blocks.items.len);
 
-        if (self.config.create_hub_nodes and self.block_counter > 10 and random.float(f32) < 0.3) {
-            // Create hub node pattern - many edges to/from central nodes
-            const hub_id = self.deterministic_block_id(1); // First block as hub
-            if (random.boolean()) {
-                source_id = hub_id;
-                target_id = if (self.block_counter > 1)
-                    self.deterministic_block_id(random.uintLessThan(u32, self.block_counter - 1) + 2)
-                else
-                    self.random_block_id();
-            } else {
-                source_id = if (self.block_counter > 1)
-                    self.deterministic_block_id(random.uintLessThan(u32, self.block_counter - 1) + 2)
-                else
-                    self.random_block_id();
-                target_id = hub_id;
-            }
-        } else {
-            // Normal edge generation
-            source_id = if (self.block_counter > 0 and random.boolean())
-                self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
-            else
-                self.random_block_id();
-
-            target_id = if (self.block_counter > 0 and random.boolean())
-                self.deterministic_block_id(random.uintLessThan(u32, self.block_counter) + 1)
-            else
-                self.random_block_id();
+        // Ensure source != target
+        while (target_idx == source_idx and self.created_blocks.items.len > 1) {
+            target_idx = random.uintLessThan(usize, self.created_blocks.items.len);
         }
 
-        // Handle self-loops based on configuration
-        if (!self.config.create_self_loops and source_id.eql(target_id)) {
-            // Avoid self-loops
-            target_id = if (self.block_counter > 1)
-                self.deterministic_block_id((self.block_counter % 2) + 1)
-            else
-                self.random_block_id();
-        }
+        const source_id = self.created_blocks.items[source_idx];
+        const target_id = self.created_blocks.items[target_idx];
 
-        // Edge type selection based on configuration
-        var edge_types: []const EdgeType = undefined;
-        if (self.config.use_all_edge_types) {
-            edge_types = &[_]EdgeType{ .imports, .calls, .defined_in, .references, .depends_on };
-        } else {
-            edge_types = &[_]EdgeType{ .imports, .calls, .references };
-        }
-
+        const edge_types = [_]EdgeType{ .calls, .imports, .defined_in, .references };
         const edge_type = edge_types[random.uintLessThan(usize, edge_types.len)];
 
         const edge = GraphEdge{
@@ -228,6 +207,7 @@ pub const WorkloadGenerator = struct {
         };
 
         self.edge_counter += 1;
+
         return Operation{
             .op_type = .put_edge,
             .edge = edge,

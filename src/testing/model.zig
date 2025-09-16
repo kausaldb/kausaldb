@@ -107,18 +107,6 @@ pub const ModelBlock = struct {
         return hash;
     }
 
-    /// Legacy simple hash for backward compatibility during transition.
-    ///
-    /// DEPRECATED: Use cryptographic_hash for new implementations.
-    /// This exists only to maintain compatibility with existing test data.
-    pub fn simple_hash(content: []const u8) u64 {
-        var hash: u64 = 0;
-        for (content) |byte| {
-            hash = hash *% 31 +% byte;
-        }
-        return hash;
-    }
-
     /// Compute validation checksum for internal consistency verification.
     ///
     /// This checksum detects corruption in the model state itself,
@@ -912,6 +900,76 @@ pub const ModelState = struct {
             .state_checksum = self.state_checksum,
             .uptime_ns = current_time - self.creation_timestamp,
         };
+    }
+
+    /// Synchronize model state with storage engine after crash recovery.
+    /// Aligns model state with actual storage contents to prevent consistency violations.
+    pub fn sync_with_storage(self: *Self, storage_engine: anytype) !void {
+        var block_iterator = self.blocks.iterator();
+        while (block_iterator.next()) |entry| {
+            const block_id = entry.key_ptr.*;
+            const model_block = entry.value_ptr;
+
+            const found_in_storage = storage_engine.find_block(block_id, .temporary) catch |err| switch (err) {
+                error.BlockNotFound => null,
+                else => return err,
+            };
+
+            // If block exists in storage, it's not deleted regardless of model state
+            if (found_in_storage != null) {
+                model_block.deleted = false;
+            }
+        }
+
+        // Rebuild edge list from storage
+        self.edges.clearAndFree();
+        const storage_edges = try self.load_all_edges_from_storage(storage_engine);
+        defer self.backing_allocator.free(storage_edges);
+
+        for (storage_edges) |edge| {
+            try self.edges.append(edge);
+        }
+
+        self.update_state_checksum();
+    }
+
+    /// Load all edges from storage engine for model synchronization
+    fn load_all_edges_from_storage(self: *Self, storage_engine: anytype) ![]GraphEdge {
+        var all_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
+
+        // Iterate through all active blocks and collect their outgoing edges
+        var block_iterator = self.blocks.iterator();
+        while (block_iterator.next()) |entry| {
+            const block_id = entry.key_ptr.*;
+            const model_block = entry.value_ptr;
+
+            // Only check active blocks
+            if (model_block.deleted) continue;
+
+            // Get outgoing edges from storage for this block
+            const outgoing_edges = storage_engine.find_outgoing_edges(block_id);
+            for (outgoing_edges) |owned_edge| {
+                const edge = owned_edge.read(.temporary);
+                try all_edges.append(edge.*);
+            }
+        }
+
+        return all_edges.toOwnedSlice();
+    }
+
+    /// Collect list of active (non-deleted) block IDs for safe edge generation
+    pub fn collect_active_block_ids(self: *Self, allocator: std.mem.Allocator) ![]BlockId {
+        var active_ids = std.array_list.Managed(BlockId).init(allocator);
+
+        var block_iterator = self.blocks.iterator();
+        while (block_iterator.next()) |entry| {
+            const model_block = entry.value_ptr;
+            if (!model_block.deleted) {
+                try active_ids.append(entry.key_ptr.*);
+            }
+        }
+
+        return active_ids.toOwnedSlice();
     }
 };
 

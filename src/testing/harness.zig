@@ -256,6 +256,7 @@ pub const SimulationRunner = struct {
         self.sim_vfs.deinit();
         self.allocator.destroy(self.sim_vfs);
         self.model.deinit();
+        self.workload.deinit();
     }
 
     /// Execute specified number of operations with fault injection
@@ -418,6 +419,9 @@ pub const SimulationRunner = struct {
             "/test_db",
         );
         try self.storage_engine.startup();
+
+        // Sync model state with what actually survived the crash
+        try self.model.sync_with_storage(&self.storage_engine);
 
         // Reset operation counters
         self.operations_since_flush = 0;
