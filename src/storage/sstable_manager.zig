@@ -777,23 +777,49 @@ pub const SSTableManager = struct {
             defer temp_allocator.free(edges);
 
             edge_loop: for (edges) |edge| {
-                // Check if target block is tombstoned in any SSTable
+                // FIRST: Check if source block is tombstoned across all SSTables
                 for (loaded_sstables.items) |*check_sstable| {
                     for (check_sstable.tombstone_index.items) |tombstone_record| {
-                        if (tombstone_record.block_id.eql(edge.target_id)) {
-                            continue :edge_loop; // Skip tombstoned target
+                        if (tombstone_record.block_id.eql(edge.source_id)) {
+                            continue :edge_loop; // Skip edges from tombstoned sources
                         }
                     }
                 }
 
-                // Also check if source block is tombstoned
+                // SECOND: Check if target block is tombstoned across all SSTables
                 for (loaded_sstables.items) |*check_sstable| {
                     for (check_sstable.tombstone_index.items) |tombstone_record| {
-                        if (tombstone_record.block_id.eql(edge.source_id)) {
-                            continue :edge_loop; // Skip tombstoned source
+                        if (tombstone_record.block_id.eql(edge.target_id)) {
+                            continue :edge_loop; // Skip edges to tombstoned targets
                         }
                     }
                 }
+
+                // THIRD: Verify source block actually exists in storage
+                var source_exists = false;
+                for (loaded_sstables.items) |*check_sstable| {
+                    if (check_sstable.bloom_filter) |*bloom| {
+                        if (!bloom.might_contain(edge.source_id)) continue;
+                    }
+                    if (check_sstable.find_block_view(edge.source_id) catch null != null) {
+                        source_exists = true;
+                        break;
+                    }
+                }
+                if (!source_exists) continue :edge_loop;
+
+                // FOURTH: Verify target block actually exists in storage
+                var target_exists = false;
+                for (loaded_sstables.items) |*check_sstable| {
+                    if (check_sstable.bloom_filter) |*bloom| {
+                        if (!bloom.might_contain(edge.target_id)) continue;
+                    }
+                    if (check_sstable.find_block_view(edge.target_id) catch null != null) {
+                        target_exists = true;
+                        break;
+                    }
+                }
+                if (!target_exists) continue :edge_loop;
 
                 try all_edges.append(edge);
             }
@@ -847,23 +873,49 @@ pub const SSTableManager = struct {
             defer temp_allocator.free(edges);
 
             edge_loop: for (edges) |edge| {
-                // Check if source block is tombstoned in any SSTable
+                // FIRST: Check if source block is tombstoned across all SSTables
                 for (loaded_sstables.items) |*check_sstable| {
                     for (check_sstable.tombstone_index.items) |tombstone_record| {
                         if (tombstone_record.block_id.eql(edge.source_id)) {
-                            continue :edge_loop; // Skip tombstoned source
+                            continue :edge_loop; // Skip edges from tombstoned sources
                         }
                     }
                 }
 
-                // Also check if target block is tombstoned
+                // SECOND: Check if target block is tombstoned across all SSTables
                 for (loaded_sstables.items) |*check_sstable| {
                     for (check_sstable.tombstone_index.items) |tombstone_record| {
                         if (tombstone_record.block_id.eql(edge.target_id)) {
-                            continue :edge_loop; // Skip tombstoned target
+                            continue :edge_loop; // Skip edges to tombstoned targets
                         }
                     }
                 }
+
+                // THIRD: Verify source block actually exists in storage
+                var source_exists = false;
+                for (loaded_sstables.items) |*check_sstable| {
+                    if (check_sstable.bloom_filter) |*bloom| {
+                        if (!bloom.might_contain(edge.source_id)) continue;
+                    }
+                    if (check_sstable.find_block_view(edge.source_id) catch null != null) {
+                        source_exists = true;
+                        break;
+                    }
+                }
+                if (!source_exists) continue :edge_loop;
+
+                // FOURTH: Verify target block actually exists in storage
+                var target_exists = false;
+                for (loaded_sstables.items) |*check_sstable| {
+                    if (check_sstable.bloom_filter) |*bloom| {
+                        if (!bloom.might_contain(edge.target_id)) continue;
+                    }
+                    if (check_sstable.find_block_view(edge.target_id) catch null != null) {
+                        target_exists = true;
+                        break;
+                    }
+                }
+                if (!target_exists) continue :edge_loop;
 
                 try all_edges.append(edge);
             }
