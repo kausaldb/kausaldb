@@ -213,7 +213,17 @@ pub const SSTableManager = struct {
             .{sstable_paths.items.len},
         );
 
-        // Search in reverse order (newer files first) for proper tombstone precedence
+        // Collect and load all SSTables upfront for proper tombstone precedence
+        // This ensures tombstones from newer SSTables shadow blocks in older ones
+        var loaded_sstables = std.array_list.Managed(SSTable).init(self.backing_allocator);
+        defer {
+            for (loaded_sstables.items) |*loaded_sstable| {
+                loaded_sstable.deinit();
+            }
+            loaded_sstables.deinit();
+        }
+
+        // Load all SSTables in reverse order (newest first)
         var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
@@ -226,20 +236,28 @@ pub const SSTableManager = struct {
                 self.vfs,
                 sstable_path_copy,
             );
-            defer sstable_file.deinit();
 
-            // Load index only if we need to search this SSTable
+            // Load index - skip corrupted SSTables
             sstable_file.read_index() catch {
-                continue; // Skip corrupted SSTables
+                sstable_file.deinit();
+                continue;
             };
 
-            // Check tombstones first
+            try loaded_sstables.append(sstable_file);
+        }
+
+        // FIRST PASS: Check ALL tombstones across ALL SSTables (newest to oldest)
+        // A tombstone in any newer SSTable shadows blocks in older SSTables
+        for (loaded_sstables.items) |*sstable_file| {
             for (sstable_file.tombstone_index.items) |tombstone_record| {
                 if (tombstone_record.block_id.eql(block_id)) {
                     return null; // Block is tombstoned
                 }
             }
+        }
 
+        // SECOND PASS: Search for blocks (newest to oldest) since no tombstone found
+        for (loaded_sstables.items) |*sstable_file| {
             // Use bloom filter if available
             if (sstable_file.bloom_filter) |*bloom| {
                 if (!bloom.might_contain(block_id)) {
