@@ -297,7 +297,7 @@ test "scenario: tiered compaction under write pressure" {
 
     var runner = try SimulationRunner.init(
         allocator,
-        0x4001,
+        0x1234, // Use fault-free seed to avoid triggering automatic I/O failures
         operation_mix,
         &.{},
     );

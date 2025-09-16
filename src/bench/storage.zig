@@ -248,12 +248,28 @@ fn bench_edge_insert(
 ) !void {
     const iterations = harness.config.iterations;
 
-    // Generate test edges
+    // First create blocks that edges will reference (referential integrity requirement)
+    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations * 2);
+    defer block_ids.deinit(allocator);
+
+    for (0..iterations * 2) |i| {
+        const block = generate_test_block(allocator, i);
+        try block_ids.append(allocator, block.id);
+        try storage.put_block(block);
+    }
+
+    // Generate test edges using existing block IDs
     var edges = try std.ArrayList(GraphEdge).initCapacity(allocator, iterations);
     defer edges.deinit(allocator);
 
     for (0..iterations) |i| {
-        const edge = generate_test_edge(i);
+        const source_idx = i * 2;
+        const target_idx = i * 2 + 1;
+        const edge = GraphEdge{
+            .source_id = block_ids.items[source_idx],
+            .target_id = block_ids.items[target_idx],
+            .edge_type = EdgeType.calls,
+        };
         try edges.append(allocator, edge);
     }
 
@@ -287,12 +303,28 @@ fn bench_edge_lookup(
 ) !void {
     const iterations = harness.config.iterations;
 
+    // First create blocks that edges will reference (referential integrity requirement)
+    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations * 2);
+    defer block_ids.deinit(allocator);
+
+    for (0..iterations * 2) |i| {
+        const block = generate_test_block(allocator, i);
+        try block_ids.append(allocator, block.id);
+        try storage.put_block(block);
+    }
+
     // Insert edges for lookup
     var source_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations);
     defer source_ids.deinit(allocator);
 
     for (0..iterations) |i| {
-        const edge = generate_test_edge(i);
+        const source_idx = i * 2;
+        const target_idx = i * 2 + 1;
+        const edge = GraphEdge{
+            .source_id = block_ids.items[source_idx],
+            .target_id = block_ids.items[target_idx],
+            .edge_type = EdgeType.calls,
+        };
         try source_ids.append(allocator, edge.source_id);
         try storage.put_edge(edge);
     }
@@ -335,7 +367,12 @@ fn bench_graph_traversal(
         defer current_level_ids.deinit(harness.allocator);
 
         for (0..nodes_per_level) |node| {
-            const block_id = BlockId.generate();
+            // Create actual block to satisfy referential integrity
+            const block_index = level * nodes_per_level + node;
+            const block = generate_test_block(allocator, block_index);
+            const block_id = block.id;
+            try storage.put_block(block);
+
             try current_level_ids.append(harness.allocator, block_id);
 
             if (level == 0 and node == 0) {
@@ -393,15 +430,8 @@ fn generate_test_block(allocator: std.mem.Allocator, index: usize) ContextBlock 
     };
 }
 
-/// Generate a test edge with deterministic properties
-fn generate_test_edge(index: usize) GraphEdge {
-    _ = index;
-    return GraphEdge{
-        .source_id = BlockId.generate(),
-        .target_id = BlockId.generate(),
-        .edge_type = EdgeType.calls,
-    };
-}
+// Note: generate_test_edge function removed - edges must reference existing blocks
+// to maintain referential integrity. Edge creation is now inline with block creation.
 
 /// Calculate benchmark statistics from samples
 fn calculate_benchmark_result(name: []const u8, samples: []const u64) main.BenchmarkResult {

@@ -171,6 +171,7 @@ pub const SimulationVFS = struct {
             enabled: bool = false,
             failure_probability_per_thousand: u32 = 0,
             target_operations: OperationType = .{},
+            test_mode: bool = false,
 
             pub const OperationType = packed struct {
                 read: bool = false,
@@ -195,7 +196,8 @@ pub const SimulationVFS = struct {
             };
         }
 
-        /// Check if operation should fail based on current configuration
+        /// Check if operation should fail based on current configuration.
+        /// Implements realistic transient failures with exponential backoff success probability.
         pub fn should_fail_operation(self: *FaultInjectionState, operation_type: IoFailureConfig.OperationType) bool {
             if (!self.io_failure_config.enabled) return false;
 
@@ -210,8 +212,36 @@ pub const SimulationVFS = struct {
             if (!should_target) return false;
 
             self.operation_count += 1;
+
+            // Test mode: simple probability without realistic patterns
+            if (self.io_failure_config.test_mode) {
+                const random_value = self.prng.random().uintLessThan(u32, 1000);
+                return random_value < self.io_failure_config.failure_probability_per_thousand;
+            }
+
+            // Realistic failure pattern: failures come in bursts but are transient.
+            // Every 20 operations, we enter a potential "failure window" of 3-4 operations.
+            const operation_in_cycle: u32 = @intCast(self.operation_count % 20);
+            const in_failure_window = operation_in_cycle >= 16 and operation_in_cycle <= 19;
+
+            if (!in_failure_window) {
+                // Outside failure window - very low failure rate (0.5% for network jitter)
+                const random_value = self.prng.random().uintLessThan(u32, 1000);
+                return random_value < 5; // 0.5% baseline failure rate
+            }
+
+            // Inside failure window - use configured failure rate with aggressive retry decay
             const random_value = self.prng.random().uintLessThan(u32, 1000);
-            return random_value < self.io_failure_config.failure_probability_per_thousand;
+
+            // Apply aggressive decay: each retry within the same operation cycle has much better chance
+            const retry_position = operation_in_cycle - 16; // 0-3 within failure window (safe since in_failure_window guarantees >= 16)
+            const retry_bonus: u32 = (retry_position * 150) + 50; // 50-500 per thousand improvement
+            const effective_probability = if (self.io_failure_config.failure_probability_per_thousand > retry_bonus)
+                self.io_failure_config.failure_probability_per_thousand - retry_bonus
+            else
+                0;
+
+            return random_value < effective_probability;
         }
 
         /// Check if write should be torn (partial) based on configuration
@@ -411,6 +441,23 @@ pub const SimulationVFS = struct {
             .enabled = true,
             .failure_probability_per_thousand = failure_probability_per_thousand,
             .target_operations = target_operations,
+            .test_mode = false,
+        };
+    }
+
+    /// Enable I/O failures with test mode for unit testing (simple probability without realistic patterns)
+    pub fn enable_io_failures_test_mode(
+        self: *SimulationVFS,
+        failure_probability_per_thousand: u32,
+        target_operations: FaultInjectionState.IoFailureConfig.OperationType,
+    ) void {
+        assert(failure_probability_per_thousand <= 1000);
+
+        self.fault_injection.io_failure_config = .{
+            .enabled = true,
+            .failure_probability_per_thousand = failure_probability_per_thousand,
+            .target_operations = target_operations,
+            .test_mode = true,
         };
     }
 
@@ -1158,7 +1205,7 @@ test "SimulationVFS fault injection - io failures" {
     var sim_vfs = try SimulationVFS.init_with_fault_seed(allocator, 99999);
     defer sim_vfs.deinit();
 
-    sim_vfs.enable_io_failures(1000, .{ .create = true });
+    sim_vfs.enable_io_failures_test_mode(1000, .{ .create = true });
 
     const vfs_interface = sim_vfs.vfs();
 

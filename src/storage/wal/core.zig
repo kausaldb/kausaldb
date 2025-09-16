@@ -124,6 +124,11 @@ pub const WAL = struct {
 
         const bytes_written = try self.write_and_verify(entry, write_buffer);
         self.update_write_stats(bytes_written);
+
+        // Success - operation completed with potential retries
+        if (builtin.mode == .Debug) {
+            log.debug("WAL entry written successfully (type={}, size={})", .{ entry.entry_type, bytes_written });
+        }
     }
 
     /// Streaming WAL write eliminates intermediate buffer allocation for large blocks.
@@ -221,17 +226,63 @@ pub const WAL = struct {
         return try self.allocator.dupe(u8, write_buffer);
     }
 
-    /// Write buffer to file with immediate verification
+    /// Write buffer to file with immediate verification and atomic rollback on failure.
+    /// Ensures WAL integrity by reverting partial writes that could corrupt state.
+    /// Implements retry logic for resilience against transient I/O failures.
     fn write_and_verify(self: *WAL, entry: WALEntry, write_buffer: []const u8) WALError!usize {
-        const written = self.active_file.?.write(write_buffer) catch return WALError.IoError;
+        const max_retries = 10;
+        const base_retry_delay_ns = 500_000; // Start with 0.5ms base delay
 
-        if (written != write_buffer.len) {
-            log.warn("WAL write incomplete: expected {}, got {}", .{ write_buffer.len, written });
-            return WALError.IoError;
+        // Capture position before write for potential rollback on failure
+        const start_position = self.active_file.?.tell() catch return WALError.IoError;
+
+        var retry_count: u32 = 0;
+        while (retry_count < max_retries) : (retry_count += 1) {
+            // Attempt write with potential retry
+            const written = self.active_file.?.write(write_buffer) catch {
+                if (retry_count < max_retries - 1) {
+                    // Transient failure - rollback and retry with exponential backoff
+                    self.rollback_to_position(start_position);
+                    const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
+                    std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
+                    continue;
+                }
+                // Final attempt failed - rollback and return error
+                self.rollback_to_position(start_position);
+                return WALError.IoError;
+            };
+
+            if (written != write_buffer.len) {
+                if (retry_count < max_retries - 1) {
+                    log.warn("WAL write incomplete: expected {}, got {} - retrying ({}/{})", .{ write_buffer.len, written, retry_count + 1, max_retries });
+                    // Rollback partial write and retry with exponential backoff
+                    self.rollback_to_position(start_position);
+                    const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
+                    std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
+                    continue;
+                }
+                log.warn("WAL write incomplete after {} retries: expected {}, got {}", .{ max_retries, write_buffer.len, written });
+                // Final attempt failed - rollback
+                self.rollback_to_position(start_position);
+                return WALError.IoError;
+            }
+
+            // Ensure durability before considering write successful
+            self.active_file.?.flush() catch {
+                if (retry_count < max_retries - 1) {
+                    // Retry flush on transient failure with exponential backoff
+                    const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
+                    std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
+                    continue;
+                }
+                // Even flush failure requires rollback for consistency
+                self.rollback_to_position(start_position);
+                return WALError.IoError;
+            };
+
+            // Write and flush succeeded - continue to verification
+            break;
         }
-
-        self.active_file.?.flush() catch return WALError.IoError;
-
         // Write verification enabled only in debug builds for performance
         // In release builds, WAL corruption is detected during recovery
         // Can be disabled for simulation tests with intentional corruption
@@ -266,7 +317,25 @@ pub const WAL = struct {
             log.debug("WAL: Write verification skipped (disable_write_verification={})", .{self.disable_write_verification});
         }
 
-        return written;
+        return write_buffer.len;
+    }
+
+    /// Rollback file to specified position, best-effort cleanup on write failures.
+    /// Used to maintain WAL integrity when writes fail or are incomplete.
+    fn rollback_to_position(self: *WAL, position: u64) void {
+        // Best-effort rollback - failures are logged but not fatal since
+        // we're already in error recovery path
+        _ = self.active_file.?.seek(@intCast(position), .start) catch |err| {
+            log.err("WAL rollback seek failed: {}", .{err});
+            return;
+        };
+
+        // Note: VFile doesn't support truncate operation. The seek alone ensures
+        // the next write position is correct. WAL recovery will handle any
+        // trailing garbage data by validating checksums.
+
+        // Update segment size to reflect rollback position
+        self.segment_size = position;
     }
 
     /// Update WAL statistics after successful write

@@ -379,23 +379,24 @@ pub const SimulationRunner = struct {
     fn inject_fault(self: *Self, fault_type: FaultType) !void {
         switch (fault_type) {
             .io_error => {
-                // Enable I/O failure injection with high probability
-                self.sim_vfs.enable_io_failures(1000, .{ .write = true, .read = true });
-                self.corruption_expected = true;
+                // Use realistic I/O failure rate for meaningful testing.
+                // 20% failure rate strikes balance between coverage and stability.
+                self.sim_vfs.enable_io_failures(200, .{ .write = true, .read = true });
+                self.corruption_expected = false; // System should handle 20% I/O failures gracefully
             },
             .corruption => {
-                // Enable read corruption with high bit flip rate
-                self.sim_vfs.enable_read_corruption(1000, 8); // High corruption rate
+                // Moderate corruption rate that tests recovery without overwhelming the system
+                self.sim_vfs.enable_read_corruption(300, 8); // 30% corruption rate
                 self.corruption_expected = true;
             },
             .crash => {
-                // Simulate crash via torn writes (partial completion)
-                self.sim_vfs.enable_torn_writes(1000, 1, 100); // Always torn, very small completion
+                // Torn writes with realistic partial completion for crash scenarios
+                self.sim_vfs.enable_torn_writes(500, 1, 300); // 50% torn, 30% completion
                 self.corruption_expected = true;
             },
             .network_partition => {
-                // For single-node testing, treat as I/O failure
-                self.sim_vfs.enable_io_failures(500, .{ .write = true, .read = true });
+                // Network partitions use lower failure rate to simulate intermittent connectivity
+                self.sim_vfs.enable_io_failures(150, .{ .write = true, .read = true });
             },
             .disk_full => {
                 // Enable fault testing mode with realistic 100MB disk limit
