@@ -308,7 +308,7 @@ pub const SimulationRunner = struct {
     /// Apply single operation to the storage system
     fn apply_operation_to_system(self: *Self, operation: *const Operation) !bool {
         switch (operation.op_type) {
-            .put_block => {
+            .put_block, .update_block => {
                 if (operation.block) |block| {
                     self.put_block_with_backpressure(block) catch {
                         return false; // Report failure so model doesn't get updated

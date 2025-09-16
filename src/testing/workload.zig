@@ -22,6 +22,7 @@ const GraphEdge = types.GraphEdge;
 /// These represent actual API operations, not internal storage operations
 pub const OperationType = enum {
     put_block,
+    update_block,
     find_block,
     delete_block,
     put_edge,
@@ -31,8 +32,9 @@ pub const OperationType = enum {
 /// Configuration for operation mix in workload generation
 /// Represents realistic API usage patterns, not internal storage operations
 pub const OperationMix = struct {
-    put_block_weight: u32 = 40, // Primary write operations
-    find_block_weight: u32 = 40, // Primary read operations
+    put_block_weight: u32 = 35, // Primary write operations
+    update_block_weight: u32 = 10, // Block version updates
+    find_block_weight: u32 = 35, // Primary read operations
     delete_block_weight: u32 = 5, // Occasional deletions
     put_edge_weight: u32 = 10, // Graph relationship creation
     find_edges_weight: u32 = 5, // Graph traversal queries
@@ -40,6 +42,7 @@ pub const OperationMix = struct {
     /// Calculate total weight for probability distribution
     pub fn total_weight(self: OperationMix) u32 {
         return self.put_block_weight +
+            self.update_block_weight +
             self.find_block_weight +
             self.delete_block_weight +
             self.put_edge_weight +
@@ -107,6 +110,9 @@ pub const WorkloadGenerator = struct {
             cumulative += self.operation_mix.put_block_weight;
             if (choice < cumulative) break :blk .put_block;
 
+            cumulative += self.operation_mix.update_block_weight;
+            if (choice < cumulative) break :blk .update_block;
+
             cumulative += self.operation_mix.find_block_weight;
             if (choice < cumulative) break :blk .find_block;
 
@@ -121,6 +127,7 @@ pub const WorkloadGenerator = struct {
 
         const operation = switch (op_type) {
             .put_block => try self.generate_put_block(),
+            .update_block => try self.generate_update_block(),
             .find_block => try self.generate_find_block(),
             .delete_block => try self.generate_delete_block(),
             .put_edge => try self.generate_put_edge(),
@@ -141,6 +148,29 @@ pub const WorkloadGenerator = struct {
 
         return Operation{
             .op_type = .put_block,
+            .block = block,
+            .sequence_number = self.operation_count,
+        };
+    }
+
+    /// Generate update_block operation for existing block with higher version
+    fn generate_update_block(self: *Self) !Operation {
+        const random = self.prng.random();
+
+        // If no blocks exist yet, create a new block instead
+        if (self.created_blocks.items.len == 0) {
+            return self.generate_put_block();
+        }
+
+        // Choose an existing block to update
+        const block_index = random.uintLessThan(usize, self.created_blocks.items.len);
+        const existing_block_id = self.created_blocks.items[block_index];
+
+        // Create updated version with higher version number
+        const block = try self.create_updated_block(existing_block_id);
+
+        return Operation{
+            .op_type = .update_block,
             .block = block,
             .sequence_number = self.operation_count,
         };
@@ -272,6 +302,48 @@ pub const WorkloadGenerator = struct {
             .content = content,
             .metadata_json = metadata,
             .version = 1,
+        };
+    }
+
+    /// Create updated version of existing block with higher version number
+    fn create_updated_block(self: *Self, existing_block_id: BlockId) !ContextBlock {
+        const random = self.prng.random();
+
+        // Generate new version number (increment from base version)
+        const new_version = random.uintAtMost(u64, 10) + 2; // Version 2-12
+
+        const source_uri = try std.fmt.allocPrint(
+            self.allocator,
+            "/test/updated_file_v{d}.zig",
+            .{new_version},
+        );
+
+        // Create updated content
+        const content = try std.fmt.allocPrint(
+            self.allocator,
+            \\// Updated version {d}
+            \\pub fn updated_function() void {{
+            \\    // Updated implementation
+            \\    const updated_value = {d};
+            \\}}
+        ,
+            .{ new_version, random.uintLessThan(u32, 1000) },
+        );
+
+        // Create updated metadata
+        const metadata = try std.fmt.allocPrint(
+            self.allocator,
+            \\{{"type": "function", "version": {d}, "updated": true}}
+        ,
+            .{new_version},
+        );
+
+        return ContextBlock{
+            .id = existing_block_id, // Same ID as existing block
+            .source_uri = source_uri,
+            .content = content,
+            .metadata_json = metadata,
+            .version = new_version, // Higher version number
         };
     }
 

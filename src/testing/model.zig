@@ -268,6 +268,11 @@ pub const ModelState = struct {
                     try self.apply_put_block(block);
                 }
             },
+            .update_block => {
+                if (operation.block) |block| {
+                    try self.apply_put_block(block); // Same logic as put_block - higher version overwrites
+                }
+            },
             .find_block => {
                 // Read operations maintain sequence but don't mutate state
                 // Track for operation history and mathematical completeness
@@ -300,7 +305,7 @@ pub const ModelState = struct {
             .operation_type = operation.op_type,
             .timestamp = operation_timestamp,
             .affected_block = switch (operation.op_type) {
-                .put_block => if (operation.block) |b| b.id else null,
+                .put_block, .update_block => if (operation.block) |b| b.id else null,
                 .find_block, .delete_block => operation.block_id,
                 else => null,
             },
@@ -345,8 +350,18 @@ pub const ModelState = struct {
             // Update validation checksum to reflect state change
             model_block.validation_checksum = ModelBlock.compute_validation_checksum(model_block.id, model_block.content_hash, model_block.sequence_number);
 
-            // Track cascading effects on graph edges
-            self.track_deletion_cascades(block_id);
+            // Remove all edges associated with the deleted block to maintain referential integrity
+            var i: usize = 0;
+            while (i < self.edges.items.len) {
+                const edge = self.edges.items[i];
+                if (edge.source_id.eql(block_id) or edge.target_id.eql(block_id)) {
+                    // Remove edge by swapping with last element (O(1) removal)
+                    _ = self.edges.swapRemove(i);
+                    // Don't increment i since we swapped a new element to this position
+                } else {
+                    i += 1;
+                }
+            }
         }
     }
 
