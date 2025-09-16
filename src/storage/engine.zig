@@ -738,13 +738,7 @@ pub const StorageEngine = struct {
             return OwnedBlock.take_ownership(block, .query_engine);
         }
 
-        const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| switch (err) {
-            error.CorruptedSSTablePaths => {
-                // SSTable corruption detected - continue gracefully without SSTable lookup
-                return null;
-            },
-            else => return err,
-        };
+        const parsed_block_result = try self.sstable_manager.find_block_view_in_sstables(block_id);
 
         if (parsed_block_result) |parsed_block| {
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());

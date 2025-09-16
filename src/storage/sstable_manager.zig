@@ -147,33 +147,17 @@ pub const SSTableManager = struct {
         accessor: BlockOwnership,
         temp_allocator: std.mem.Allocator,
     ) !?OwnedBlock {
-        // Detect SSTable paths corruption and handle gracefully in fault injection tests
-        if (self.sstable_paths.items.len > 1000000) {
-            return error.CorruptedSSTablePaths;
-        }
+        var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
+        defer sstable_paths.deinit();
 
-        // Comprehensive corruption detection for SSTable paths array
-        fatal_assert(@intFromPtr(&self.sstable_paths) != 0, "SSTable paths ArrayList structure corrupted - null pointer", .{});
+        // Basic safety validation for the collected paths
+        fatal_assert(sstable_paths.items.len < 10000, "Excessive SSTable count {} suggests corruption", .{sstable_paths.items.len});
 
-        if (@intFromPtr(self.sstable_paths.items.ptr) == 0 and self.sstable_paths.items.len > 0) {
-            // SSTable paths array corruption detected - handle gracefully in fault injection scenarios
-            return error.CorruptedSSTablePaths;
-        }
-        fatal_assert(self.sstable_paths.capacity >= self.sstable_paths.items.len, "SSTable paths capacity {} < length {} - ArrayList corruption", .{ self.sstable_paths.capacity, self.sstable_paths.items.len });
-
-        var i: usize = self.sstable_paths.items.len;
+        // Search in reverse order (newer files first) for better performance
+        var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
-
-            // Validate array bounds and pointer consistency before each access
-            fatal_assert(i < self.sstable_paths.items.len, "SSTable index out of bounds: {} >= {} - memory corruption detected", .{ i, self.sstable_paths.items.len });
-            fatal_assert(@intFromPtr(self.sstable_paths.items.ptr) != 0, "SSTable paths array pointer became null during iteration", .{});
-
-            const sstable_path = self.sstable_paths.items[i];
-
-            // Validate the path string itself
-            fatal_assert(@intFromPtr(sstable_path.ptr) != 0 or sstable_path.len == 0, "SSTable path[{}] has null pointer with length {} - string corruption", .{ i, sstable_path.len });
-            fatal_assert(sstable_path.len < 4096, "SSTable path[{}] has suspicious length {} - possible corruption", .{ i, sstable_path.len });
+            const sstable_path = sstable_paths.items[i];
 
             const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
             var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
@@ -207,33 +191,17 @@ pub const SSTableManager = struct {
     /// Find a block using zero-copy ParsedBlock view without heap allocations.
     /// Eliminates redundant memory copies during SSTable reads for performance-critical paths.
     pub fn find_block_view_in_sstables(self: *SSTableManager, block_id: BlockId) !?ParsedBlock {
-        // Detect SSTable paths corruption and handle gracefully in fault injection tests
-        if (self.sstable_paths.items.len > 1000000) {
-            return error.CorruptedSSTablePaths;
-        }
+        var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
+        defer sstable_paths.deinit();
 
-        // Comprehensive corruption detection for SSTable paths array
-        fatal_assert(@intFromPtr(&self.sstable_paths) != 0, "SSTable paths ArrayList structure corrupted - null pointer", .{});
+        // Basic safety validation for the collected paths
+        fatal_assert(sstable_paths.items.len < 10000, "Excessive SSTable count {} suggests corruption", .{sstable_paths.items.len});
 
-        if (@intFromPtr(self.sstable_paths.items.ptr) == 0 and self.sstable_paths.items.len > 0) {
-            // SSTable paths array corruption detected - handle gracefully in fault injection scenarios
-            return error.CorruptedSSTablePaths;
-        }
-        fatal_assert(self.sstable_paths.capacity >= self.sstable_paths.items.len, "SSTable paths capacity {} < length {} - ArrayList corruption", .{ self.sstable_paths.capacity, self.sstable_paths.items.len });
-
-        var i: usize = self.sstable_paths.items.len;
+        // Search in reverse order (newer files first) for better performance
+        var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
-
-            // Validate array bounds and pointer consistency before each access
-            fatal_assert(i < self.sstable_paths.items.len, "SSTable index out of bounds: {} >= {} - memory corruption detected", .{ i, self.sstable_paths.items.len });
-            fatal_assert(@intFromPtr(self.sstable_paths.items.ptr) != 0, "SSTable paths array pointer became null during iteration", .{});
-
-            const sstable_path = self.sstable_paths.items[i];
-
-            // Validate the path string itself
-            fatal_assert(@intFromPtr(sstable_path.ptr) != 0 or sstable_path.len == 0, "SSTable path[{}] has null pointer with length {} - string corruption", .{ i, sstable_path.len });
-            fatal_assert(sstable_path.len < 4096, "SSTable path[{}] has suspicious length {} - possible corruption", .{ i, sstable_path.len });
+            const sstable_path = sstable_paths.items[i];
 
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
             var sstable_file = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.vfs, sstable_path_copy);
