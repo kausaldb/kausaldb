@@ -11,6 +11,7 @@ const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const assert_mod = @import("../core/assert.zig");
+const tombstone = @import("tombstone.zig");
 
 const assert = assert_mod.assert;
 const assert_fmt = assert_mod.assert_fmt;
@@ -21,6 +22,7 @@ const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
 const OwnedBlock = ownership.OwnedBlock;
+const TombstoneRecord = tombstone.TombstoneRecord;
 
 /// In-memory block index using Arena Coordinator Pattern for efficient bulk operations.
 /// Provides fast writes and reads while maintaining O(1) memory cleanup through
@@ -33,6 +35,12 @@ pub const BlockIndex = struct {
     blocks: std.HashMap(
         BlockId,
         OwnedBlock,
+        BlockIdContext,
+        std.hash_map.default_max_load_percentage,
+    ),
+    tombstones: std.HashMap(
+        BlockId,
+        TombstoneRecord,
         BlockIdContext,
         std.hash_map.default_max_load_percentage,
     ),
@@ -73,8 +81,16 @@ pub const BlockIndex = struct {
             std.hash_map.default_max_load_percentage,
         ).init(backing);
 
+        const tombstones = std.HashMap(
+            BlockId,
+            TombstoneRecord,
+            BlockIdContext,
+            std.hash_map.default_max_load_percentage,
+        ).init(backing);
+
         return BlockIndex{
             .blocks = blocks, // HashMap uses stable backing allocator
+            .tombstones = tombstones,
             .arena_coordinator = coordinator, // Stable coordinator interface
             .backing_allocator = backing,
             .memory_used = 0,
@@ -82,10 +98,11 @@ pub const BlockIndex = struct {
     }
 
     /// Clean up BlockIndex resources following Arena Coordinator Pattern.
-    /// Only clears HashMap since arena memory is managed by coordinator.
+    /// Clears both blocks and tombstones HashMaps to prevent memory leaks.
     /// Content memory cleanup happens when coordinator resets its arena.
     pub fn deinit(self: *BlockIndex) void {
         self.blocks.clearAndFree();
+        self.tombstones.clearAndFree();
         // Arena memory is owned by StorageEngine - no local cleanup needed
     }
 
@@ -172,8 +189,13 @@ pub const BlockIndex = struct {
     // For legacy callers: use OwnedBlock.take_ownership(block, .temporary) then put_block()
 
     /// Find a block by ID.
-    /// Returns block data if found.
+    /// Returns block data if found and not tombstoned.
     pub fn find_block(self: *const BlockIndex, block_id: BlockId) ?ContextBlock {
+        // Check tombstone first - tombstones shadow blocks
+        if (self.tombstones.contains(block_id)) {
+            return null;
+        }
+
         if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
             return owned_block_ptr.read(.temporary).*;
         }
@@ -202,14 +224,39 @@ pub const BlockIndex = struct {
         // Clear operation validation is expensive and should be selective
 
         self.blocks.clearRetainingCapacity();
+        self.tombstones.clearRetainingCapacity();
         // Arena memory reset handled by StorageEngine - enables O(1) bulk cleanup
         self.memory_used = 0;
 
         // Validate cleared state in debug builds
         if (builtin.mode == .Debug) {
             fatal_assert(self.blocks.count() == 0, "Clear operation failed - blocks still present", .{});
+            fatal_assert(self.tombstones.count() == 0, "Clear operation failed - tombstones still present", .{});
             fatal_assert(self.memory_used == 0, "Clear operation failed - memory not reset", .{});
         }
+    }
+
+    /// Add tombstone record to mark block as deleted.
+    /// Removes existing block if present to enforce tombstone shadowing.
+    pub fn put_tombstone(self: *BlockIndex, tombstone_record: TombstoneRecord) !void {
+        // Add tombstone first to ensure atomic visibility
+        try self.tombstones.put(tombstone_record.block_id, tombstone_record);
+
+        // Remove existing block after tombstone is safely added
+        self.remove_block(tombstone_record.block_id);
+    }
+
+    /// Collect all tombstones for compaction processing.
+    /// Caller owns returned slice and must free with provided allocator.
+    pub fn collect_tombstones(self: *const BlockIndex, allocator: std.mem.Allocator) ![]TombstoneRecord {
+        var tombstones_list = std.array_list.Managed(TombstoneRecord).init(allocator);
+        defer tombstones_list.deinit();
+
+        var iter = self.tombstones.iterator();
+        while (iter.next()) |entry| {
+            try tombstones_list.append(entry.value_ptr.*);
+        }
+        return tombstones_list.toOwnedSlice();
     }
 
     /// Large block cloning with chunked copy to improve cache locality.

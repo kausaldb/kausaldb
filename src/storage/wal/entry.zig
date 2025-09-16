@@ -10,6 +10,7 @@ const context_block = @import("../../core/types.zig");
 const assert_mod = @import("../../core/assert.zig");
 const ownership = @import("../../core/ownership.zig");
 const stream = @import("stream.zig");
+const tombstone = @import("../tombstone.zig");
 const types = @import("types.zig");
 
 const assert = assert_mod.assert;
@@ -21,6 +22,7 @@ const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const BlockId = context_block.BlockId;
 const OwnedBlock = ownership.OwnedBlock;
+const TombstoneRecord = tombstone.TombstoneRecord;
 
 /// WAL entry header structure with corruption detection
 pub const WALEntry = struct {
@@ -191,27 +193,25 @@ pub const WALEntry = struct {
         return entry;
     }
 
-    /// Create WAL entry for deleting a Context Block.
-    /// Payload contains only the 16-byte BlockId for efficient deletion replay.
-    pub fn create_delete_block(allocator: std.mem.Allocator, block_id: BlockId) WALError!WALEntry {
-        comptime assert(@sizeOf(BlockId) == 16);
+    /// Create WAL entry for tombstone block record.
+    /// Payload contains serialized TombstoneRecord for proper deletion semantics.
+    pub fn create_tombstone_block(allocator: std.mem.Allocator, tombstone_record: TombstoneRecord) WALError!WALEntry {
+        const payload = try allocator.alloc(u8, tombstone.TOMBSTONE_SIZE);
+        errdefer allocator.free(payload);
 
-        const payload = try allocator.dupe(u8, &block_id.bytes);
-        assert(payload.len == 16);
+        _ = try tombstone_record.serialize(payload);
 
-        const checksum = calculate_checksum(.delete_block, payload);
+        const checksum = calculate_checksum(.tombstone_block, payload);
 
         const entry = WALEntry{
             .checksum = checksum,
-            .entry_type = .delete_block,
-            // Safety: Payload length bounded by serialization limits and fits in u32
+            .entry_type = .tombstone_block,
             .payload_size = @intCast(payload.len),
             .payload = payload,
         };
 
-        // Invariant: delete entries must contain exactly one BlockId
-        assert(entry.payload.len == 16);
-        assert(entry.payload_size == 16);
+        assert(entry.payload.len == tombstone.TOMBSTONE_SIZE);
+        assert(entry.payload_size == tombstone.TOMBSTONE_SIZE);
 
         return entry;
     }
@@ -245,7 +245,7 @@ pub const WALEntry = struct {
     ) WALError!WALEntry {
         const entry_type: WALEntryType = switch (entry_type_raw) {
             1 => .put_block,
-            2 => .delete_block,
+            2 => .tombstone_block,
             3 => .put_edge,
             else => return WALError.InvalidEntryType,
         };
@@ -283,13 +283,6 @@ pub const WALEntry = struct {
             return WALError.CorruptedEntry;
         };
         return OwnedBlock.take_ownership(block_data, .storage_engine);
-    }
-
-    /// Extract BlockId from delete_block entry payload
-    pub fn extract_block_id(self: WALEntry) WALError!BlockId {
-        if (self.entry_type != .delete_block) return WALError.InvalidEntryType;
-        if (self.payload.len != 16) return WALError.CorruptedEntry;
-        return BlockId{ .bytes = self.payload[0..16].* };
     }
 
     /// Extract GraphEdge from put_edge entry payload
@@ -342,7 +335,7 @@ test "WALEntry checksum calculation consistency" {
     const checksum1 = WALEntry.calculate_checksum(.put_block, payload1);
     const checksum2 = WALEntry.calculate_checksum(.put_block, payload2);
     const checksum3 = WALEntry.calculate_checksum(.put_block, different_payload);
-    const checksum4 = WALEntry.calculate_checksum(.delete_block, payload1);
+    const checksum4 = WALEntry.calculate_checksum(.tombstone_block, payload1);
 
     try testing.expectEqual(checksum1, checksum2);
 
@@ -455,18 +448,23 @@ test "WALEntry create_put_block" {
     try testing.expectEqual(expected_checksum, entry.checksum);
 }
 
-test "WALEntry create_delete_block" {
+test "WALEntry create_tombstone_block" {
     const allocator = testing.allocator;
 
     const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
-    const entry = try WALEntry.create_delete_block(allocator, test_id);
+    const tombstone_record = tombstone.TombstoneRecord{
+        .block_id = test_id,
+        .deletion_sequence = 1,
+        .deletion_timestamp = @intCast(std.time.microTimestamp()),
+        .generation = 0,
+    };
+    const entry = try WALEntry.create_tombstone_block(allocator, tombstone_record);
     defer entry.deinit(allocator);
 
-    try testing.expectEqual(WALEntryType.delete_block, entry.entry_type);
-    try testing.expectEqual(@as(u32, 16), entry.payload_size);
-    try testing.expectEqual(@as(usize, 16), entry.payload.len);
-    try testing.expect(std.mem.eql(u8, &test_id.bytes, entry.payload));
-    const expected_checksum = WALEntry.calculate_checksum(.delete_block, entry.payload);
+    try testing.expectEqual(WALEntryType.tombstone_block, entry.entry_type);
+    try testing.expectEqual(@as(u32, tombstone.TOMBSTONE_SIZE), entry.payload_size);
+    try testing.expectEqual(@as(usize, tombstone.TOMBSTONE_SIZE), entry.payload.len);
+    const expected_checksum = WALEntry.calculate_checksum(.tombstone_block, entry.payload);
     try testing.expectEqual(expected_checksum, entry.checksum);
 }
 
@@ -614,45 +612,16 @@ test "WALEntry extract_block invalid entry type" {
     const allocator = testing.allocator;
 
     const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
-    const entry = try WALEntry.create_delete_block(allocator, test_id);
+    const tombstone_record = tombstone.TombstoneRecord{
+        .block_id = test_id,
+        .deletion_sequence = 1,
+        .deletion_timestamp = @intCast(std.time.microTimestamp()),
+        .generation = 0,
+    };
+    const entry = try WALEntry.create_tombstone_block(allocator, tombstone_record);
     defer entry.deinit(allocator);
 
     try testing.expectError(WALError.InvalidEntryType, entry.extract_block(allocator));
-}
-
-test "WALEntry extract_block_id success" {
-    const allocator = testing.allocator;
-
-    const test_id = BlockId.from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") catch unreachable; // Safety: hardcoded valid hex
-    const entry = try WALEntry.create_delete_block(allocator, test_id);
-    defer entry.deinit(allocator);
-
-    const extracted_id = try entry.extract_block_id();
-    try testing.expect(test_id.eql(extracted_id));
-}
-
-test "WALEntry extract_block_id invalid entry type" {
-    const allocator = testing.allocator;
-
-    const test_block = create_test_block();
-    const entry = try WALEntry.create_put_block(allocator, test_block);
-    defer entry.deinit(allocator);
-
-    try testing.expectError(WALError.InvalidEntryType, entry.extract_block_id());
-}
-
-test "WALEntry extract_block_id corrupted payload" {
-    const corrupted_payload = "short";
-    const checksum = WALEntry.calculate_checksum(.delete_block, corrupted_payload);
-
-    const entry = WALEntry{
-        .checksum = checksum,
-        .entry_type = .delete_block,
-        .payload_size = @intCast(corrupted_payload.len),
-        .payload = corrupted_payload,
-    };
-
-    try testing.expectError(WALError.CorruptedEntry, entry.extract_block_id());
 }
 
 test "WALEntry extract_edge success" {

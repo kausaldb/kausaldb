@@ -21,10 +21,12 @@ const std = @import("std");
 
 const assert_mod = @import("../core/assert.zig");
 const bloom_filter = @import("bloom_filter.zig");
+const config_mod = @import("config.zig");
 const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
 
 const comptime_assert = assert_mod.comptime_assert;
@@ -39,6 +41,7 @@ const GraphEdge = context_block.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const ParsedBlock = context_block.ParsedBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
+const TombstoneRecord = tombstone.TombstoneRecord;
 const VFS = vfs.VFS;
 const VFile = vfs.VFile;
 
@@ -57,6 +60,8 @@ pub const SSTable = struct {
     file_path: []const u8,
     block_count: u32,
     index: std.array_list.Managed(IndexEntry),
+    tombstone_count: u32,
+    tombstone_index: std.array_list.Managed(TombstoneRecord),
     bloom_filter: ?BloomFilter,
 
     const MAGIC = [4]u8{ 'S', 'S', 'T', 'B' }; // "SSTB" for SSTable Blocks
@@ -129,13 +134,18 @@ pub const SSTable = struct {
         created_timestamp: u64, // 8 bytes: Unix timestamp
         bloom_filter_offset: u64, // 8 bytes: Offset to bloom filter
         bloom_filter_size: u32, // 4 bytes: Size of serialized bloom filter
-        reserved: [20]u8, // 20 bytes: Reserved for future use
+        tombstone_count: u32, // 4 bytes: Number of tombstones
+        tombstone_offset: u64, // 8 bytes: Offset to tombstone section
+        reserved: [8]u8, // 8 bytes: Reserved for future use
 
         comptime {
             comptime_assert(@sizeOf(Header) == 64, "SSTable Header must be exactly 64 bytes for cache-aligned performance");
             comptime_assert(HEADER_SIZE == @sizeOf(Header), "HEADER_SIZE constant must match actual Header struct size");
-            comptime_assert(4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u32) +
-                @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + 20 == 64, "SSTable Header field sizes must sum to exactly 64 bytes");
+            comptime_assert(
+                4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u32) +
+                    @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + 8 == 64,
+                "SSTable Header field sizes must sum to exactly 64 bytes",
+            );
         }
 
         /// Serialize SSTable header to binary format for on-disk storage
@@ -174,7 +184,13 @@ pub const SSTable = struct {
             std.mem.writeInt(u32, buffer[offset..][0..4], self.bloom_filter_size, .little);
             offset += 4;
 
-            @memset(buffer[offset .. offset + 20], 0);
+            std.mem.writeInt(u32, buffer[offset..][0..4], self.tombstone_count, .little);
+            offset += 4;
+
+            std.mem.writeInt(u64, buffer[offset..][0..8], self.tombstone_offset, .little);
+            offset += 8;
+
+            @memset(buffer[offset .. offset + 8], 0);
         }
 
         /// Deserialize SSTable header from binary format during file loading
@@ -216,7 +232,13 @@ pub const SSTable = struct {
             const bloom_filter_size = std.mem.readInt(u32, buffer[offset..][0..4], .little);
             offset += 4;
 
-            const reserved = buffer[offset .. offset + 20];
+            const tombstone_count = std.mem.readInt(u32, buffer[offset..][0..4], .little);
+            offset += 4;
+
+            const tombstone_offset = std.mem.readInt(u64, buffer[offset..][0..8], .little);
+            offset += 8;
+
+            const reserved = buffer[offset .. offset + 8];
             for (reserved) |byte| {
                 if (byte != 0) return error.InvalidReservedBytes;
             }
@@ -231,7 +253,9 @@ pub const SSTable = struct {
                 .created_timestamp = created_timestamp,
                 .bloom_filter_offset = bloom_filter_offset,
                 .bloom_filter_size = bloom_filter_size,
-                .reserved = [_]u8{0} ** 20,
+                .tombstone_count = tombstone_count,
+                .tombstone_offset = tombstone_offset,
+                .reserved = [_]u8{0} ** 8,
             };
         }
     };
@@ -257,6 +281,8 @@ pub const SSTable = struct {
             .file_path = file_path,
             .block_count = 0,
             .index = std.array_list.Managed(IndexEntry).init(backing),
+            .tombstone_count = 0,
+            .tombstone_index = std.array_list.Managed(TombstoneRecord).init(backing),
             .bloom_filter = null,
         };
     }
@@ -266,10 +292,11 @@ pub const SSTable = struct {
     pub fn deinit(self: *SSTable) void {
         self.backing_allocator.free(self.file_path);
         self.index.deinit();
+        self.tombstone_index.deinit();
     }
 
-    /// Write blocks to SSTable file in sorted order
-    pub fn write_blocks(self: *SSTable, blocks: anytype) !void {
+    /// Write blocks and tombstones to SSTable file in sorted order
+    pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord) !void {
         const BlocksType = @TypeOf(blocks);
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
@@ -282,9 +309,13 @@ pub const SSTable = struct {
         };
 
         if (!supported_block_write) {
-            @compileError("write_blocks() called with unsupported type '" ++ @typeName(BlocksType) ++ "'. Accepts []const ContextBlock, []ContextBlock, []const OwnedBlock, or []OwnedBlock only");
+            @compileError(
+                "write_blocks() called with unsupported type '" ++ @typeName(BlocksType) ++
+                    "'. Accepts []const ContextBlock, []ContextBlock, []const OwnedBlock, or []OwnedBlock only",
+            );
         }
-        assert_mod.assert_not_empty(blocks, "Cannot write empty blocks array", .{});
+        // Handle empty case - create empty SSTable with just tombstones if needed
+        if (blocks.len == 0 and tombstones.len == 0) return;
         assert_mod.assert_fmt(blocks.len <= 1000000, "Too many blocks for single SSTable: {}", .{blocks.len});
 
         self.index.clearAndFree();
@@ -304,7 +335,11 @@ pub const SSTable = struct {
 
             assert_mod.assert_fmt(block_data.content.len > 0, "Block {} has empty content", .{i});
             assert_mod.assert_fmt(block_data.source_uri.len > 0, "Block {} has empty source_uri", .{i});
-            assert_mod.assert_fmt(block_data.content.len < 100 * 1024 * 1024, "Block {} content too large: {} bytes", .{ i, block_data.content.len });
+            assert_mod.assert_fmt(
+                block_data.content.len < 100 * 1024 * 1024,
+                "Block {} content too large: {} bytes",
+                .{ i, block_data.content.len },
+            );
         }
 
         // Convert all blocks to ContextBlock for sorting (zero-cost for ContextBlock arrays)
@@ -329,6 +364,13 @@ pub const SSTable = struct {
                 return std.mem.order(u8, &a.id.bytes, &b.id.bytes) == .lt;
             }
         }.less_than);
+
+        // Copy tombstones and sort them
+        const sorted_tombstones = try self.arena_coordinator.allocator().alloc(TombstoneRecord, tombstones.len);
+        defer self.arena_coordinator.allocator().free(sorted_tombstones);
+        @memcpy(sorted_tombstones, tombstones);
+
+        std.mem.sort(TombstoneRecord, sorted_tombstones, {}, TombstoneRecord.less_than);
 
         var file = try self.filesystem.create(self.file_path);
         defer file.close();
@@ -369,6 +411,19 @@ pub const SSTable = struct {
             });
 
             current_offset += block_size;
+        }
+
+        // Store tombstone offset before writing tombstones
+        const tombstone_offset = current_offset;
+
+        // Write tombstones
+        for (sorted_tombstones) |tombstone_record| {
+            var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
+            _ = try tombstone_record.serialize(&tombstone_buffer);
+            _ = try file.write(&tombstone_buffer);
+            current_offset += tombstone.TOMBSTONE_SIZE;
+
+            try self.tombstone_index.append(tombstone_record);
         }
 
         const index_offset = current_offset;
@@ -413,7 +468,9 @@ pub const SSTable = struct {
             .created_timestamp = @intCast(std.time.timestamp()),
             .bloom_filter_offset = bloom_filter_offset,
             .bloom_filter_size = bloom_filter_size,
-            .reserved = [_]u8{0} ** 20,
+            .tombstone_count = @intCast(sorted_tombstones.len),
+            .tombstone_offset = if (sorted_tombstones.len > 0) tombstone_offset else 0,
+            .reserved = [_]u8{0} ** 8,
         };
 
         try header.serialize(&header_buffer);
@@ -422,10 +479,43 @@ pub const SSTable = struct {
         try file.flush();
         // Safety: Block count bounded by storage format limits and fits in u32
         self.block_count = @intCast(context_blocks.len);
+        self.tombstone_count = @intCast(sorted_tombstones.len);
 
-        // SUCCESS: All fallible operations completed. Now transfer ownership.
-
+        // Transfer ownership
         self.bloom_filter = new_bloom;
+    }
+
+    /// Load tombstones from SSTable file into memory index
+    pub fn load_tombstones(self: *SSTable) !void {
+        if (self.tombstone_count == 0) return; // No tombstones to load
+
+        var file = try self.filesystem.open(self.file_path);
+        defer file.close();
+
+        // Read header to get tombstone offset
+        var header_buffer: [HEADER_SIZE]u8 = undefined;
+        const bytes_read = try file.read(&header_buffer);
+        if (bytes_read != HEADER_SIZE) return error.CorruptedEntry;
+
+        const header = try Header.deserialize(&header_buffer);
+        if (header.tombstone_count == 0) return;
+
+        // Seek to tombstone section
+        _ = try file.seek(header.tombstone_offset, .start);
+
+        // Read all tombstones
+        for (0..header.tombstone_count) |_| {
+            var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
+            const tombstone_bytes_read = try file.read(&tombstone_buffer);
+            if (tombstone_bytes_read != tombstone.TOMBSTONE_SIZE) {
+                return error.CorruptedEntry;
+            }
+
+            const tombstone_record = try TombstoneRecord.deserialize(&tombstone_buffer);
+            try self.tombstone_index.append(tombstone_record);
+        }
+
+        self.tombstone_count = header.tombstone_count;
     }
 
     /// Calculate CRC32 checksum over file content (excluding header checksum field and footer)
@@ -463,6 +553,7 @@ pub const SSTable = struct {
 
         const header = try Header.deserialize(&header_buffer);
         self.block_count = header.block_count;
+        self.tombstone_count = header.tombstone_count;
 
         if (header.file_checksum != 0) {
             const content_end = if (header.bloom_filter_size > 0)
@@ -506,6 +597,23 @@ pub const SSTable = struct {
 
             self.bloom_filter = try BloomFilter.deserialize(self.arena_coordinator.allocator(), bloom_buffer);
         }
+
+        // Load tombstones if present
+        if (header.tombstone_count > 0) {
+            // Safety: Tombstone offset validated during header parsing
+            _ = try file.seek(@intCast(header.tombstone_offset), .start);
+
+            self.tombstone_index.clearRetainingCapacity();
+            try self.tombstone_index.ensureTotalCapacity(header.tombstone_count);
+
+            for (0..header.tombstone_count) |_| {
+                var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
+                _ = try file.read(&tombstone_buffer);
+
+                const tombstone_record = try TombstoneRecord.deserialize(&tombstone_buffer);
+                try self.tombstone_index.append(tombstone_record);
+            }
+        }
     }
 
     /// Find and return a block by its ID from this SSTable
@@ -515,6 +623,13 @@ pub const SSTable = struct {
     pub fn find_block(self: *SSTable, block_id: BlockId) !?ContextBlock {
         // Skip per-operation index validation to prevent read path performance regression
         // Index ordering validation on every find_block call causes significant overhead
+
+        // Check tombstones first - tombstoned blocks should not be returned
+        for (self.tombstone_index.items) |tombstone_record| {
+            if (tombstone_record.block_id.eql(block_id)) {
+                return null;
+            }
+        }
 
         if (self.bloom_filter) |*filter| {
             if (!filter.might_contain(block_id)) {
@@ -565,6 +680,13 @@ pub const SSTable = struct {
     pub fn find_block_view(self: *SSTable, block_id: BlockId) !?ParsedBlock {
         // Skip per-operation index validation to prevent read path performance regression
         // Index ordering validation on every find_block call causes significant overhead
+
+        // Check tombstones first - tombstoned blocks should not be returned
+        for (self.tombstone_index.items) |tombstone_record| {
+            if (tombstone_record.block_id.eql(block_id)) {
+                return null;
+            }
+        }
 
         if (self.bloom_filter) |*filter| {
             if (!filter.might_contain(block_id)) {
@@ -621,7 +743,11 @@ pub const SSTable = struct {
 
         for (self.index.items[0 .. self.index.items.len - 1], self.index.items[1..]) |current, next| {
             const order = std.mem.order(u8, &current.block_id.bytes, &next.block_id.bytes);
-            assert_mod.fatal_assert(order == .lt, "SSTable index not properly sorted: {any} >= {any} at positions", .{ current.block_id, next.block_id });
+            assert_mod.fatal_assert(
+                order == .lt,
+                "SSTable index not properly sorted: {any} >= {any} at positions",
+                .{ current.block_id, next.block_id },
+            );
         }
     }
 };
@@ -656,7 +782,12 @@ pub const SSTableIterator = struct {
     pub fn next(self: *SSTableIterator) !?ContextBlock {
         // Safety: Converting pointer to integer for corruption detection
         assert_mod.assert_fmt(@intFromPtr(self.sstable) != 0, "Iterator sstable pointer corrupted", .{});
-        assert_mod.assert_index_valid(self.current_index, self.sstable.index.items.len + 1, "Iterator index out of bounds: {} >= {}", .{ self.current_index, self.sstable.index.items.len + 1 });
+        assert_mod.assert_index_valid(
+            self.current_index,
+            self.sstable.index.items.len + 1,
+            "Iterator index out of bounds: {} >= {}",
+            .{ self.current_index, self.sstable.index.items.len + 1 },
+        );
 
         if (self.current_index >= self.sstable.index.items.len) {
             return null;
@@ -748,6 +879,10 @@ pub const Compactor = struct {
         var all_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
         defer all_blocks.deinit();
 
+        // Collect tombstones from all input SSTables
+        var all_tombstones = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
+        defer all_tombstones.deinit();
+
         var total_capacity: u32 = 0;
         for (input_tables) |table| {
             total_capacity += table.block_count;
@@ -761,14 +896,21 @@ pub const Compactor = struct {
             while (try iter.next()) |block| {
                 try all_blocks.append(block);
             }
+
+            // Collect tombstones from this table
+            for (table.tombstone_index.items) |tombstone_record| {
+                try all_tombstones.append(tombstone_record);
+            }
         }
 
         const unique_blocks = try self.dedup_blocks(all_blocks.items);
+        const unique_tombstones = try self.dedup_and_gc_tombstones(all_tombstones.items);
 
         defer self.backing_allocator.free(unique_blocks);
+        defer self.backing_allocator.free(unique_tombstones);
         // Arena coordinator handles cleanup of cloned block strings automatically
 
-        try output_table.write_blocks(unique_blocks);
+        try output_table.write_blocks(unique_blocks, unique_tombstones);
 
         for (input_paths) |path| {
             self.filesystem.remove(path) catch |err| {
@@ -780,7 +922,11 @@ pub const Compactor = struct {
     /// Remove duplicate blocks, keeping the one with highest version
     fn dedup_blocks(self: *Compactor, blocks: []ContextBlock) ![]ContextBlock {
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(@intFromPtr(blocks.ptr) != 0 or blocks.len == 0, "Blocks array has null pointer with non-zero length", .{});
+        assert_mod.assert_fmt(
+            @intFromPtr(blocks.ptr) != 0 or blocks.len == 0,
+            "Blocks array has null pointer with non-zero length",
+            .{},
+        );
 
         if (blocks.len == 0) return try self.backing_allocator.alloc(ContextBlock, 0);
 
@@ -820,6 +966,52 @@ pub const Compactor = struct {
         }
 
         self.backing_allocator.free(sorted);
-        return try unique.toOwnedSlice();
+        return unique.toOwnedSlice();
+    }
+
+    /// Remove duplicate tombstones, keeping the one with highest deletion sequence,
+    /// and garbage collect old tombstones based on age
+    fn dedup_and_gc_tombstones(self: *Compactor, tombstones: []TombstoneRecord) ![]TombstoneRecord {
+        if (tombstones.len == 0) return try self.backing_allocator.alloc(TombstoneRecord, 0);
+
+        const sorted = try self.backing_allocator.dupe(TombstoneRecord, tombstones);
+        std.mem.sort(TombstoneRecord, sorted, {}, struct {
+            fn less_than(context: void, a: TombstoneRecord, b: TombstoneRecord) bool {
+                _ = context;
+                const order = std.mem.order(u8, &a.block_id.bytes, &b.block_id.bytes);
+                if (order == .eq) {
+                    return a.deletion_sequence > b.deletion_sequence;
+                }
+                return order == .lt;
+            }
+        }.less_than);
+
+        var unique = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
+        defer unique.deinit();
+
+        try unique.ensureTotalCapacity(sorted.len);
+
+        // Get current timestamp for garbage collection
+        const current_timestamp = @as(u64, @intCast(std.time.microTimestamp()));
+        const gc_grace_seconds = config_mod.DEFAULT_TOMBSTONE_GC_GRACE_SECONDS;
+
+        var prev_id: ?BlockId = null;
+        for (sorted) |tombstone_record| {
+            // Skip duplicates (keep only highest sequence per block_id)
+            if (prev_id != null and tombstone_record.block_id.eql(prev_id.?)) {
+                continue;
+            }
+            
+            // Skip tombstones that can be garbage collected
+            if (tombstone_record.can_garbage_collect(current_timestamp, gc_grace_seconds)) {
+                continue;
+            }
+            
+            try unique.append(tombstone_record);
+            prev_id = tombstone_record.block_id;
+        }
+
+        self.backing_allocator.free(sorted);
+        return unique.toOwnedSlice();
     }
 };

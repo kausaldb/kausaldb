@@ -6,19 +6,21 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
-const assert_mod = @import("core/assert.zig");
-const assert = assert_mod.assert;
-const MiB = 1024 * 1024;
 
 pub const std_options = .{
     .log_level = build_options.log_level,
 };
 
 comptime {
+    // Scenarios
     _ = @import("tests/scenarios/storage.zig");
     _ = @import("tests/scenarios/component.zig");
     _ = @import("tests/scenarios/query.zig");
     _ = @import("tests/scenarios/ingestion.zig");
+    _ = @import("tests/scenarios/vfs_fault.zig");
 
+    _ = @import("tests/deletion_compaction_test.zig");
+
+    // Regression tests (keeps bugs fixed)
     _ = @import("tests/regression/regression.zig");
 }

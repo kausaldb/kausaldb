@@ -19,6 +19,11 @@ const assert = assert_mod.assert;
 /// cause excessive I/O overhead, larger values risk OOM with large blocks.
 pub const DEFAULT_MEMTABLE_MAX_SIZE: u64 = 128 * 1024 * 1024;
 
+/// Default tombstone garbage collection grace period in seconds (6 hours).
+/// Tombstones older than this period can be safely garbage collected during compaction.
+/// Conservative enough to handle delayed compactions but aggressive enough to prevent accumulation.
+pub const DEFAULT_TOMBSTONE_GC_GRACE_SECONDS: u64 = 6 * 3600;
+
 /// Configuration validation errors.
 pub const ConfigError = error{
     /// Memtable max size too small (must be at least 1MB for testing, 16MB+ recommended for production)
@@ -32,6 +37,11 @@ pub const Config = struct {
     /// Maximum memory size for memtable before flushing to SSTable.
     /// Prevents unpredictable memory usage and potential OOM crashes with large blocks.
     memtable_max_size: u64 = DEFAULT_MEMTABLE_MAX_SIZE,
+    
+    /// Tombstone garbage collection grace period in seconds.
+    /// Tombstones older than this period are removed during compaction.
+    /// Setting too low risks resurrection bugs; setting too high wastes disk space.
+    tombstone_gc_grace_seconds: u64 = DEFAULT_TOMBSTONE_GC_GRACE_SECONDS,
 
     /// Validate configuration parameters for operational safety.
     /// Production deployments should use 16MB+ for memtable_max_size to avoid
@@ -46,10 +56,11 @@ pub const Config = struct {
     }
 
     /// Create a minimal configuration suitable for testing environments.
-    /// Uses 1MB memtable to enable fast test iteration without excessive memory usage.
+    /// Uses 1MB memtable and 1-hour tombstone GC for fast test iteration.
     pub fn minimal_for_testing() Config {
         return Config{
             .memtable_max_size = 1024 * 1024, // 1MB
+            .tombstone_gc_grace_seconds = 3600, // 1 hour
         };
     }
 

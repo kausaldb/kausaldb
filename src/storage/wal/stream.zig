@@ -208,7 +208,7 @@ pub const WALEntryStream = struct {
             return StreamError.CorruptedEntry;
         }
 
-        if (entry_type == 0 or entry_type > 3) {
+        if (entry_type == 0 or entry_type > 4) {
             const looks_like_eof_padding = (checksum <= 0xFF) and (entry_type == 0) and (payload_size == 0);
 
             if (looks_like_eof_padding) {

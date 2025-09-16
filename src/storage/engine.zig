@@ -32,6 +32,7 @@ const sstable = @import("sstable.zig");
 const sstable_manager_mod = @import("sstable_manager.zig");
 const state_machines = @import("../core/state_machines.zig");
 const tiered_compaction = @import("tiered_compaction.zig");
+const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
 const wal = @import("wal.zig");
 
@@ -67,6 +68,7 @@ pub const WAL = wal.WAL;
 pub const WALEntry = wal.WALEntry;
 pub const WALEntryType = wal.WALEntryType;
 pub const WALError = wal.WALError;
+pub const TombstoneRecord = tombstone.TombstoneRecord;
 
 /// Storage engine errors.
 pub const StorageError = error{
@@ -176,6 +178,8 @@ pub const StorageEngine = struct {
     /// eliminating corruption from struct copying while maintaining O(1) cleanup.
     storage_arena: *std.heap.ArenaAllocator,
     arena_coordinator: *ArenaCoordinator,
+    /// Monotonic deletion sequence counter for tombstone ordering
+    deletion_sequence: std.atomic.Value(u64),
 
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
@@ -261,6 +265,7 @@ pub const StorageEngine = struct {
             .storage_metrics = StorageMetrics.init(),
             .storage_arena = storage_arena,
             .arena_coordinator = arena_coordinator,
+            .deletion_sequence = std.atomic.Value(u64).init(0),
 
             // TEMP: Skip sstable_pool field
             // .sstable_pool = sstable_pool,
@@ -641,6 +646,11 @@ pub const StorageEngine = struct {
             return owned_block;
         }
 
+        // Check tombstones to prevent resurrection from SSTables
+        if (self.memtable_manager.is_block_tombstoned(block_id)) {
+            return null;
+        }
+
         // SSTable fallback with zero-copy optimization: eliminates redundant allocations
         // by using ParsedBlock view until ownership transfer is required
         const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| {
@@ -694,13 +704,17 @@ pub const StorageEngine = struct {
             return OwnedBlock.take_ownership(block, owner);
         }
 
+        // Check tombstones to prevent resurrection from SSTables
+        if (self.memtable_manager.is_block_tombstoned(block_id)) {
+            return null;
+        }
+
         // Slower path: check SSTables with zero-copy optimization
         if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
             // Convert to owned block only when ownership transfer is required
             const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
             return OwnedBlock.take_ownership(owned_context_block, owner);
         }
-
         return null;
     }
 
@@ -716,6 +730,11 @@ pub const StorageEngine = struct {
 
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
             return OwnedBlock.take_ownership(block_ptr.*, .storage_engine);
+        }
+
+        // Check tombstones to prevent resurrection from SSTables
+        if (self.memtable_manager.is_block_tombstoned(block_id)) {
+            return null;
         }
 
         if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
@@ -738,6 +757,11 @@ pub const StorageEngine = struct {
             return OwnedBlock.take_ownership(block, .query_engine);
         }
 
+        // Check tombstones to prevent resurrection from SSTables
+        if (self.memtable_manager.is_block_tombstoned(block_id)) {
+            return null;
+        }
+
         const parsed_block_result = try self.sstable_manager.find_block_view_in_sstables(block_id);
 
         if (parsed_block_result) |parsed_block| {
@@ -755,8 +779,16 @@ pub const StorageEngine = struct {
             return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
         }
 
-        self.memtable_manager.delete_block_durable(block_id) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("delete_block_durable", block_id));
+        const sequence = self.deletion_sequence.fetchAdd(1, .monotonic);
+        const tombstone_record = TombstoneRecord{
+            .block_id = block_id,
+            .deletion_sequence = sequence,
+            .deletion_timestamp = @intCast(std.time.microTimestamp()),
+            .generation = 0,
+        };
+
+        self.memtable_manager.put_tombstone_durable(tombstone_record) catch |err| {
+            error_context.log_storage_error(err, error_context.block_context("put_tombstone_durable", block_id));
             return err;
         };
 

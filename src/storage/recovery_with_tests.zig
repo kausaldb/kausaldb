@@ -43,7 +43,7 @@ const WALEntry = wal.WALEntry;
 pub const RecoveryStats = struct {
     blocks_recovered: u32,
     edges_recovered: u32,
-    blocks_deleted: u32,
+    tombstones_recovered: u32,
     recovery_time_ns: u64,
     corrupted_entries_skipped: u32,
     total_entries_processed: u32,
@@ -52,7 +52,7 @@ pub const RecoveryStats = struct {
         return RecoveryStats{
             .blocks_recovered = 0,
             .edges_recovered = 0,
-            .blocks_deleted = 0,
+            .tombstones_recovered = 0,
             .recovery_time_ns = 0,
             .corrupted_entries_skipped = 0,
             .total_entries_processed = 0,
@@ -167,15 +167,20 @@ pub fn apply_wal_entry_to_storage(entry: WALEntry, context: *anyopaque) wal.WALE
             };
             recovery_ctx.stats.blocks_recovered += 1;
         },
-        .delete_block => {
-            const block_id = entry.extract_block_id() catch |err| {
-                log.warn("Failed to extract block_id from WAL entry: {any}", .{err});
+        .tombstone_block => {
+            const tombstone = @import("tombstone.zig");
+            const tombstone_record = tombstone.TombstoneRecord.deserialize(entry.payload) catch |err| {
+                log.warn("Failed to extract tombstone from WAL entry: {any}", .{err});
                 recovery_ctx.stats.corrupted_entries_skipped += 1;
                 return;
             };
-            recovery_ctx.block_index.remove_block(block_id);
-            recovery_ctx.graph_index.remove_block_edges(block_id);
-            recovery_ctx.stats.blocks_deleted += 1;
+            recovery_ctx.block_index.put_tombstone(tombstone_record) catch |err| {
+                log.warn("Failed to recover tombstone for block {any}: {any}", .{ tombstone_record.block_id, err });
+                recovery_ctx.stats.corrupted_entries_skipped += 1;
+                return;
+            };
+            recovery_ctx.graph_index.remove_block_edges(tombstone_record.block_id);
+            recovery_ctx.stats.tombstones_recovered += 1;
         },
         .put_edge => {
             const edge = entry.extract_edge() catch |err| {

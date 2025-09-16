@@ -25,6 +25,7 @@ const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
+const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
 
 const comptime_assert = assert_mod.comptime_assert;
@@ -39,6 +40,7 @@ const GraphEdge = context_block.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const ParsedBlock = context_block.ParsedBlock;
 const SimulationVFS = simulation_vfs.SimulationVFS;
+const TombstoneRecord = tombstone.TombstoneRecord;
 const VFS = vfs.VFS;
 const VFile = vfs.VFile;
 
@@ -268,8 +270,8 @@ pub const SSTable = struct {
         self.index.deinit();
     }
 
-    /// Write blocks to SSTable file in sorted order
-    pub fn write_blocks(self: *SSTable, blocks: anytype) !void {
+    /// Write blocks and tombstones to SSTable file in sorted order
+    pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord) !void {
         const BlocksType = @TypeOf(blocks);
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
@@ -284,7 +286,8 @@ pub const SSTable = struct {
         if (!supported_block_write) {
             @compileError("write_blocks() called with unsupported type '" ++ @typeName(BlocksType) ++ "'. Accepts []const ContextBlock, []ContextBlock, []const OwnedBlock, or []OwnedBlock only");
         }
-        assert_mod.assert_not_empty(blocks, "Cannot write empty blocks array", .{});
+        // Handle empty case - create empty SSTable with just tombstones if needed
+        if (blocks.len == 0 and tombstones.len == 0) return;
         assert_mod.assert_fmt(blocks.len <= 1000000, "Too many blocks for single SSTable: {}", .{blocks.len});
 
         self.index.clearAndFree();
@@ -754,7 +757,7 @@ pub const Compactor = struct {
         defer self.backing_allocator.free(unique_blocks);
         // Arena coordinator handles cleanup of cloned block strings automatically
 
-        try output_table.write_blocks(unique_blocks);
+        try output_table.write_blocks(unique_blocks, &[_]TombstoneRecord{});
 
         for (input_paths) |path| {
             self.filesystem.remove(path) catch |err| {
@@ -844,7 +847,7 @@ test "SSTable write and read" {
     try blocks.append(block1);
     try blocks.append(block2);
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
 
     try sstable.read_index();
     try std.testing.expectEqual(@as(u32, 2), sstable.block_count);
@@ -903,7 +906,7 @@ test "SSTable iterator" {
         .content = "content 2",
     });
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
     try sstable.read_index();
 
     var iter = sstable.iterator();
@@ -960,7 +963,7 @@ test "SSTable compaction" {
         .content = "content 1",
     });
 
-    try sstable1.write_blocks(blocks1.items);
+    try sstable1.write_blocks(blocks1.items, &[_]TombstoneRecord{});
 
     var sstable2 = SSTable.init(&coordinator, allocator, sim_vfs.vfs(), try allocator.dupe(u8, "table2.sst"));
     defer sstable2.deinit();
@@ -984,7 +987,7 @@ test "SSTable compaction" {
         .content = "content 2",
     });
 
-    try sstable2.write_blocks(blocks2.items);
+    try sstable2.write_blocks(blocks2.items, &[_]TombstoneRecord{});
 
     var compactor = Compactor.init(&coordinator, allocator, sim_vfs.vfs(), "/test/");
     const input_paths = [_][]const u8{ "table1.sst", "table2.sst" };
@@ -1029,7 +1032,7 @@ test "SSTable checksum validation" {
     defer blocks.deinit();
     try blocks.append(block);
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
 
     try sstable.read_index();
     try std.testing.expectEqual(@as(u32, 1), sstable.block_count);
@@ -1086,7 +1089,7 @@ test "SSTable Bloom filter functionality" {
     try blocks.append(block1);
     try blocks.append(block2);
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
 
     try std.testing.expect(sstable.bloom_filter != null);
 
@@ -1145,7 +1148,7 @@ test "SSTable Bloom filter persistence" {
         for (blocks) |block| {
             try blocks_list.append(block);
         }
-        try sstable_write.write_blocks(blocks_list.items);
+        try sstable_write.write_blocks(blocks_list.items, &[_]TombstoneRecord{});
         try std.testing.expect(sstable_write.bloom_filter != null);
     }
 
@@ -1206,7 +1209,7 @@ test "SSTable Bloom filter with many blocks" {
         try blocks.append(block);
     }
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
 
     try std.testing.expect(sstable.bloom_filter != null);
     if (sstable.bloom_filter) |*filter| {
@@ -1265,7 +1268,7 @@ test "SSTable zero-copy ParsedBlock vs traditional deserialization performance" 
     defer blocks.deinit();
     try blocks.append(test_block);
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
 
     // Test 1: Zero-copy ParsedBlock access
     const parsed_block = try sstable.find_block_view(test_block.id);
@@ -1340,7 +1343,7 @@ test "SSTable binary search performance" {
         try blocks.append(block);
     }
 
-    try sstable.write_blocks(blocks.items);
+    try sstable.write_blocks(blocks.items, &[_]TombstoneRecord{});
     try sstable.read_index();
 
     for (blocks.items) |original_block| {

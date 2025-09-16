@@ -1062,7 +1062,7 @@ pub const SimulationRunner = struct {
 
 /// Create deterministic block ID from seed for reproducible tests
 pub fn create_deterministic_block_id(seed: u32) BlockId {
-    return BlockId.from_u64(@as(u64, seed) * 0x1234567890ABCDEF + 0xFEDCBA0987654321);
+    return BlockId.from_u64(@as(u64, seed) *% 0x1234567890ABCDEF +% 0xFEDCBA0987654321);
 }
 
 /// Test assertion helpers for performance and memory testing

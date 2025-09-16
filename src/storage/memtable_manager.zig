@@ -19,6 +19,7 @@ const graph_edge_index = @import("graph_edge_index.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const vfs = @import("../core/vfs.zig");
+const tombstone = @import("tombstone.zig");
 const wal = @import("wal.zig");
 
 const ArenaCoordinator = memory.ArenaCoordinator;
@@ -30,13 +31,19 @@ const GraphEdge = context_block.GraphEdge;
 const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const OwnedBlock = ownership.OwnedBlock;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
+const TombstoneRecord = tombstone.TombstoneRecord;
 const VFS = vfs.VFS;
 const WAL = wal.WAL;
 const WALEntry = wal.WALEntry;
 
 pub const BlockIterator = struct {
     block_index: *const BlockIndex,
-    hash_map_iterator: std.HashMap(BlockId, OwnedBlock, BlockIndex.BlockIdContext, std.hash_map.default_max_load_percentage).Iterator,
+    hash_map_iterator: std.HashMap(
+        BlockId,
+        OwnedBlock,
+        BlockIndex.BlockIdContext,
+        std.hash_map.default_max_load_percentage,
+    ).Iterator,
 
     pub fn next(self: *BlockIterator) ?*const OwnedBlock {
         if (self.hash_map_iterator.next()) |entry| {
@@ -108,10 +115,26 @@ pub const MemtableManager = struct {
     pub fn deinit(self: *MemtableManager) void {
         concurrency.assert_main_thread();
 
-        fatal_assert(@intFromPtr(self) != 0, "MemtableManager self pointer is null - memory corruption detected", .{});
-        fatal_assert(@intFromPtr(&self.wal) != 0, "MemtableManager WAL pointer corrupted - memory safety violation detected", .{});
-        fatal_assert(@intFromPtr(&self.block_index) != 0, "MemtableManager block_index pointer corrupted - memory safety violation detected", .{});
-        fatal_assert(@intFromPtr(&self.graph_index) != 0, "MemtableManager graph_index pointer corrupted - memory safety violation detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "MemtableManager self pointer is null - memory corruption detected",
+            .{},
+        );
+        fatal_assert(
+            @intFromPtr(&self.wal) != 0,
+            "MemtableManager WAL pointer corrupted - memory safety violation detected",
+            .{},
+        );
+        fatal_assert(
+            @intFromPtr(&self.block_index) != 0,
+            "MemtableManager block_index pointer corrupted - memory safety violation detected",
+            .{},
+        );
+        fatal_assert(
+            @intFromPtr(&self.graph_index) != 0,
+            "MemtableManager graph_index pointer corrupted - memory safety violation detected",
+            .{},
+        );
 
         self.wal.deinit();
         self.block_index.deinit();
@@ -174,44 +197,32 @@ pub const MemtableManager = struct {
         try self.block_index.put_block(block);
     }
 
-    /// Remove a block from the memtable with full durability guarantees.
-    /// WAL-first design ensures delete operation is recorded before state update.
-    /// This is the primary method for durable block deletion operations.
-    pub fn delete_block_durable(self: *MemtableManager, block_id: BlockId) !void {
+    /// Add tombstone record with full durability guarantees.
+    /// WAL-first design ensures tombstone operation is recorded before state update.
+    pub fn put_tombstone_durable(self: *MemtableManager, tombstone_record: TombstoneRecord) !void {
         concurrency.assert_main_thread();
 
-        // CRITICAL: WAL write must complete before memtable update for durability guarantees
-        const wal_entry = try WALEntry.create_delete_block(self.backing_allocator, block_id);
+        const wal_entry = try WALEntry.create_tombstone_block(self.backing_allocator, tombstone_record);
         defer wal_entry.deinit(self.backing_allocator);
         self.wal.write_entry(wal_entry) catch |err| {
-            // WAL write failure due to resource constraints (e.g. disk full) is recoverable.
-            // Log the error and propagate it to the client rather than crashing the system.
             error_context.log_storage_error(err, error_context.StorageContext{
-                .operation = "wal_write_delete_entry",
-                .block_id = block_id,
+                .operation = "wal_write_tombstone_entry",
+                .block_id = tombstone_record.block_id,
             });
             return err;
         };
 
-        // Validate WAL write succeeded before proceeding with deletion
-        if (builtin.mode == .Debug) {
-            // In debug builds, verify the deletion operation order is correct
-            fatal_assert(true, "WAL delete operation completed, proceeding with memtable deletion", .{});
-        }
-
-        self.block_index.remove_block(block_id);
-        self.graph_index.remove_block_edges(block_id);
+        try self.block_index.put_tombstone(tombstone_record);
+        self.graph_index.remove_block_edges(tombstone_record.block_id);
     }
 
-    /// Remove a block from the memtable by ID without WAL durability.
-    /// Also removes all associated graph edges to maintain consistency.
+    /// Add tombstone record without WAL durability.
     /// Used for WAL recovery operations where durability is already guaranteed.
-    /// For regular operations, use delete_block_durable() instead.
-    pub fn delete_block(self: *MemtableManager, block_id: BlockId) void {
+    pub fn put_tombstone(self: *MemtableManager, tombstone_record: TombstoneRecord) !void {
         concurrency.assert_main_thread();
 
-        self.block_index.remove_block(block_id);
-        self.graph_index.remove_block_edges(block_id);
+        try self.block_index.put_tombstone(tombstone_record);
+        self.graph_index.remove_block_edges(tombstone_record.block_id);
     }
 
     /// Add a graph edge with full durability guarantees.
@@ -246,6 +257,12 @@ pub const MemtableManager = struct {
     /// Used by the storage engine for LSM-tree read path (memtable first).
     pub fn find_block_in_memtable(self: *const MemtableManager, id: BlockId) ?ContextBlock {
         return self.block_index.find_block(id);
+    }
+
+    /// Check if a block is tombstoned (marked for deletion).
+    /// Used by StorageEngine to prevent resurrection from SSTables.
+    pub fn is_block_tombstoned(self: *const MemtableManager, id: BlockId) bool {
+        return self.block_index.tombstones.contains(id);
     }
 
     /// Find a block in memtable and clone it with specified ownership.
@@ -290,7 +307,11 @@ pub const MemtableManager = struct {
         // P0.5: Verify WAL write completed before memtable update
         // This ordering is CRITICAL for durability guarantees
         const wal_entries_after = self.wal.stats.entries_written;
-        assert_fmt(wal_entries_after > wal_entries_before, "WAL entry count must increase before memtable update: {} -> {}", .{ wal_entries_before, wal_entries_after });
+        assert_fmt(
+            wal_entries_after > wal_entries_before,
+            "WAL entry count must increase before memtable update: {} -> {}",
+            .{ wal_entries_before, wal_entries_after },
+        );
 
         // Only update memtable AFTER WAL persistence is confirmed
         try self.block_index.put_block(block.*);
@@ -334,7 +355,12 @@ pub const MemtableManager = struct {
     /// Used by StorageEngine.iterate_all_blocks for mixed memtable+SSTable iteration.
     pub fn raw_iterator(
         self: *const MemtableManager,
-    ) std.HashMap(BlockId, OwnedBlock, BlockIndex.BlockIdContext, std.hash_map.default_max_load_percentage).Iterator {
+    ) std.HashMap(
+        BlockId,
+        OwnedBlock,
+        BlockIndex.BlockIdContext,
+        std.hash_map.default_max_load_percentage,
+    ).Iterator {
         return self.block_index.blocks.iterator();
     }
 
@@ -399,11 +425,19 @@ pub const MemtableManager = struct {
 
         // In normal operation, WAL should have at least as many entries as memtable blocks
         // (WAL may have more due to edges, deletes, or unflushed entries)
-        assert_fmt(wal_entries >= memtable_blocks, "WAL entry count {} cannot be less than memtable block count {} - durability ordering violated", .{ wal_entries, memtable_blocks });
+        assert_fmt(
+            wal_entries >= memtable_blocks,
+            "WAL entry count {} cannot be less than memtable block count {} - durability ordering violated",
+            .{ wal_entries, memtable_blocks },
+        );
 
         // Verify WAL is in a consistent state for durability
         if (self.wal.active_file != null) {
-            assert_fmt(self.wal.statistics().entries_written > 0 or memtable_blocks == 0, "Active WAL file exists but no entries written with {} blocks in memtable - inconsistent state", .{memtable_blocks});
+            assert_fmt(
+                self.wal.statistics().entries_written > 0 or memtable_blocks == 0,
+                "Active WAL file exists but no entries written with {} blocks in memtable - inconsistent state",
+                .{memtable_blocks},
+            );
         }
     }
 
@@ -449,13 +483,21 @@ pub const MemtableManager = struct {
         const total_memory = self.block_index.memory_used;
 
         // MemtableManager memory should equal BlockIndex memory (main consumer)
-        assert_fmt(total_memory == block_index_memory, "MemtableManager memory accounting inconsistency: total={} block_index={}", .{ total_memory, block_index_memory });
+        assert_fmt(
+            total_memory == block_index_memory,
+            "MemtableManager memory accounting inconsistency: total={} block_index={}",
+            .{ total_memory, block_index_memory },
+        );
 
         // Validate memory usage is reasonable given block count
         const current_block_count = @as(u32, @intCast(self.block_index.blocks.count()));
         if (current_block_count > 0) {
             const avg_block_size = total_memory / current_block_count;
-            assert_fmt(avg_block_size > 0 and avg_block_size < 100 * 1024 * 1024, "Average block size {} indicates memory corruption", .{avg_block_size});
+            assert_fmt(
+                avg_block_size > 0 and avg_block_size < 100 * 1024 * 1024,
+                "Average block size {} indicates memory corruption",
+                .{avg_block_size},
+            );
         }
     }
 
@@ -470,11 +512,19 @@ pub const MemtableManager = struct {
         fatal_assert(@intFromPtr(&self.wal) != 0, "WAL pointer corruption in MemtableManager", .{});
 
         // Configuration corruption could lead to OOM or pathological performance degradation
-        assert_fmt(self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024, "Memtable max size {} is unreasonable - indicates corruption", .{self.memtable_max_size});
+        assert_fmt(
+            self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024,
+            "Memtable max size {} is unreasonable - indicates corruption",
+            .{self.memtable_max_size},
+        );
 
         // Validate current usage doesn't exceed configured maximum (with small buffer for overhead)
         const current_usage = self.block_index.memory_used;
-        assert_fmt(current_usage <= self.memtable_max_size * 2, "Memory usage {} exceeds 2x max size {} - indicates accounting corruption", .{ current_usage, self.memtable_max_size });
+        assert_fmt(
+            current_usage <= self.memtable_max_size * 2,
+            "Memory usage {} exceeds 2x max size {} - indicates accounting corruption",
+            .{ current_usage, self.memtable_max_size },
+        );
     }
 
     /// Clean up old WAL segments after successful memtable flush.
@@ -491,7 +541,7 @@ pub const MemtableManager = struct {
     pub fn flush_to_sstable(self: *MemtableManager, sstable_manager: anytype) !void {
         concurrency.assert_main_thread();
 
-        if (self.block_index.blocks.count() == 0) return;
+        if (self.block_index.blocks.count() == 0 and self.block_index.tombstones.count() == 0) return;
 
         var owned_blocks = std.array_list.Managed(OwnedBlock).init(self.backing_allocator);
         defer owned_blocks.deinit();
@@ -501,7 +551,11 @@ pub const MemtableManager = struct {
             try owned_blocks.append(owned_block_ptr.*);
         }
 
-        try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items);
+        // Get tombstones before clearing memtable
+        const tombstones = try self.block_index.collect_tombstones(self.backing_allocator);
+        defer self.backing_allocator.free(tombstones);
+
+        try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, tombstones);
 
         self.clear();
 
@@ -521,10 +575,11 @@ pub const MemtableManager = struct {
                 const owned_block = try entry.extract_block(temp_allocator);
                 try self.put_block(owned_block.read(.storage_engine).*);
             },
-            .delete_block => {
-                const block_id = try entry.extract_block_id();
-                self.delete_block(block_id);
+            .tombstone_block => {
+                const tombstone_record = try TombstoneRecord.deserialize(entry.payload);
+                try self.put_tombstone(tombstone_record);
             },
+
             .put_edge => {
                 const edge = try entry.extract_edge();
                 try self.put_edge(edge);

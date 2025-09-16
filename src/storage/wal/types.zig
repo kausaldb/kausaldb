@@ -47,6 +47,9 @@ comptime {
 pub const WALError = error{
     NotInitialized,
     InvalidChecksum,
+    InvalidMagic,
+    UnsupportedVersion,
+    ChecksumMismatch,
     InvalidEntryType,
     BufferTooSmall,
     CorruptedEntry,
@@ -63,7 +66,7 @@ pub const WALError = error{
 /// WAL entry types as defined in the data model specification
 pub const WALEntryType = enum(u8) {
     put_block = 0x01,
-    delete_block = 0x02,
+    tombstone_block = 0x02,
     put_edge = 0x03,
 
     pub fn from_u8(value: u8) WALError!WALEntryType {
@@ -95,7 +98,7 @@ pub const WALStats = struct {
 
 test "WALEntryType from_u8 valid values" {
     try testing.expectEqual(WALEntryType.put_block, try WALEntryType.from_u8(0x01));
-    try testing.expectEqual(WALEntryType.delete_block, try WALEntryType.from_u8(0x02));
+    try testing.expectEqual(WALEntryType.tombstone_block, try WALEntryType.from_u8(0x02));
     try testing.expectEqual(WALEntryType.put_edge, try WALEntryType.from_u8(0x03));
 }
 
@@ -147,7 +150,7 @@ test "WAL constants validation" {
 
 test "WALEntryType enum values" {
     try testing.expectEqual(@as(u8, 0x01), @intFromEnum(WALEntryType.put_block));
-    try testing.expectEqual(@as(u8, 0x02), @intFromEnum(WALEntryType.delete_block));
+    try testing.expectEqual(@as(u8, 0x02), @intFromEnum(WALEntryType.tombstone_block));
     try testing.expectEqual(@as(u8, 0x03), @intFromEnum(WALEntryType.put_edge));
 }
 

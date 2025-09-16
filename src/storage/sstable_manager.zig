@@ -21,6 +21,7 @@ const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const vfs = @import("../core/vfs.zig");
 const sstable = @import("sstable.zig");
 const tiered_compaction = @import("tiered_compaction.zig");
+const tombstone = @import("tombstone.zig");
 const assert_mod = @import("../core/assert.zig");
 
 const log = std.log.scoped(.sstable_manager);
@@ -28,6 +29,8 @@ const testing = std.testing;
 const assert = assert_mod.assert;
 const assert_fmt = assert_mod.assert_fmt;
 const fatal_assert = assert_mod.fatal_assert;
+
+const TombstoneRecord = tombstone.TombstoneRecord;
 
 const VFS = vfs.VFS;
 const ContextBlock = context_block.ContextBlock;
@@ -190,6 +193,7 @@ pub const SSTableManager = struct {
 
     /// Find a block using zero-copy ParsedBlock view without heap allocations.
     /// Eliminates redundant memory copies during SSTable reads for performance-critical paths.
+    /// Implements robust tombstone collection to prevent resurrection across SSTable boundaries.
     pub fn find_block_view_in_sstables(self: *SSTableManager, block_id: BlockId) !?ParsedBlock {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit();
@@ -197,7 +201,17 @@ pub const SSTableManager = struct {
         // Basic safety validation for the collected paths
         fatal_assert(sstable_paths.items.len < 10000, "Excessive SSTable count {} suggests corruption", .{sstable_paths.items.len});
 
-        // Search in reverse order (newer files first) for better performance
+        // Collect all successfully loaded SSTables and their tombstones upfront
+        // This ensures consistency - we only search SSTables we can validate for tombstones
+        var loaded_sstables = std.array_list.Managed(SSTable).init(self.backing_allocator);
+        defer {
+            for (loaded_sstables.items) |*loaded_sstable| {
+                loaded_sstable.deinit();
+            }
+            loaded_sstables.deinit();
+        }
+
+        // Load all SSTables in reverse order (newer files first)
         var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
@@ -206,13 +220,35 @@ pub const SSTableManager = struct {
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
             var sstable_file = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.vfs, sstable_path_copy);
 
-            // CRITICAL: Track SSTable index loading failures
+            // Only include SSTables that load successfully
             sstable_file.read_index() catch {
-                // Log and continue to next SSTable
                 continue;
             };
 
+            try loaded_sstables.append(sstable_file);
+        }
+
+        // Check all collected tombstones for the requested block
+        var total_tombstones_checked: u32 = 0;
+        for (loaded_sstables.items) |*sstable_file| {
+            total_tombstones_checked += @intCast(sstable_file.tombstone_index.items.len);
+            for (sstable_file.tombstone_index.items) |tombstone_record| {
+                if (tombstone_record.block_id.eql(block_id)) {
+                    return null;
+                }
+            }
+        }
+
+        // Search for the block in the same SSTables we checked for tombstones
+        for (loaded_sstables.items) |*sstable_file| {
             if (try sstable_file.find_block_view(block_id)) |parsed_block| {
+                // Debug: Verify we're not returning a tombstoned block
+                if (comptime builtin.mode == .Debug) {
+                    // Double-check that this SSTable doesn't have a tombstone for this block
+                    for (sstable_file.tombstone_index.items) |tombstone_record| {
+                        fatal_assert(!tombstone_record.block_id.eql(block_id), "CRITICAL BUG: Returning block {} that has tombstone in same SSTable", .{block_id});
+                    }
+                }
                 return parsed_block;
             }
         }
@@ -221,17 +257,17 @@ pub const SSTableManager = struct {
     }
 
     /// Create a new SSTable from memtable flush with implicit ownership validation.
-    pub fn create_new_sstable_from_memtable(self: *SSTableManager, owned_blocks: []const OwnedBlock) !void {
+    pub fn create_new_sstable_from_memtable(self: *SSTableManager, owned_blocks: []const OwnedBlock, tombstones: []const TombstoneRecord) !void {
         concurrency.assert_main_thread();
 
-        if (owned_blocks.len == 0) return; // Nothing to flush
+        if (owned_blocks.len == 0 and tombstones.len == 0) return; // Nothing to flush
 
         // Validate that blocks can be read for SSTable creation from memtable
         for (owned_blocks) |*owned_block| {
             _ = owned_block.read(.memtable_manager);
         }
 
-        return self.create_new_sstable_internal(owned_blocks, .memtable_manager);
+        return self.create_new_sstable_internal(owned_blocks, tombstones, .memtable_manager);
     }
 
     /// Create a new SSTable from owned blocks with explicit access validation.
@@ -247,12 +283,13 @@ pub const SSTableManager = struct {
             _ = owned_block.read(accessor); // Validates access permission
         }
 
-        return self.create_new_sstable_internal(owned_blocks, accessor);
+        return self.create_new_sstable_internal(owned_blocks, &[_]TombstoneRecord{}, accessor);
     }
 
     fn create_new_sstable_internal(
         self: *SSTableManager,
         owned_blocks: []const OwnedBlock,
+        tombstones: []const TombstoneRecord,
         comptime accessor: BlockOwnership,
     ) !void {
         const sstable_filename = try std.fmt.allocPrint(
@@ -260,7 +297,6 @@ pub const SSTableManager = struct {
             "{s}/sst/sstable_{:04}.sst",
             .{ self.data_dir, self.next_sstable_id },
         );
-        // Free after all consumers have made their own copies
         defer self.backing_allocator.free(sstable_filename);
         self.next_sstable_id += 1;
 
@@ -286,14 +322,11 @@ pub const SSTableManager = struct {
             sorted_blocks[i] = owned_block.read(accessor).*;
         }
 
-        var new_sstable = SSTable.init(self.arena_coordinator, self.backing_allocator, self.vfs, sstable_filename);
-        defer {
-            new_sstable.index.deinit();
-            if (new_sstable.bloom_filter) |*filter| {
-                filter.deinit();
-            }
-        }
-        try new_sstable.write_blocks(sorted_blocks);
+        // SSTable expects to own the file path, so create a copy for it
+        const sstable_path_copy = try self.backing_allocator.dupe(u8, sstable_filename);
+        var new_sstable = SSTable.init(self.arena_coordinator, self.backing_allocator, self.vfs, sstable_path_copy);
+        defer new_sstable.deinit();
+        try new_sstable.write_blocks(sorted_blocks, tombstones);
 
         // Register path in single ownership system and get reference
         const path_index = try self.register_sstable_path(sstable_filename);

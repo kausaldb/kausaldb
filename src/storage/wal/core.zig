@@ -201,7 +201,7 @@ pub const WAL = struct {
             if (serialized_checksum == 0x5555555555555555 or
                 serialized_checksum == 0xAAAAAAAAAAAAAAAA or
                 serialized_payload_size > MAX_PAYLOAD_SIZE or
-                serialized_type > 3)
+                serialized_type > 4)
             {
                 log.err("WAL corruption detected before write: checksum=0x{X} type={} payload_size={}", .{ serialized_checksum, serialized_type, serialized_payload_size });
                 return WALError.CorruptedEntry;

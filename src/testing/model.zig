@@ -915,9 +915,11 @@ pub const ModelState = struct {
                 else => return err,
             };
 
-            // If block exists in storage, it's not deleted regardless of model state
+            // Sync deletion state with storage reality
             if (found_in_storage != null) {
                 model_block.deleted = false;
+            } else {
+                model_block.deleted = true;
             }
         }
 

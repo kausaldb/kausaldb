@@ -12,8 +12,8 @@ const block_index = @import("block_index.zig");
 const concurrency = @import("../core/concurrency.zig");
 const context_block = @import("../core/types.zig");
 const graph_edge_index = @import("graph_edge_index.zig");
-// const harness = @import("../tests/harness.zig"); // Removed - harness deleted
 const memory = @import("../core/memory.zig");
+const tombstone = @import("tombstone.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const wal = @import("wal.zig");
@@ -31,19 +31,14 @@ const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const SimulationVFS = simulation_vfs.SimulationVFS;
-// Simple test data utility to replace deleted harness
-const TestData = struct {
-    pub fn deterministic_block_id(value: u32) BlockId {
-        return BlockId{ .bytes = [16]u8{ @intCast(value & 0xFF), @intCast((value >> 8) & 0xFF), @intCast((value >> 16) & 0xFF), @intCast((value >> 24) & 0xFF), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
-    }
-};
+const TombstoneRecord = tombstone.TombstoneRecord;
 const WALEntry = wal.WALEntry;
 
 /// Recovery statistics for monitoring and debugging.
 pub const RecoveryStats = struct {
     blocks_recovered: u32,
     edges_recovered: u32,
-    blocks_deleted: u32,
+    tombstones_recovered: u32,
     recovery_time_ns: u64,
     corrupted_entries_skipped: u32,
     total_entries_processed: u32,
@@ -52,7 +47,7 @@ pub const RecoveryStats = struct {
         return RecoveryStats{
             .blocks_recovered = 0,
             .edges_recovered = 0,
-            .blocks_deleted = 0,
+            .tombstones_recovered = 0,
             .recovery_time_ns = 0,
             .corrupted_entries_skipped = 0,
             .total_entries_processed = 0,
@@ -167,15 +162,19 @@ pub fn apply_wal_entry_to_storage(entry: WALEntry, context: *anyopaque) wal.WALE
             };
             recovery_ctx.stats.blocks_recovered += 1;
         },
-        .delete_block => {
-            const block_id = entry.extract_block_id() catch |err| {
-                log.warn("Failed to extract block_id from WAL entry: {any}", .{err});
+        .tombstone_block => {
+            const tombstone_record = TombstoneRecord.deserialize(entry.payload) catch |err| {
+                log.warn("Failed to extract tombstone from WAL entry: {any}", .{err});
                 recovery_ctx.stats.corrupted_entries_skipped += 1;
                 return;
             };
-            recovery_ctx.block_index.remove_block(block_id);
-            recovery_ctx.graph_index.remove_block_edges(block_id);
-            recovery_ctx.stats.blocks_deleted += 1;
+            recovery_ctx.block_index.put_tombstone(tombstone_record) catch |err| {
+                log.warn("Failed to recover tombstone for block {any}: {any}", .{ tombstone_record.block_id, err });
+                recovery_ctx.stats.corrupted_entries_skipped += 1;
+                return;
+            };
+            recovery_ctx.graph_index.remove_block_edges(tombstone_record.block_id);
+            recovery_ctx.stats.tombstones_recovered += 1;
         },
         .put_edge => {
             const edge = entry.extract_edge() catch |err| {
