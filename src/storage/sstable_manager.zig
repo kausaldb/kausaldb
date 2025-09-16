@@ -486,11 +486,11 @@ pub const SSTableManager = struct {
 
         // Check version compatibility
         const format_version = std.mem.readInt(u16, header_buffer[offset..][0..2], .little);
-        if (format_version > 1) {
+        if (format_version > 2) {
             const context = error_context.StorageContext{
                 .operation = "sstable_version_check",
                 .file_path = file_path,
-                .expected_value = 1,
+                .expected_value = 2,
                 .actual_value = format_version,
             };
             error_context.log_storage_error(error.UnsupportedVersion, context);
@@ -498,10 +498,10 @@ pub const SSTableManager = struct {
         }
         offset += 2;
 
-        // Skip flags (2 bytes) and index_offset (8 bytes)
-        offset += 10;
+        // Skip flags (2) + index_offset (8) + created_timestamp (8) + bloom_filter_offset (8) + tombstone_offset (8) + edge_offset (8)
+        offset += 42;
 
-        // Block count is at offset 16 in header for O(1) statistics without index loading
+        // Block count is at offset 48 in header for O(1) statistics without index loading
         const block_count = std.mem.readInt(u32, header_buffer[offset..][0..4], .little);
 
         // Validate block count is reasonable to catch corruption

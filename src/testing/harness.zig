@@ -1062,7 +1062,16 @@ pub const SimulationRunner = struct {
 
 /// Create deterministic block ID from seed for reproducible tests
 pub fn create_deterministic_block_id(seed: u32) BlockId {
-    return BlockId.from_u64(@as(u64, seed) *% 0x1234567890ABCDEF +% 0xFEDCBA0987654321);
+    // Generate two u64 values to fill all 16 bytes of BlockId
+    // This prevents hash clustering that occurs when last 8 bytes are always zero
+    const base_seed = @as(u64, seed);
+    const high_bits = base_seed *% 0x1234567890ABCDEF +% 0xFEDCBA0987654321;
+    const low_bits = base_seed *% 0x9E3779B97F4A7C15 +% 0x3C6EF372FE94F82A;
+
+    var bytes: [16]u8 = undefined;
+    std.mem.writeInt(u64, bytes[0..8], high_bits, .little);
+    std.mem.writeInt(u64, bytes[8..16], low_bits, .little);
+    return BlockId{ .bytes = bytes };
 }
 
 /// Test assertion helpers for performance and memory testing
