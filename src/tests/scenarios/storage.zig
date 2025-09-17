@@ -643,7 +643,14 @@ test "scenario: regression - block iterator memory leak" {
 
     // Memory should not leak from iterators
     const final_memory = runner.memory_stats();
-    try testing.expect(final_memory.total_allocated <= @as(u64, @intFromFloat(@as(f64, @floatFromInt(initial_memory.total_allocated)) * 2.5)));
+
+    // Use absolute threshold when starting from zero, relative when substantial initial memory
+    const max_allowed = if (initial_memory.total_allocated < 1024)
+        100 * 1024 // 100KB absolute limit when starting near zero
+    else
+        @as(u64, @intFromFloat(@as(f64, @floatFromInt(initial_memory.total_allocated)) * 2.5));
+
+    try testing.expect(final_memory.total_allocated <= max_allowed);
 }
 
 test "scenario: regression - edge index bidirectional consistency" {

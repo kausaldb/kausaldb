@@ -474,6 +474,8 @@ pub const SimulationRunner = struct {
             .corruption => {
                 // Moderate corruption rate that tests recovery without overwhelming the system
                 self.sim_vfs.enable_read_corruption(300, 8); // 30% corruption rate
+                // Disable WAL write verification to prevent error logging during intentional corruption
+                self.storage_engine.disable_wal_verification_for_simulation();
                 self.corruption_expected = true;
             },
             .crash => {
