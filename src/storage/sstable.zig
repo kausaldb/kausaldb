@@ -1050,6 +1050,10 @@ pub const Compactor = struct {
         try all_blocks.ensureTotalCapacity(total_capacity);
 
         for (input_tables) |table| {
+            // Skip empty SSTables to avoid iterator assertion failure
+            // Empty SSTables can exist due to test artifacts or edge cases
+            if (table.index.items.len == 0) continue;
+
             var iter = table.iterator();
             defer iter.deinit();
 

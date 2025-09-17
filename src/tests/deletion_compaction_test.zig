@@ -147,7 +147,7 @@ test "deletion persistence through multiple compactions" {
     defer deleted_ids.deinit();
 
     // Generation 1: Create initial blocks
-    var i: u32 = 0;
+    var i: u32 = 1;
     while (i < 10) : (i += 1) {
         const hex = try std.fmt.allocPrint(allocator, "00000000000000000000000000000{x:03}", .{i});
         defer allocator.free(hex);
@@ -164,8 +164,8 @@ test "deletion persistence through multiple compactions" {
     }
     try storage_engine.flush_memtable_to_sstable();
 
-    // Generation 2: Delete even-numbered blocks
-    i = 0;
+    // Generation 2: Delete even-numbered blocks (skip block 0 - zero BlockId is invalid)
+    i = 2;
     while (i < 10) : (i += 2) {
         const hex = try std.fmt.allocPrint(allocator, "00000000000000000000000000000{x:03}", .{i});
         defer allocator.free(hex);
@@ -204,9 +204,9 @@ test "deletion persistence through multiple compactions" {
             fatal_assert(found == null, "RESURRECTION BUG: Deleted block {} reappeared after compaction round {}", .{ deleted_id, round });
         }
 
-        // Verify non-deleted blocks still exist
+        // Verify non-deleted blocks still exist (odd blocks: 1, 3, 5, 7, 9)
         i = 1;
-        while (i < 10) : (i += 2) { // Odd blocks from gen1
+        while (i < 10) : (i += 2) {
             const hex = try std.fmt.allocPrint(allocator, "00000000000000000000000000000{x:03}", .{i});
             defer allocator.free(hex);
             const id = try BlockId.from_hex(hex);
@@ -432,7 +432,7 @@ test "concurrent deletion and compaction stress" {
         // Add some blocks
         var i: u32 = 0;
         while (i < 10) : (i += 1) {
-            const id_num = iteration * 100 + i;
+            const id_num = iteration * 100 + i + 1; // Add 1 to avoid zero BlockId
             const hex = try std.fmt.allocPrint(allocator, "{x:032}", .{id_num});
             defer allocator.free(hex);
 
