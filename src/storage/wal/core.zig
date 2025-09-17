@@ -576,7 +576,7 @@ pub const WAL = struct {
             .format_version = ContextBlock.FORMAT_VERSION,
             .flags = 0,
             .id = block.id.bytes,
-            .block_version = block.version,
+            .block_sequence = block.sequence,
             .source_uri_len = @intCast(block.source_uri.len),
             .metadata_json_len = @intCast(block.metadata_json.len),
             .content_len = block.content.len,
@@ -635,7 +635,7 @@ pub const WAL = struct {
 fn create_test_block() ContextBlock {
     return ContextBlock{
         .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://wal_core.zig",
         .metadata_json = "{}",
         .content = "test WAL core content",

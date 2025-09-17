@@ -695,7 +695,7 @@ const fatal_assert = assert_mod.fatal_assert;
 fn create_test_block(id: BlockId, content: []const u8) ContextBlock {
     return ContextBlock{
         .id = id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://source.zig",
         .metadata_json = "{}",
         .content = content,

@@ -53,16 +53,16 @@ const MODEL_CONFIG = struct {
 /// cryptographically verified content integrity and temporal ordering.
 /// The sequence number provides total ordering of all state mutations.
 pub const ModelBlock = struct {
-    // Block identity and versioning
+    // Block identity and sequence
     id: BlockId,
-    version: u64,
+    sequence: u64,
 
     // Cryptographic content verification
     content_hash: u64,
     content_size: u32,
 
     // Temporal ordering and lifecycle tracking
-    sequence_number: u64,
+    model_sequence: u64,
     creation_timestamp: u64,
     deleted: bool = false,
 
@@ -80,10 +80,10 @@ pub const ModelBlock = struct {
 
         const model_block = ModelBlock{
             .id = block.id,
-            .version = block.version,
+            .sequence = block.sequence,
             .content_hash = content_hash,
             .content_size = @intCast(block.content.len),
-            .sequence_number = sequence,
+            .model_sequence = sequence,
             .creation_timestamp = @intCast(timestamp),
             .deleted = false,
             .source_operation_id = operation_id,
@@ -209,7 +209,12 @@ pub const ModelState = struct {
         const model_state = Self{
             .model_arena = model_arena,
             .backing_allocator = backing_allocator,
-            .blocks = std.HashMap(BlockId, ModelBlock, BlockIdContext, std.hash_map.default_max_load_percentage).init(arena_allocator),
+            .blocks = std.HashMap(
+                BlockId,
+                ModelBlock,
+                BlockIdContext,
+                std.hash_map.default_max_load_percentage,
+            ).init(arena_allocator),
             .edges = std.array_list.Managed(GraphEdge).init(arena_allocator),
             .operation_count = 0,
             .global_sequence = 0, // Start at 0 to match WorkloadGenerator.operation_count
@@ -271,7 +276,7 @@ pub const ModelState = struct {
             },
             .update_block => {
                 if (operation.block) |block| {
-                    try self.apply_put_block(block); // Same logic as put_block - higher version overwrites
+                    try self.apply_put_block(block);
                 }
             },
             .find_block => {
@@ -329,9 +334,8 @@ pub const ModelState = struct {
     pub fn apply_put_block(self: *Self, block: ContextBlock) !void {
         var model_block = ModelBlock.from_context_block(block, self.global_sequence, @truncate(self.operation_count));
 
-        // Preserve deletion state to prevent resurrection of tombstoned blocks
-        const existing_deleted = if (self.blocks.get(block.id)) |existing| existing.deleted else false;
-        model_block.deleted = existing_deleted;
+        // In MVCC, new versions resurrect deleted blocks - always mark as not deleted
+        model_block.deleted = false;
 
         // Validate block consistency before insertion
         if (comptime std.debug.runtime_safety) {
@@ -350,10 +354,14 @@ pub const ModelState = struct {
         if (self.blocks.getPtr(block_id)) |model_block| {
             // Mathematical state transition: exists → deleted
             model_block.deleted = true;
-            model_block.sequence_number = self.global_sequence;
+            model_block.model_sequence = self.global_sequence;
 
             // Update validation checksum to reflect state change
-            model_block.validation_checksum = ModelBlock.compute_validation_checksum(model_block.id, model_block.content_hash, model_block.sequence_number);
+            model_block.validation_checksum = ModelBlock.compute_validation_checksum(
+                model_block.id,
+                model_block.content_hash,
+                model_block.model_sequence,
+            );
 
             // Remove all edges associated with the deleted block to maintain referential integrity
             var i: usize = 0;
@@ -449,12 +457,12 @@ pub const ModelState = struct {
         }
 
         // Verify sequence number ordering
-        if (block.sequence_number > self.global_sequence) {
+        if (block.model_sequence > self.global_sequence) {
             return error.SequenceOrderViolation;
         }
 
         // Verify validation checksum integrity
-        const expected_checksum = ModelBlock.compute_validation_checksum(block.id, block.content_hash, block.sequence_number);
+        const expected_checksum = ModelBlock.compute_validation_checksum(block.id, block.content_hash, block.model_sequence);
         if (block.validation_checksum != expected_checksum) {
             return error.ValidationChecksumMismatch;
         }
@@ -544,7 +552,7 @@ pub const ModelState = struct {
             deleted_blocks: u32 = 0,
             verified_blocks: u32 = 0,
             hash_mismatches: u32 = 0,
-            version_mismatches: u32 = 0,
+            sequence_mismatches: u32 = 0,
         }{};
 
         var block_iterator = self.blocks.iterator();
@@ -562,10 +570,14 @@ pub const ModelState = struct {
                 };
 
                 if (found != null) {
-                    fatal_assert(false, "DELETION CONSISTENCY VIOLATION: Deleted block {} still findable\n" ++
-                        "  Block sequence: {}\n" ++
-                        "  Deletion timestamp: {}\n" ++
-                        "  This violates the fundamental deletion contract.", .{ model_block.id, model_block.sequence_number, model_block.creation_timestamp });
+                    fatal_assert(
+                        false,
+                        "DELETION CONSISTENCY VIOLATION: Deleted block {} still findable\n" ++
+                            "  Block sequence: {}\n" ++
+                            "  Deletion timestamp: {}\n" ++
+                            "  This violates the fundamental deletion contract.",
+                        .{ model_block.id, model_block.sequence, model_block.creation_timestamp },
+                    );
                 }
                 continue;
             }
@@ -577,83 +589,105 @@ pub const ModelState = struct {
             if (system_block == null and builtin.mode == .Debug) {
                 log.warn("FORENSIC: Block existence check failed for model block", .{});
                 log.warn("  Block ID: {}", .{model_block.id});
-                log.warn("  Model sequence: {}", .{model_block.sequence_number});
+                log.warn("  Model sequence: {}", .{model_block.model_sequence});
                 log.warn("  Model global sequence: {}", .{self.global_sequence});
                 log.warn("  Operation count: {}", .{self.operation_count});
                 log.warn("  Content hash: 0x{x}", .{model_block.content_hash});
                 log.warn("  Creation timestamp: {}", .{model_block.creation_timestamp});
-                log.warn("  Version: {}", .{model_block.version});
+                log.warn("  Sequence: {}", .{model_block.sequence});
 
                 // Check if this is a sequence divergence issue
-                const sequence_gap = @as(i64, @intCast(self.operation_count)) - @as(i64, @intCast(model_block.sequence_number));
+                const sequence_gap = @as(i64, @intCast(self.operation_count)) - @as(i64, @intCast(model_block.model_sequence));
                 log.warn("  Sequence gap (op_count - block_seq): {}", .{sequence_gap});
 
                 // Try to identify recent failed operations that might explain the gap
                 if (sequence_gap > 0) {
-                    log.warn("  POTENTIAL CAUSE: {} operations may have failed in storage but succeeded in sequence counting", .{sequence_gap});
+                    log.warn(
+                        "  POTENTIAL CAUSE: {} operations may have failed in storage but succeeded in sequence counting",
+                        .{sequence_gap},
+                    );
                 }
             }
 
             if (system_block == null) {
-                fatal_assert(false, "BLOCK EXISTENCE VIOLATION: Model block {} not found in system\n" ++
-                    "  Expected version: {}\n" ++
-                    "  Creation sequence: {}\n" ++
-                    "  Content size: {} bytes\n" ++
-                    "  This indicates catastrophic data loss.", .{ model_block.id, model_block.version, model_block.sequence_number, model_block.content_size });
+                fatal_assert(
+                    false,
+                    "BLOCK EXISTENCE VIOLATION: Model block {} not found in system\n" ++
+                        "  Expected sequence: {}\n" ++
+                        "  Creation sequence: {}\n" ++
+                        "  Content size: {} bytes\n" ++
+                        "  This indicates catastrophic data loss.",
+                    .{ model_block.id, model_block.sequence, model_block.model_sequence, model_block.content_size },
+                );
             }
 
-            // Combined version and hash consistency verification
+            // Combined sequence and hash consistency verification
             const actual_hash = ModelBlock.cryptographic_hash(system_block.?.block.content);
             const expected_hash = model_block.content_hash;
 
-            if (system_block.?.block.version != model_block.version) {
-                validation_metrics.version_mismatches += 1;
+            if (system_block.?.block.sequence != model_block.sequence) {
+                validation_metrics.sequence_mismatches += 1;
 
-                if (system_block.?.block.version > model_block.version) {
-                    // Storage has newer version - sync model with storage reality
-                    // This can happen during background compaction that increments versions
+                if (system_block.?.block.sequence > model_block.sequence) {
+                    // Storage has newer sequence - sync model with storage reality
+                    // This can happen during background compaction that increments sequences
                     if (builtin.mode == .Debug) {
-                        log.warn("VERSION PRECEDENCE VIOLATION DETECTED:", .{});
+                        log.warn("SEQUENCE PRECEDENCE VIOLATION DETECTED:", .{});
                         log.warn("  Block ID: {}", .{model_block.id});
                         log.warn("  MODEL EXPECTATION:", .{});
-                        log.warn("    Expected version: {}", .{model_block.version});
+                        log.warn("    Expected sequence: {}", .{model_block.sequence});
                         log.warn("    Expected hash: 0x{x}", .{model_block.content_hash});
-                        log.warn("    Model sequence: {}", .{model_block.sequence_number});
+                        log.warn("    Model sequence: {}", .{model_block.model_sequence});
                         log.warn("    Creation timestamp: {}", .{model_block.creation_timestamp});
                         log.warn("  STORAGE REALITY:", .{});
-                        log.warn("    Actual version: {}", .{system_block.?.block.version});
+                        log.warn("    Actual sequence: {}", .{system_block.?.block.sequence});
                         log.warn("    Actual hash: 0x{x}", .{actual_hash});
                         log.warn("    Content size: {} bytes", .{system_block.?.block.content.len});
-                        log.warn("  VERSION ANALYSIS:", .{});
-                        log.warn("    PROBLEM: Storage returned NEWER version {} when model expects version {}", .{ system_block.?.block.version, model_block.version });
-                        log.warn("    ROOT CAUSE: Model state inconsistency - missed version update", .{});
+                        log.warn("  SEQUENCE ANALYSIS:", .{});
+                        log.warn(
+                            "    PROBLEM: Storage returned NEWER sequence {} when model expects sequence {}",
+                            .{ system_block.?.block.sequence, model_block.sequence },
+                        );
+                        log.warn("    ROOT CAUSE: Model state inconsistency - missed sequence update", .{});
                     }
 
-                    // Update model to match storage reality (both version and hash)
+                    // Update model to match storage reality (both sequence and hash)
                     if (self.blocks.getPtr(model_block.id)) |model_ptr| {
-                        model_ptr.version = system_block.?.block.version;
+                        model_ptr.sequence = system_block.?.block.sequence;
                         model_ptr.content_hash = actual_hash;
-                        model_ptr.sequence_number = self.global_sequence;
-                        model_ptr.validation_checksum = ModelBlock.compute_validation_checksum(model_ptr.id, model_ptr.content_hash, model_ptr.sequence_number);
+                        model_ptr.model_sequence = self.global_sequence;
+                        model_ptr.validation_checksum = ModelBlock.compute_validation_checksum(
+                            model_ptr.id,
+                            model_ptr.content_hash,
+                            model_ptr.model_sequence,
+                        );
                     }
                 } else {
-                    // Storage has older version - this indicates data loss or corruption
-                    fatal_assert(false, "VERSION REGRESSION VIOLATION: Storage version older than model\n" ++
-                        "  Block ID: {}\n" ++
-                        "  Model version: {}\n" ++
-                        "  Storage version: {}\n" ++
-                        "  This indicates data loss or version rollback.", .{ model_block.id, model_block.version, system_block.?.block.version });
+                    // Storage has older sequence - this indicates data loss or corruption
+                    fatal_assert(
+                        false,
+                        "SEQUENCE REGRESSION VIOLATION: Storage sequence older than model\n" ++
+                            "  Block ID: {}\n" ++
+                            "  Model sequence: {}\n" ++
+                            "  Storage sequence: {}\n" ++
+                            "  This indicates data loss or sequence rollback.",
+                        .{ model_block.id, model_block.sequence, system_block.?.block.sequence },
+                    );
                 }
             } else {
-                // Same version - verify hash strictly
+                // Same sequence - verify hash strictly
                 if (actual_hash != expected_hash) {
                     validation_metrics.hash_mismatches += 1;
-                    fatal_assert(false, "CRYPTOGRAPHIC INTEGRITY VIOLATION: Content hash mismatch\n" ++
-                        "  Block ID: {}\n" ++
-                        "  Expected hash: 0x{x}\n" ++
-                        "  Actual hash: 0x{x}\n" ++
-                        "  Content size: {} bytes\n" ++
-                        "  This indicates data corruption or hash function inconsistency.", .{ model_block.id, expected_hash, actual_hash, model_block.content_size });
+                    fatal_assert(
+                        false,
+                        "CRYPTOGRAPHIC INTEGRITY VIOLATION: Content hash mismatch\n" ++
+                            "  Block ID: {}\n" ++
+                            "  Expected hash: 0x{x}\n" ++
+                            "  Actual hash: 0x{x}\n" ++
+                            "  Content size: {} bytes\n" ++
+                            "  This indicates data corruption or hash function inconsistency.",
+                        .{ model_block.id, expected_hash, actual_hash, model_block.content_size },
+                    );
                 }
             }
 
@@ -665,13 +699,23 @@ pub const ModelState = struct {
             const verification_rate = @as(f64, @floatFromInt(validation_metrics.verified_blocks)) /
                 @as(f64, @floatFromInt(validation_metrics.total_blocks - validation_metrics.deleted_blocks));
 
-            log.debug("Block consistency validation complete:\n" ++
-                "  Total blocks: {}\n" ++
-                "  Deleted blocks: {}\n" ++
-                "  Verified blocks: {}\n" ++
-                "  Verification rate: {d:.3}%\n" ++
-                "  Hash mismatches: {}\n" ++
-                "  Version mismatches: {}", .{ validation_metrics.total_blocks, validation_metrics.deleted_blocks, validation_metrics.verified_blocks, verification_rate * 100, validation_metrics.hash_mismatches, validation_metrics.version_mismatches });
+            log.debug(
+                "Block consistency validation complete:\n" ++
+                    "  Total blocks: {}\n" ++
+                    "  Deleted blocks: {}\n" ++
+                    "  Verified blocks: {}\n" ++
+                    "  Verification rate: {d:.3}%\n" ++
+                    "  Hash mismatches: {}\n" ++
+                    "  Sequence mismatches: {}",
+                .{
+                    validation_metrics.total_blocks,
+                    validation_metrics.deleted_blocks,
+                    validation_metrics.verified_blocks,
+                    verification_rate * 100,
+                    validation_metrics.hash_mismatches,
+                    validation_metrics.sequence_mismatches,
+                },
+            );
         }
     }
 
@@ -750,12 +794,23 @@ pub const ModelState = struct {
             const edge_integrity = @as(f64, @floatFromInt(graph_metrics.verified_edges)) /
                 @as(f64, @floatFromInt(graph_metrics.active_edges));
 
-            fatal_assert(false, "GRAPH TRAVERSAL VIOLATION: Edge discovery inconsistency\n" ++
-                "  Missing edges: {}/{} ({d:.1}%)\n" ++
-                "  Active edges: {}\n" ++
-                "  Orphaned edges: {}\n" ++
-                "  Edge integrity: {d:.3}%\n" ++
-                "  This breaks the graph traversal consistency guarantee.", .{ graph_metrics.missing_edges, graph_metrics.active_edges, @as(f64, @floatFromInt(graph_metrics.missing_edges)) / @as(f64, @floatFromInt(graph_metrics.active_edges)) * 100, graph_metrics.active_edges, graph_metrics.orphaned_edges, edge_integrity * 100 });
+            fatal_assert(
+                false,
+                "GRAPH TRAVERSAL VIOLATION: Edge discovery inconsistency\n" ++
+                    "  Missing edges: {}/{} ({d:.1}%)\n" ++
+                    "  Active edges: {}\n" ++
+                    "  Orphaned edges: {}\n" ++
+                    "  Edge integrity: {d:.3}%\n" ++
+                    "  This breaks the graph traversal consistency guarantee.",
+                .{
+                    graph_metrics.missing_edges,
+                    graph_metrics.active_edges,
+                    @as(f64, @floatFromInt(graph_metrics.missing_edges)) / @as(f64, @floatFromInt(graph_metrics.active_edges)) * 100,
+                    graph_metrics.active_edges,
+                    graph_metrics.orphaned_edges,
+                    edge_integrity * 100,
+                },
+            );
         }
 
         // Report comprehensive graph validation metrics
@@ -763,12 +818,21 @@ pub const ModelState = struct {
             const graph_integrity = @as(f64, @floatFromInt(graph_metrics.verified_edges)) /
                 @as(f64, @floatFromInt(graph_metrics.total_edges));
 
-            log.debug("Graph consistency validation complete:\n" ++
-                "  Total edges: {}\n" ++
-                "  Active edges: {}\n" ++
-                "  Verified edges: {}\n" ++
-                "  Orphaned edges: {}\n" ++
-                "  Graph integrity: {d:.3}%", .{ graph_metrics.total_edges, graph_metrics.active_edges, graph_metrics.verified_edges, graph_metrics.orphaned_edges, graph_integrity * 100 });
+            log.debug(
+                "Graph consistency validation complete:\n" ++
+                    "  Total edges: {}\n" ++
+                    "  Active edges: {}\n" ++
+                    "  Verified edges: {}\n" ++
+                    "  Orphaned edges: {}\n" ++
+                    "  Graph integrity: {d:.3}%",
+                .{
+                    graph_metrics.total_edges,
+                    graph_metrics.active_edges,
+                    graph_metrics.verified_edges,
+                    graph_metrics.orphaned_edges,
+                    graph_integrity * 100,
+                },
+            );
         }
     }
 
@@ -851,7 +915,7 @@ pub const ModelState = struct {
             if (!block.deleted) {
                 // Verify block integrity before returning
                 if (comptime std.debug.runtime_safety) {
-                    const expected_checksum = ModelBlock.compute_validation_checksum(block.id, block.content_hash, block.sequence_number);
+                    const expected_checksum = ModelBlock.compute_validation_checksum(block.id, block.content_hash, block.model_sequence);
                     if (block.validation_checksum != expected_checksum) {
                         log.warn("Block integrity violation in find_active_block");
                         return null;
@@ -1056,14 +1120,14 @@ test "model state tracks put_block operations" {
         .source_uri = "/test/file.zig",
         .content = "test content",
         .metadata_json = "{}",
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
     };
 
     // Apply put_block operation
     const operation = workload_mod.Operation{
         .op_type = .put_block,
         .block = block,
-        .sequence_number = 1,
+        .model_sequence = 1,
     };
     try model.apply_operation(&operation);
 
@@ -1086,12 +1150,12 @@ test "model state tracks delete_block operations" {
         .source_uri = "/test/file.zig",
         .content = "test content",
         .metadata_json = "{}",
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
     };
     const put_op = workload_mod.Operation{
         .op_type = .put_block,
         .block = block,
-        .sequence_number = 1,
+        .model_sequence = 1,
     };
     try model.apply_operation(&put_op);
 
@@ -1099,7 +1163,7 @@ test "model state tracks delete_block operations" {
     const delete_op = workload_mod.Operation{
         .op_type = .delete_block,
         .block_id = block_id,
-        .sequence_number = 2,
+        .model_sequence = 2,
     };
     try model.apply_operation(&delete_op);
 
@@ -1117,7 +1181,7 @@ test "model state tracks put_edge operations" {
     // Create source block first
     const source_block = ContextBlock{
         .id = BlockId.from_u64(1),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://source",
         .metadata_json = "{}",
         .content = "source block",
@@ -1126,14 +1190,14 @@ test "model state tracks put_edge operations" {
     const source_operation = workload_mod.Operation{
         .op_type = .put_block,
         .block = source_block,
-        .sequence_number = 1,
+        .model_sequence = 1,
     };
     try model.apply_operation(&source_operation);
 
     // Create target block second
     const target_block = ContextBlock{
         .id = BlockId.from_u64(2),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://target",
         .metadata_json = "{}",
         .content = "target block",
@@ -1142,7 +1206,7 @@ test "model state tracks put_edge operations" {
     const target_operation = workload_mod.Operation{
         .op_type = .put_block,
         .block = target_block,
-        .sequence_number = 2,
+        .model_sequence = 2,
     };
     try model.apply_operation(&target_operation);
 
@@ -1156,7 +1220,7 @@ test "model state tracks put_edge operations" {
     const edge_operation = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 3,
+        .model_sequence = 3,
     };
     try model.apply_operation(&edge_operation);
 
@@ -1175,7 +1239,7 @@ test "model prevents duplicate edges" {
     // Create source block first
     const source_block = ContextBlock{
         .id = BlockId.from_u64(1),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://source",
         .metadata_json = "{}",
         .content = "source block",
@@ -1184,14 +1248,14 @@ test "model prevents duplicate edges" {
     const source_operation = workload_mod.Operation{
         .op_type = .put_block,
         .block = source_block,
-        .sequence_number = 1,
+        .model_sequence = 1,
     };
     try model.apply_operation(&source_operation);
 
     // Create target block second
     const target_block = ContextBlock{
         .id = BlockId.from_u64(2),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://target",
         .metadata_json = "{}",
         .content = "target block",
@@ -1200,7 +1264,7 @@ test "model prevents duplicate edges" {
     const target_operation = workload_mod.Operation{
         .op_type = .put_block,
         .block = target_block,
-        .sequence_number = 2,
+        .model_sequence = 2,
     };
     try model.apply_operation(&target_operation);
 
@@ -1214,14 +1278,14 @@ test "model prevents duplicate edges" {
     const op1 = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 3,
+        .model_sequence = 3,
     };
     try model.apply_operation(&op1);
 
     const op2 = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 4,
+        .model_sequence = 4,
     };
     try model.apply_operation(&op2);
 

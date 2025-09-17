@@ -143,8 +143,8 @@ pub const ContextBlock = struct {
     /// Unique identifier for this block
     id: BlockId,
 
-    /// Version number for this block (for update tracking)
-    version: u64,
+    /// Global sequence number for MVCC ordering
+    sequence: u64,
 
     /// URI identifying the source of this content
     source_uri: []const u8,
@@ -164,7 +164,7 @@ pub const ContextBlock = struct {
         format_version: u16,
         flags: u16,
         id: [16]u8,
-        block_version: u64,
+        block_sequence: u64,
         source_uri_len: u32,
         metadata_json_len: u32,
         content_len: u64,
@@ -195,7 +195,7 @@ pub const ContextBlock = struct {
             @memcpy(buffer[offset .. offset + 16], &self.id);
             offset += 16;
 
-            std.mem.writeInt(u64, buffer[offset .. offset + 8][0..8], self.block_version, .little);
+            std.mem.writeInt(u64, buffer[offset .. offset + 8][0..8], self.block_sequence, .little);
             offset += 8;
             std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], self.source_uri_len, .little);
             offset += 4;
@@ -227,7 +227,7 @@ pub const ContextBlock = struct {
             @memcpy(&id, buffer[offset .. offset + 16]);
             offset += 16;
 
-            const block_version = std.mem.readInt(u64, buffer[offset .. offset + 8][0..8], .little);
+            const block_sequence = std.mem.readInt(u64, buffer[offset .. offset + 8][0..8], .little);
             offset += 8;
             const source_uri_len = std.mem.readInt(u32, buffer[offset .. offset + 4][0..4], .little);
             offset += 4;
@@ -248,7 +248,7 @@ pub const ContextBlock = struct {
                 .format_version = format_version,
                 .flags = flags,
                 .id = id,
-                .block_version = block_version,
+                .block_sequence = block_sequence,
                 .source_uri_len = source_uri_len,
                 .metadata_json_len = metadata_json_len,
                 .content_len = content_len,
@@ -313,7 +313,7 @@ pub const ContextBlock = struct {
             .format_version = FORMAT_VERSION,
             .flags = 0,
             .id = self.id.bytes,
-            .block_version = self.version,
+            .block_sequence = self.sequence,
             // Safety: String lengths are bounded by memory limits and fit in u32
             .source_uri_len = @intCast(self.source_uri.len),
             .metadata_json_len = @intCast(self.metadata_json.len),
@@ -371,7 +371,7 @@ pub const ContextBlock = struct {
 
         return ContextBlock{
             .id = BlockId{ .bytes = header.id },
-            .version = header.block_version,
+            .sequence = header.block_sequence,
             .source_uri = source_uri,
             .metadata_json = metadata_json,
             .content = content,
@@ -434,8 +434,8 @@ pub const ContextBlock = struct {
         if (!std.unicode.utf8ValidateSlice(self.metadata_json)) {
             return error.InvalidMetadataEncoding;
         }
-        if (self.version == 0) {
-            return error.InvalidVersion;
+        if (self.sequence == 0) {
+            return error.InvalidSequence;
         }
     }
 
@@ -506,9 +506,9 @@ pub const ParsedBlock = struct {
         return BlockId{ .bytes = self.header.id };
     }
 
-    /// Get block version without allocation.
-    pub fn version(self: ParsedBlock) u64 {
-        return self.header.block_version;
+    /// Get block sequence without allocation.
+    pub fn sequence(self: ParsedBlock) u64 {
+        return self.header.block_sequence;
     }
 
     /// Get source URI as slice into buffer without allocation.
@@ -538,7 +538,7 @@ pub const ParsedBlock = struct {
 
         return ContextBlock{
             .id = self.block_id(),
-            .version = self.version(),
+            .sequence = self.sequence(),
             .source_uri = owned_source_uri,
             .metadata_json = owned_metadata_json,
             .content = owned_content,
@@ -650,7 +650,7 @@ test "ContextBlock serialization roundtrip" {
 
     const original = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 42,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig",
         .metadata_json = "{\"type\": \"function\"}",
         .content = "pub fn test() void {}",
@@ -667,7 +667,7 @@ test "ContextBlock serialization roundtrip" {
     defer deserialized.deinit(allocator);
 
     try std.testing.expect(original.id.eql(deserialized.id));
-    try std.testing.expectEqual(original.version, deserialized.version);
+    try std.testing.expectEqual(original.sequence, deserialized.sequence);
     try std.testing.expectEqualStrings(original.source_uri, deserialized.source_uri);
     try std.testing.expectEqualStrings(original.metadata_json, deserialized.metadata_json);
     try std.testing.expectEqualStrings(original.content, deserialized.content);
@@ -696,7 +696,7 @@ test "ContextBlock validation" {
 
     const valid_block = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 1,
+        .sequence = 1, // Valid sequence for validation test
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
         .content = "test content",
@@ -706,7 +706,7 @@ test "ContextBlock validation" {
 
     const invalid_json_block = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 1,
+        .sequence = 1, // Valid sequence for validation test
         .source_uri = "test://example.zig",
         .metadata_json = "{invalid json",
         .content = "test content",
@@ -721,7 +721,7 @@ test "BlockHeader versioned format" {
         .format_version = ContextBlock.FORMAT_VERSION,
         .flags = 0,
         .id = [_]u8{1} ** 16,
-        .block_version = 42,
+        .block_sequence = 42,
         .source_uri_len = 100,
         .metadata_json_len = 50,
         .content_len = 1000,
@@ -736,7 +736,7 @@ test "BlockHeader versioned format" {
     const deserialized = try ContextBlock.BlockHeader.deserialize(&buffer);
     try std.testing.expectEqual(header.magic, deserialized.magic);
     try std.testing.expectEqual(header.format_version, deserialized.format_version);
-    try std.testing.expectEqual(header.block_version, deserialized.block_version);
+    try std.testing.expectEqual(header.block_sequence, deserialized.block_sequence);
 }
 
 test "BlockHeader invalid magic" {
@@ -752,7 +752,7 @@ test "BlockHeader unsupported version" {
         .format_version = 999, // Unsupported version
         .flags = 0,
         .id = [_]u8{1} ** 16,
-        .block_version = 1,
+        .block_sequence = 1,
         .source_uri_len = 0,
         .metadata_json_len = 0,
         .content_len = 0,
@@ -772,7 +772,7 @@ test "BlockHeader reserved bytes validation" {
         .format_version = ContextBlock.FORMAT_VERSION,
         .flags = 0,
         .id = [_]u8{1} ** 16,
-        .block_version = 1,
+        .block_sequence = 1,
         .source_uri_len = 0,
         .metadata_json_len = 0,
         .content_len = 0,
@@ -792,7 +792,7 @@ test "ContextBlock versioned serialization" {
 
     const block_v1 = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 1,
+        .sequence = 1, // Test sequence for serialization validation
         .source_uri = "test://v1.zig",
         .metadata_json = "{\"version\": 1}",
         .content = "version 1 content",
@@ -806,7 +806,7 @@ test "ContextBlock versioned serialization" {
     const deserialized = try ContextBlock.deserialize(allocator, buffer);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expectEqual(@as(u64, 1), deserialized.version);
+    try std.testing.expectEqual(@as(u64, 1), deserialized.sequence);
     try std.testing.expectEqualStrings("{\"version\": 1}", deserialized.metadata_json);
 }
 
@@ -815,7 +815,7 @@ test "ContextBlock checksum validation" {
 
     const block = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://checksum.zig",
         .metadata_json = "{}",
         .content = "checksum test",
@@ -839,7 +839,7 @@ test "ContextBlock size computation from buffer" {
 
     const block = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://size.zig",
         .metadata_json = "{}",
         .content = "size test content",

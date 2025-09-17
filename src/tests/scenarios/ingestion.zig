@@ -523,7 +523,7 @@ test "scenario: rich metadata extraction" {
     try runner.verify_metadata_extraction();
 }
 
-test "scenario: version tracking during updates" {
+test "scenario: sequence tracking during updates" {
     const allocator = testing.allocator;
 
     const operation_mix = OperationMix{
@@ -542,14 +542,14 @@ test "scenario: version tracking during updates" {
     );
     defer runner.deinit();
 
-    // Configure version tracking
-    runner.ingestion_config.track_versions = true;
+    // Configure sequence tracking
+    runner.ingestion_config.track_sequences = true;
     runner.ingestion_config.preserve_history = true;
 
     try runner.run(600);
 
-    // Verify version history is maintained
-    try runner.verify_version_tracking();
+    // Verify sequence history is maintained
+    try runner.verify_sequence_tracking();
 }
 
 // ====================================================================

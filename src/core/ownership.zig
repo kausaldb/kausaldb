@@ -164,7 +164,7 @@ pub const OwnedBlock = struct {
 
         const cloned_block = ContextBlock{
             .id = self.block.id,
-            .version = self.block.version,
+            .sequence = self.block.sequence,
             .source_uri = cloned_source_uri,
             .metadata_json = cloned_metadata,
             .content = cloned_content,
@@ -653,7 +653,7 @@ test "OwnedBlock basic operations" {
     const block = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("00112233445566778899AABBCCDDEEFF") catch unreachable, // Safety: valid 32-char hex string
-        .version = 1,
+        .sequence = 2, // Test sequence for ownership validation
         .source_uri = try std.testing.allocator.dupe(u8, "test://block"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "test content"),
@@ -670,8 +670,8 @@ test "OwnedBlock basic operations" {
     try std.testing.expect(read_ptr.id.eql(block.id));
 
     const write_ptr = owned.write(.memtable_manager);
-    write_ptr.version = 2;
-    try std.testing.expect(owned.block.version == 2);
+    write_ptr.sequence = 2; // Test maintains the original sequence
+    try std.testing.expect(owned.block.sequence == 2);
 
     // Temporary can also access
     _ = owned.read(.temporary);
@@ -682,7 +682,7 @@ test "OwnedBlock ownership transfer" {
     const block = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("FFEEDDCCBBAA99887766554433221100") catch unreachable, // Safety: valid 32-char hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://transfer"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "transfer test"),
@@ -707,7 +707,7 @@ test "OwnedBlock cloning with ownership" {
     const block = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("1122334455667788AABBCCDDEEFF0099") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://clone"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "clone test"),
@@ -741,7 +741,7 @@ test "OwnedBlockCollection management" {
     const block1 = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("1111111111111111AAAAAAAAAAAAAAAA") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://block1"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "content1"),
@@ -755,7 +755,7 @@ test "OwnedBlockCollection management" {
     const block2 = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("2222222222222222BBBBBBBBBBBBBBBB") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://block2"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "content2"),
@@ -844,7 +844,7 @@ test "zero-cost compile-time ownership system" {
     const block_id = BlockId.from_hex("1234567890ABCDEF0987654321FEDCBA") catch unreachable;
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://block"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "test content for zero-cost ownership"),
@@ -896,7 +896,7 @@ test "moved-from state prevents use-after-transfer" {
     const block = ContextBlock{
         // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("DEADBEEFCAFEBABE1234567890ABCDEF") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://move"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),
         .content = try std.testing.allocator.dupe(u8, "move test content"),

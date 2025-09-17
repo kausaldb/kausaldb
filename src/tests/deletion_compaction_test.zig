@@ -39,11 +39,11 @@ const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageEngine = engine.StorageEngine;
 
 /// Create deterministic test block for reproducible testing
-fn create_test_block(comptime id_suffix: []const u8, version: u32) !ContextBlock {
-    const id_hex = "11111111111111111111111111111" ++ id_suffix;
+fn create_test_block(comptime id_suffix: []const u8, sequence: u32) !ContextBlock {
+    const id_hex = "1111111111111111111111111111" ++ id_suffix;
     return ContextBlock{
         .id = try BlockId.from_hex(id_hex),
-        .version = version,
+        .sequence = sequence,
         .source_uri = "test://deletion/" ++ id_suffix,
         .metadata_json = "{\"test\": true}",
         .content = "Test content for block " ++ id_suffix,
@@ -153,7 +153,7 @@ test "deletion persistence through multiple compactions" {
         defer allocator.free(hex);
         const block = ContextBlock{
             .id = try BlockId.from_hex(hex),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "test://gen1",
             .metadata_json = "{}",
             .content = try std.fmt.allocPrint(allocator, "Generation 1 block {}", .{i}),
@@ -182,7 +182,7 @@ test "deletion persistence through multiple compactions" {
         defer allocator.free(hex);
         const block = ContextBlock{
             .id = try BlockId.from_hex(hex),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "test://gen3",
             .metadata_json = "{}",
             .content = try std.fmt.allocPrint(allocator, "Generation 3 block {}", .{i}),
@@ -222,60 +222,60 @@ test "version shadowing during compaction" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test_version_shadow");
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "/test_sequence_shadow");
     defer storage_engine.deinit();
     try storage_engine.startup();
     defer storage_engine.shutdown() catch {};
 
     const block_id = try BlockId.from_hex("DEADBEEFCAFEBABE0000000000000001");
 
-    // Version 1
+    // Sequence 1
     const block_v1 = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://v1",
         .metadata_json = "{}",
-        .content = "Version 1 content",
+        .content = "Sequence 1 content",
     };
     try storage_engine.put_block(block_v1);
     try storage_engine.flush_memtable_to_sstable();
 
-    // Version 2
+    // Sequence 2
     const block_v2 = ContextBlock{
         .id = block_id,
-        .version = 2,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://v2",
         .metadata_json = "{}",
-        .content = "Version 2 content",
+        .content = "Sequence 2 content",
     };
     try storage_engine.put_block(block_v2);
     try storage_engine.flush_memtable_to_sstable();
 
-    // Delete (should shadow both versions)
+    // Delete (should shadow both sequences)
     try storage_engine.delete_block(block_id);
     try storage_engine.flush_memtable_to_sstable();
 
-    // Force compaction to test version shadowing
+    // Force compaction to test sequence shadowing
     try storage_engine.sstable_manager.check_and_run_compaction();
 
-    // Verify block remains deleted (both versions shadowed)
+    // Verify block remains deleted (both sequences shadowed)
     const found = try storage_engine.find_block(block_id, .query_engine);
     try testing.expect(found == null);
 
-    // Add version 3 after deletion
+    // Add sequence 3 after deletion
     const block_v3 = ContextBlock{
         .id = block_id,
-        .version = 3,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://v3",
         .metadata_json = "{}",
-        .content = "Version 3 content - after deletion",
+        .content = "Sequence 3 content - after deletion",
     };
     try storage_engine.put_block(block_v3);
 
-    // Should find version 3 (not shadowed by earlier tombstone)
+    // Should find sequence 3 (not shadowed by earlier tombstone)
     const found_v3 = try storage_engine.find_block(block_id, .query_engine);
     try testing.expect(found_v3 != null);
-    try testing.expectEqualStrings("Version 3 content - after deletion", found_v3.?.read(.temporary).content);
+    try testing.expectEqualStrings("Sequence 3 content - after deletion", found_v3.?.read(.temporary).content);
 }
 
 test "simulation: heavy deletion workload with compaction" {
@@ -298,12 +298,12 @@ test "simulation: heavy deletion workload with compaction" {
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
         // Add blocks
-        const block = try create_test_block("abc", i + 1);
+        const block = try create_test_block("0abc", i + 1);
         try storage_engine.put_block(block);
 
         // Occasionally delete and compact
         if (i % 10 == 0 and i > 0) {
-            const delete_id = try BlockId.from_hex("11111111111111111111111111111abc"); // "abc" suffix
+            const delete_id = try BlockId.from_hex("1111111111111111111111111111" ++ "0abc"); // "0abc" suffix
             try storage_engine.delete_block(delete_id);
             try deleted_blocks.put(delete_id, {});
         }
@@ -438,7 +438,7 @@ test "concurrent deletion and compaction stress" {
 
             const block = ContextBlock{
                 .id = try BlockId.from_hex(hex),
-                .version = 1,
+                .sequence = 0, // Storage engine will assign the actual global sequence
                 .source_uri = "test://stress",
                 .metadata_json = "{}",
                 .content = try std.fmt.allocPrint(allocator, "Stress block {}", .{id_num}),

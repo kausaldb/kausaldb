@@ -729,7 +729,7 @@ test "scenario: isolated flush durability verification" {
         .content = "Test content 1",
         .source_uri = "/test/block_1.zig",
         .metadata_json = "{}",
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
     };
 
     const test_block_2 = ContextBlock{
@@ -737,7 +737,7 @@ test "scenario: isolated flush durability verification" {
         .content = "Test content 2",
         .source_uri = "/test/block_2.zig",
         .metadata_json = "{}",
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
     };
 
     // Store blocks in storage engine
@@ -786,7 +786,7 @@ test "scenario: multiple flush operations preserve all data" {
             .content = try std.fmt.allocPrint(allocator, "Batch 1 content {}", .{i}),
             .source_uri = try std.fmt.allocPrint(allocator, "/test/batch1_{}.zig", .{i}),
             .metadata_json = "{}",
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
         };
         all_blocks[block_count] = block;
         block_count += 1;
@@ -810,7 +810,7 @@ test "scenario: multiple flush operations preserve all data" {
             .content = try std.fmt.allocPrint(allocator, "Batch 2 content {}", .{i}),
             .source_uri = try std.fmt.allocPrint(allocator, "/test/batch2_{}.zig", .{i}),
             .metadata_json = "{}",
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
         };
         all_blocks[block_count] = block;
         block_count += 1;
@@ -834,7 +834,7 @@ test "scenario: multiple flush operations preserve all data" {
             .content = try std.fmt.allocPrint(allocator, "Batch 3 content {}", .{i}),
             .source_uri = try std.fmt.allocPrint(allocator, "/test/batch3_{}.zig", .{i}),
             .metadata_json = "{}",
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
         };
         all_blocks[block_count] = block;
         block_count += 1;

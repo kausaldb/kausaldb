@@ -184,7 +184,7 @@ pub const SSTableManager = struct {
                 // Clone strings using coordinator's arena allocation methods
                 const cloned_block = ContextBlock{
                     .id = block.id,
-                    .version = block.version,
+                    .sequence = block.sequence,
                     .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
                     .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
                     .content = try self.arena_coordinator.duplicate_slice(u8, block.content),
@@ -959,7 +959,7 @@ test "SSTableManager creates new SSTable from owned blocks" {
 
     const block1 = ContextBlock{
         .id = BlockId.generate(),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "file://test1.zig",
         .metadata_json = "{}",
         .content = "test content 1",
@@ -991,7 +991,7 @@ test "SSTableManager finds owned blocks in SSTables" {
     const block_id = BlockId.generate();
     const block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "file://test.zig",
         .metadata_json = "{}",
         .content = "test content",
@@ -1033,14 +1033,14 @@ test "SSTableManager total_block_count aggregates across SSTables" {
     // Create first SSTable with 2 blocks
     const block1 = ContextBlock{
         .id = BlockId.generate(),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "file://test1.zig",
         .metadata_json = "{}",
         .content = "test content 1",
     };
     const block2 = ContextBlock{
         .id = BlockId.generate(),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "file://test2.zig",
         .metadata_json = "{}",
         .content = "test content 2",
@@ -1057,7 +1057,7 @@ test "SSTableManager total_block_count aggregates across SSTables" {
     // Create second SSTable with 1 block
     const block3 = ContextBlock{
         .id = BlockId.generate(),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "file://test3.zig",
         .metadata_json = "{}",
         .content = "test content 3",

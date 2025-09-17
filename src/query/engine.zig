@@ -252,7 +252,11 @@ pub const QueryEngine = struct {
             .allocator = allocator,
             .storage_engine = storage_engine,
             .state = .initialized,
-            .query_cache = cache.QueryCache.init(allocator, cache.QueryCache.DEFAULT_MAX_ENTRIES, cache.QueryCache.DEFAULT_TTL_MINUTES),
+            .query_cache = cache.QueryCache.init(
+                allocator,
+                cache.QueryCache.DEFAULT_MAX_ENTRIES,
+                cache.QueryCache.DEFAULT_TTL_MINUTES,
+            ),
             .caching_enabled = true, // Enable caching by default for performance
             .next_query_id = stdx.MetricsCounter.init(1),
             .planning_enabled = true, // Enable planning by default for future extensibility
@@ -438,17 +442,17 @@ pub const QueryEngine = struct {
         return operations.has_block(self.storage_engine, block_id);
     }
 
-    /// Get block version without loading full content - optimized for version queries
-    pub fn query_block_version(self: *QueryEngine, block_id: BlockId) ?u64 {
+    /// Get block sequence without loading full content - optimized for sequnce queries
+    pub fn query_block_sequence(self: *QueryEngine, block_id: BlockId) ?u64 {
         if (!self.state.can_query()) return null;
 
         // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
-            return block.version;
+            return block.sequence;
         }
 
         // For SSTables, this would require loading metadata only
-        // Implementation deferred - storage engine should provide version-only access
+        // Implementation deferred - storage engine should provide sequence-only access
         return null;
     }
 
@@ -972,7 +976,12 @@ pub const QueryEngine = struct {
         context.metrics.optimization_applied = true;
         context.metrics.blocks_scanned = blocks_evaluated;
 
-        return filtering.FilteredQueryResult.init(self.allocator, streaming_blocks.items, @intCast(streaming_blocks.items.len), false);
+        return filtering.FilteredQueryResult.init(
+            self.allocator,
+            streaming_blocks.items,
+            @intCast(streaming_blocks.items.len),
+            false,
+        );
     }
 
     /// Execute filtered query using index optimization
@@ -1007,7 +1016,7 @@ pub const QueryCommand = enum(u8) {
 fn create_test_block(id: BlockId, content: []const u8) ContextBlock {
     return ContextBlock{
         .id = id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://harness.query_engine.zig",
         .metadata_json = "{}",
         .content = content,

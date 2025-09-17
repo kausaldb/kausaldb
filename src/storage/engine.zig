@@ -41,7 +41,12 @@ const fatal_assert = assert_mod.fatal_assert;
 const log = std.log.scoped(.storage_engine);
 const testing = std.testing;
 
-const BlockHashMap = std.HashMap(BlockId, OwnedBlock, block_index_mod.BlockIndex.BlockIdContext, std.hash_map.default_max_load_percentage);
+const BlockHashMap = std.HashMap(
+    BlockId,
+    OwnedBlock,
+    block_index_mod.BlockIndex.BlockIdContext,
+    std.hash_map.default_max_load_percentage,
+);
 const BlockHashMapIterator = BlockHashMap.Iterator;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
@@ -111,15 +116,15 @@ const FlushMemtableCommand = struct {
             }
         }
 
-        self.storage_engine.memtable_manager.flush_to_sstable(&self.storage_engine.sstable_manager) catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_to_sstable" });
+        self.storage_engine.memtable_manager.flush_to_sstable(
+            &self.storage_engine.sstable_manager,
+        ) catch |err| {
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "flush_to_sstable" },
+            );
             return err;
         };
-
-        // CRITICAL FIX: Don't reset arena immediately after flush
-        // The test harness may still have references to arena-allocated content
-        // Arena reset should only happen when we're certain no external references exist
-        // self.storage_engine.reset_storage_memory();
 
         // Execute compaction if needed using command pattern
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
@@ -157,7 +162,10 @@ const CompactionCommand = struct {
         }
 
         self.storage_engine.sstable_manager.execute_compaction() catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "compaction_command" });
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "compaction_command" },
+            );
             return err;
         };
 
@@ -185,8 +193,9 @@ pub const StorageEngine = struct {
     /// eliminating corruption from struct copying while maintaining O(1) cleanup.
     storage_arena: *std.heap.ArenaAllocator,
     arena_coordinator: *ArenaCoordinator,
-    /// Monotonic deletion sequence counter for tombstone ordering
-    deletion_sequence: std.atomic.Value(u64),
+    /// Global sequence counter for all operations (reads, writes, deletes)
+    /// This provides total ordering of operations for MVCC semantics
+    global_sequence: std.atomic.Value(u64),
 
     /// Fixed-size object pools for frequently allocated/deallocated objects.
     /// Eliminates allocation overhead and fragmentation for SSTable and iterator objects.
@@ -220,12 +229,18 @@ pub const StorageEngine = struct {
         assert_mod.assert_fmt(@intFromPtr(data_dir.ptr) != 0, "Storage data_dir has null pointer", .{});
 
         storage_config.validate() catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "config_validation" });
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "config_validation" },
+            );
             return err;
         };
 
         const owned_data_dir = allocator.dupe(u8, data_dir) catch |err| {
-            error_context.log_storage_error(err, error_context.file_context("allocate_data_dir", data_dir));
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("allocate_data_dir", data_dir),
+            );
             return err;
         };
 
@@ -272,7 +287,7 @@ pub const StorageEngine = struct {
             .storage_metrics = StorageMetrics.init(),
             .storage_arena = storage_arena,
             .arena_coordinator = arena_coordinator,
-            .deletion_sequence = std.atomic.Value(u64).init(0),
+            .global_sequence = std.atomic.Value(u64).init(1),
 
             // TEMP: Skip sstable_pool field
             // .sstable_pool = sstable_pool,
@@ -281,7 +296,13 @@ pub const StorageEngine = struct {
         };
 
         // CRITICAL: Pass ArenaCoordinator by pointer to prevent struct copying corruption
-        engine.memtable_manager = MemtableManager.init(engine.arena_coordinator, allocator, filesystem, owned_data_dir, storage_config.memtable_max_size) catch |err| {
+        engine.memtable_manager = MemtableManager.init(
+            engine.arena_coordinator,
+            allocator,
+            filesystem,
+            owned_data_dir,
+            storage_config.memtable_max_size,
+        ) catch |err| {
             storage_arena.deinit();
             allocator.destroy(storage_arena);
             allocator.destroy(arena_coordinator);
@@ -305,12 +326,12 @@ pub const StorageEngine = struct {
             // Validate coordinator pattern integrity
             self.arena_coordinator.validate_coordinator();
 
-            // Ensure coordinator points to our heap-allocated storage arena
             // Safety: Converting pointers to integers for arena reference validation
-            fatal_assert(@intFromPtr(self.arena_coordinator.arena) == @intFromPtr(self.storage_arena), "ArenaCoordinator does not reference StorageEngine arena - coordinator corruption", .{});
-
-            // Note: Direct arena reference validation would require more complex
-            // pointer tracking. Current approach validates structure at init time.
+            fatal_assert(
+                @intFromPtr(self.arena_coordinator.arena) == @intFromPtr(self.storage_arena),
+                "ArenaCoordinator does not reference StorageEngine arena - coordinator corruption",
+                .{},
+            );
         }
     }
 
@@ -372,7 +393,10 @@ pub const StorageEngine = struct {
         if (self.state != .stopped) {
             self.shutdown() catch |err| {
                 // Log error but continue cleanup to prevent resource leaks
-                error_context.log_storage_error(err, error_context.StorageContext{ .operation = "shutdown_during_deinit" });
+                error_context.log_storage_error(
+                    err,
+                    error_context.StorageContext{ .operation = "shutdown_during_deinit" },
+                );
             };
         }
 
@@ -411,7 +435,10 @@ pub const StorageEngine = struct {
 
         const command = FlushMemtableCommand{ .storage_engine = self };
         command.execute() catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "coordinate_memtable_flush" });
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "coordinate_memtable_flush" },
+            );
             return err;
         };
     }
@@ -428,7 +455,10 @@ pub const StorageEngine = struct {
     pub fn flush_memtable_to_sstable(self: *StorageEngine) !void {
         const command = FlushMemtableCommand{ .storage_engine = self };
         command.execute() catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_memtable_to_sstable" });
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "flush_memtable_to_sstable" },
+            );
             return err;
         };
     }
@@ -452,14 +482,22 @@ pub const StorageEngine = struct {
         self.storage_metrics.total_write_time_ns.add(write_duration);
         self.storage_metrics.total_bytes_written.add(content_len);
 
-        assert_mod.assert_fmt(self.storage_metrics.blocks_written.load() == blocks_before + 1, "Blocks written counter update failed", .{});
+        assert_mod.assert_fmt(
+            self.storage_metrics.blocks_written.load() == blocks_before + 1,
+            "Blocks written counter update failed",
+            .{},
+        );
     }
 
     /// Create directory structure and discover existing data files.
     /// Called internally by startup() to prepare filesystem state.
     fn create_storage_directories(self: *StorageEngine) !void {
         concurrency.assert_main_thread();
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "StorageEngine self pointer is null - memory corruption detected",
+            .{},
+        );
 
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
@@ -473,7 +511,10 @@ pub const StorageEngine = struct {
             self.vfs.mkdir(self.data_dir) catch |err| switch (err) {
                 error.FileExists => {}, // Directory already exists, continue
                 else => {
-                    error_context.log_storage_error(err, error_context.file_context("create_data_directory", self.data_dir));
+                    error_context.log_storage_error(
+                        err,
+                        error_context.file_context("create_data_directory", self.data_dir),
+                    );
                     return err;
                 },
             };
@@ -490,19 +531,31 @@ pub const StorageEngine = struct {
         }
 
         self.create_storage_directories() catch |err| {
-            error_context.log_storage_error(err, error_context.file_context("create_storage_directories", self.data_dir));
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("create_storage_directories", self.data_dir),
+            );
             return err;
         };
         self.memtable_manager.startup() catch |err| {
-            error_context.log_storage_error(err, error_context.file_context("memtable_manager_startup", self.data_dir));
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("memtable_manager_startup", self.data_dir),
+            );
             return err;
         };
         self.sstable_manager.startup() catch |err| {
-            error_context.log_storage_error(err, error_context.file_context("sstable_manager_startup", self.data_dir));
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("sstable_manager_startup", self.data_dir),
+            );
             return err;
         };
         self.memtable_manager.recover_from_wal() catch |err| {
-            error_context.log_storage_error(err, error_context.file_context("wal_recovery", self.data_dir));
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("wal_recovery", self.data_dir),
+            );
             return err;
         };
 
@@ -522,22 +575,64 @@ pub const StorageEngine = struct {
 
         const block_data = owned_block.read(.temporary);
 
-        assert_mod.assert_fmt(block_data.content.len > 0, "Block content cannot be empty", .{});
-        assert_mod.assert_fmt(block_data.source_uri.len > 0, "Block source_uri cannot be empty", .{});
-        assert_mod.assert_fmt(block_data.content.len < 100 * 1024 * 1024, "Block content too large: {} bytes", .{block_data.content.len});
-        assert_mod.assert_fmt(block_data.source_uri.len < 2048, "Block source_uri too long: {} bytes", .{block_data.source_uri.len});
-        assert_mod.assert_fmt(block_data.metadata_json.len < 1024 * 1024, "Block metadata_json too large: {} bytes", .{block_data.metadata_json.len});
-        assert_mod.assert_fmt(block_data.version > 0, "Block version must be positive: {}", .{block_data.version});
+        // Assign global sequence number for MVCC ordering
+        const sequence = self.global_sequence.fetchAdd(1, .monotonic);
+
+        // Create a new block with the assigned sequence number
+        const sequenced_block = ContextBlock{
+            .id = block_data.id,
+            .sequence = sequence,
+            .source_uri = block_data.source_uri,
+            .metadata_json = block_data.metadata_json,
+            .content = block_data.content,
+        };
+
+        assert_mod.assert_fmt(
+            block_data.content.len > 0,
+            "Block content cannot be empty",
+            .{},
+        );
+        assert_mod.assert_fmt(
+            block_data.source_uri.len > 0,
+            "Block source_uri cannot be empty",
+            .{},
+        );
+        assert_mod.assert_fmt(
+            block_data.content.len < 100 * 1024 * 1024,
+            "Block content too large: {} bytes",
+            .{block_data.content.len},
+        );
+        assert_mod.assert_fmt(
+            block_data.source_uri.len < 2048,
+            "Block source_uri too long: {} bytes",
+            .{block_data.source_uri.len},
+        );
+        assert_mod.assert_fmt(
+            block_data.metadata_json.len < 1024 * 1024,
+            "Block metadata_json too large: {} bytes",
+            .{block_data.metadata_json.len},
+        );
+        assert_mod.assert_fmt(
+            sequenced_block.sequence > 0,
+            "Block sequence must be positive: {}",
+            .{sequenced_block.sequence},
+        );
 
         if (!self.state.can_write()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
         const start_time = std.time.nanoTimestamp();
         assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
 
-        block_data.validate(self.backing_allocator) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("block_validation", block_data.id));
+        sequenced_block.validate(self.backing_allocator) catch |err| {
+            error_context.log_storage_error(
+                err,
+                error_context.block_context("block_validation", sequenced_block.id),
+            );
             return err;
         };
 
@@ -545,7 +640,10 @@ pub const StorageEngine = struct {
         if (self.sstable_manager.compaction_manager.should_block_writes()) {
             // Try to trigger compaction before blocking in single-threaded CLI context
             self.sstable_manager.check_and_run_compaction() catch |err| {
-                error_context.log_storage_error(err, error_context.block_context("emergency_compaction", block_data.id));
+                error_context.log_storage_error(
+                    err,
+                    error_context.block_context("emergency_compaction", block_data.id),
+                );
                 // If compaction fails, still block writes to prevent L0 explosion
                 return error.WriteBlocked;
             };
@@ -561,20 +659,31 @@ pub const StorageEngine = struct {
             return error.WriteStalled;
         }
 
-        fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
+        fatal_assert(
+            @intFromPtr(&self.memtable_manager) != 0,
+            "MemtableManager pointer corrupted - memory safety violation detected",
+            .{},
+        );
 
-        // Transfer ownership from storage engine to memtable manager
-        var mutable_owned_block = owned_block;
+        // Create new owned block with sequence number for storage
+        const sequenced_owned_block = OwnedBlock.take_ownership(sequenced_block, .storage_engine);
+        var mutable_owned_block = sequenced_owned_block;
         const transferred_block = mutable_owned_block.transfer(.memtable_manager, undefined);
 
         self.memtable_manager.put_block_durable_owned(transferred_block) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("put_block_durable_owned", block_data.id));
+            error_context.log_storage_error(
+                err,
+                error_context.block_context("put_block_durable_owned", sequenced_block.id),
+            );
             return err;
         };
 
         if (self.memtable_manager.should_flush()) {
             self.coordinate_memtable_flush() catch |err| {
-                error_context.log_storage_error(err, error_context.block_context("coordinate_memtable_flush", block_data.id));
+                error_context.log_storage_error(
+                    err,
+                    error_context.block_context("coordinate_memtable_flush", sequenced_block.id),
+                );
                 return err;
             };
 
@@ -582,7 +691,10 @@ pub const StorageEngine = struct {
             // This avoids performance regression from unnecessary compaction
             if (self.sstable_manager.should_compact()) {
                 self.sstable_manager.check_and_run_compaction() catch |err| {
-                    error_context.log_storage_error(err, error_context.block_context("check_and_run_compaction", block_data.id));
+                    error_context.log_storage_error(
+                        err,
+                        error_context.block_context("check_and_run_compaction", block_data.id),
+                    );
                     return err;
                 };
             }
@@ -602,14 +714,9 @@ pub const StorageEngine = struct {
     /// Write a block to storage - primary public API.
     /// Accepts ContextBlock from external callers and manages internal ownership transfer.
     pub fn put_block(self: *StorageEngine, block: ContextBlock) !void {
-        // Convert to owned block for internal storage subsystem coordination
         const owned_block = OwnedBlock.take_ownership(block, .storage_engine);
         return self.put_block_owned(owned_block);
     }
-
-    // REMOVED: put_block_temporary() - Use put_block() with OwnedBlock.
-    // For legacy callers, create OwnedBlock.take_ownership(block, .temporary)
-    // before calling put_block().
 
     /// Find a Context Block by ID with ownership-aware semantics.
     /// Returns OwnedBlock that can be safely transferred between subsystems.
@@ -620,7 +727,11 @@ pub const StorageEngine = struct {
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
         concurrency.assert_main_thread();
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "StorageEngine self pointer is null - memory corruption detected",
+            .{},
+        );
 
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
@@ -633,61 +744,114 @@ pub const StorageEngine = struct {
         assert_mod.assert_fmt(non_zero_bytes > 0, "Block ID cannot be all zeros", .{});
 
         if (!self.state.can_read()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
         const start_time = std.time.nanoTimestamp();
 
-        // Memtable-first strategy: recent writes are in-memory for O(1) access,
-        // avoiding disk I/O for hot data and maintaining read-after-write consistency
-        if (try self.memtable_manager.find_block_with_ownership(block_id, block_ownership)) |owned_block| {
-            const end_time = std.time.nanoTimestamp();
-            const read_duration: u64 = if (end_time >= start_time)
-                @as(u64, @intCast(end_time - start_time))
-            else
-                1; // Minimum measurable duration when time goes backwards
+        // Use unified MVCC read to find highest sequence entry
+        const result = try self.find_highest_sequence_entry(block_id);
 
-            self.storage_metrics.blocks_read.incr();
-            self.storage_metrics.total_read_time_ns.add(read_duration);
-            self.storage_metrics.total_bytes_read.add(owned_block.block.content.len);
-            return owned_block;
+        const end_time = std.time.nanoTimestamp();
+        const read_duration: u64 = if (end_time >= start_time)
+            @as(u64, @intCast(end_time - start_time))
+        else
+            1; // Minimum measurable duration when time goes backwards
+
+        if (result.is_tombstoned) {
+            return null; // Block is deleted
         }
 
-        // Check tombstones to prevent resurrection from SSTables
-        if (self.memtable_manager.is_block_tombstoned(block_id)) {
-            return null;
-        }
-
-        // SSTable fallback with zero-copy optimization: eliminates redundant allocations
-        // by using ParsedBlock view until ownership transfer is required
-        const parsed_block_result = self.sstable_manager.find_block_view_in_sstables(block_id) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("find_block_view_in_sstables", block_id));
-            return err;
-        };
-
-        if (parsed_block_result) |parsed_block| {
-            // Convert to owned block only at the final moment for ownership transfer
-            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            const owned_block = OwnedBlock.take_ownership(owned_context_block, block_ownership);
-
-            const end_time = std.time.nanoTimestamp();
-            const read_duration: u64 = if (end_time >= start_time)
-                @as(u64, @intCast(end_time - start_time))
-            else
-                1; // Minimum measurable duration when time goes backwards
-
+        if (result.block) |block| {
             self.storage_metrics.blocks_read.incr();
-            self.storage_metrics.sstable_reads.incr();
             self.storage_metrics.total_read_time_ns.add(read_duration);
-            self.storage_metrics.total_bytes_read.add(parsed_block.content().len);
-
-            return owned_block;
+            self.storage_metrics.total_bytes_read.add(block.content.len);
+            return OwnedBlock.take_ownership(block, block_ownership);
         }
 
         return null;
     }
 
-    /// Zero-cost block lookup for hot paths with compile-time ownership.
+    /// MVCC read result containing the highest sequence entry
+    const MVCCReadResult = struct {
+        block: ?ContextBlock,
+        is_tombstoned: bool,
+    };
+
+    /// Unified MVCC read across all storage layers (memtable + SSTables).
+    /// Finds the entry with the highest sequence number, whether block or tombstone.
+    fn find_highest_sequence_entry(self: *StorageEngine, block_id: BlockId) !MVCCReadResult {
+        var highest_sequence: u64 = 0;
+        var winning_block: ?ContextBlock = null;
+        var is_tombstoned = false;
+
+        // Check memtable for both block and tombstone
+        if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            if (block.sequence > highest_sequence) {
+                highest_sequence = block.sequence;
+                winning_block = block;
+                is_tombstoned = false;
+            }
+        }
+
+        // Check memtable tombstones
+        if (self.memtable_manager.block_index.tombstones.get(block_id)) |tombstone_record| {
+            if (tombstone_record.sequence > highest_sequence) {
+                highest_sequence = tombstone_record.sequence;
+                winning_block = null;
+                is_tombstoned = true;
+            }
+        }
+
+        // Check SSTables - need to search all of them to find highest sequence
+        var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
+        defer sstable_paths.deinit();
+
+        for (sstable_paths.items) |sstable_path| {
+            const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(
+                self.arena_coordinator,
+                self.arena_coordinator.allocator(),
+                self.vfs,
+                sstable_path_copy,
+            );
+            defer sstable_file.deinit();
+
+            // Load index - skip corrupted SSTables
+            sstable_file.read_index() catch continue;
+
+            // Check for tombstones in this SSTable
+            for (sstable_file.tombstone_index.items) |tombstone_record| {
+                if (tombstone_record.block_id.eql(block_id)) {
+                    if (tombstone_record.sequence > highest_sequence) {
+                        highest_sequence = tombstone_record.sequence;
+                        winning_block = null;
+                        is_tombstoned = true;
+                    }
+                }
+            }
+
+            // Check for blocks in this SSTable
+            if (try sstable_file.find_block_view(block_id)) |parsed_block| {
+                const sequence = @as(u64, @intCast(parsed_block.sequence()));
+                if (sequence > highest_sequence) {
+                    highest_sequence = sequence;
+                    // Convert to owned block for later return
+                    winning_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+                    is_tombstoned = false;
+                }
+            }
+        }
+
+        return MVCCReadResult{
+            .block = winning_block,
+            .is_tombstoned = is_tombstoned,
+        };
+    }
+
     /// Eliminates all runtime overhead while maintaining type safety.
     /// Use this for performance-critical operations where ownership is known at compile time.
     pub fn find_block(
@@ -699,30 +863,30 @@ pub const StorageEngine = struct {
         // Hot path optimizations: minimal validation, direct access
         if (comptime builtin.mode == .Debug) {
             fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
-            assert_mod.assert_fmt(!block_id.eql(BlockId.from_bytes([_]u8{0} ** 16)), "Invalid block ID: cannot be all zeros", .{});
+            assert_mod.assert_fmt(
+                !block_id.eql(BlockId.from_bytes([_]u8{0} ** 16)),
+                "Invalid block ID: cannot be all zeros",
+                .{},
+            );
         }
 
         if (!self.state.can_read()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
-        // Fast path: check memtable first (most recent data)
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+        // Use unified MVCC read to find highest sequence entry
+        const result = try self.find_highest_sequence_entry(block_id);
+
+        if (result.is_tombstoned) {
+            return null; // Block is deleted
+        }
+        if (result.block) |block| {
             return OwnedBlock.take_ownership(block, owner);
         }
-
-        // Check tombstones to prevent resurrection from SSTables
-        if (self.memtable_manager.is_block_tombstoned(block_id)) {
-            return null;
-        }
-
-        // Slower path: check SSTables with zero-copy optimization
-        if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
-            // Convert to owned block only when ownership transfer is required
-            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return OwnedBlock.take_ownership(owned_context_block, owner);
-        }
-        return null;
+        return null; // Block not found
     }
 
     /// Zero-cost storage engine block lookup - fastest possible read path.
@@ -735,21 +899,16 @@ pub const StorageEngine = struct {
             fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
         }
 
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block_ptr| {
-            return OwnedBlock.take_ownership(block_ptr.*, .storage_engine);
-        }
+        // Use unified MVCC read to find highest sequence entry
+        const result = try self.find_highest_sequence_entry(block_id);
 
-        // Check tombstones to prevent resurrection from SSTables
-        if (self.memtable_manager.is_block_tombstoned(block_id)) {
-            return null;
+        if (result.is_tombstoned) {
+            return null; // Block is deleted
         }
-
-        if (try self.sstable_manager.find_block_view_in_sstables(block_id)) |parsed_block| {
-            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return OwnedBlock.take_ownership(owned_context_block, .storage_engine);
+        if (result.block) |block| {
+            return OwnedBlock.take_ownership(block, .storage_engine);
         }
-
-        return null;
+        return null; // Block not found
     }
 
     /// Zero-cost query engine block lookup for cross-subsystem access.
@@ -760,42 +919,41 @@ pub const StorageEngine = struct {
             fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
         }
 
-        if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+        // Use unified MVCC read to find highest sequence entry
+        const result = try self.find_highest_sequence_entry(block_id);
+
+        if (result.is_tombstoned) {
+            return null; // Block is deleted
+        }
+        if (result.block) |block| {
             return OwnedBlock.take_ownership(block, .query_engine);
         }
-
-        // Check tombstones to prevent resurrection from SSTables
-        if (self.memtable_manager.is_block_tombstoned(block_id)) {
-            return null;
-        }
-
-        const parsed_block_result = try self.sstable_manager.find_block_view_in_sstables(block_id);
-
-        if (parsed_block_result) |parsed_block| {
-            const owned_context_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-            return OwnedBlock.take_ownership(owned_context_block, .query_engine);
-        }
-
-        return null;
+        return null; // Block not found
     }
 
     /// Delete a Context Block by ID with tombstone semantics.
     pub fn delete_block(self: *StorageEngine, block_id: BlockId) !void {
         concurrency.assert_main_thread();
         if (!self.state.can_write()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
-        const sequence = self.deletion_sequence.fetchAdd(1, .monotonic);
+        const sequence = self.global_sequence.fetchAdd(1, .monotonic);
         const tombstone_record = TombstoneRecord{
             .block_id = block_id,
-            .deletion_sequence = sequence,
+            .sequence = sequence,
             .deletion_timestamp = @intCast(std.time.microTimestamp()),
             .generation = 0,
         };
 
         self.memtable_manager.put_tombstone_durable(tombstone_record) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("put_tombstone_durable", block_id));
+            error_context.log_storage_error(
+                err,
+                error_context.block_context("put_tombstone_durable", block_id),
+            );
             return err;
         };
 
@@ -806,7 +964,11 @@ pub const StorageEngine = struct {
     pub fn put_edge(self: *StorageEngine, edge: GraphEdge) !void {
         concurrency.assert_main_thread();
 
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "StorageEngine self pointer is null - memory corruption detected",
+            .{},
+        );
 
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
@@ -822,10 +984,17 @@ pub const StorageEngine = struct {
         }
         assert_mod.assert_fmt(source_non_zero > 0, "Edge source_id cannot be all zeros", .{});
         assert_mod.assert_fmt(target_non_zero > 0, "Edge target_id cannot be all zeros", .{});
-        assert_mod.assert_fmt(!std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes), "Edge cannot be self-referential", .{});
+        assert_mod.assert_fmt(
+            !std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes),
+            "Edge cannot be self-referential",
+            .{},
+        );
 
         if (!self.state.can_write()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
         // Validate edge endpoints exist before insertion
@@ -843,28 +1012,45 @@ pub const StorageEngine = struct {
         const start_time = std.time.nanoTimestamp();
         assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
 
-        fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
+        fatal_assert(
+            @intFromPtr(&self.memtable_manager) != 0,
+            "MemtableManager pointer corrupted - memory safety violation detected",
+            .{},
+        );
 
         self.memtable_manager.put_edge_durable(edge) catch |err| {
-            error_context.log_storage_error(err, error_context.block_context("put_edge_durable", edge.source_id));
+            error_context.log_storage_error(
+                err,
+                error_context.block_context("put_edge_durable", edge.source_id),
+            );
             return err;
         };
 
         const edges_before = self.storage_metrics.edges_added.load();
         self.storage_metrics.edges_added.incr();
 
-        fatal_assert(self.storage_metrics.edges_added.load() == edges_before + 1, "Edges added counter update failed - metrics corruption detected", .{});
+        fatal_assert(
+            self.storage_metrics.edges_added.load() == edges_before + 1,
+            "Edges added counter update failed - metrics corruption detected",
+            .{},
+        );
     }
 
     /// Force synchronization of all WAL operations to durable storage.
     pub fn flush_wal(self: *StorageEngine) !void {
         concurrency.assert_main_thread();
         if (!self.state.can_write()) {
-            return if (self.state == .uninitialized or self.state == .initialized) StorageError.NotInitialized else StorageError.StorageEngineDeinitialized;
+            return if (self.state == .uninitialized or self.state == .initialized)
+                StorageError.NotInitialized
+            else
+                StorageError.StorageEngineDeinitialized;
         }
 
         self.memtable_manager.flush_wal() catch |err| {
-            error_context.log_storage_error(err, error_context.StorageContext{ .operation = "flush_wal" });
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "flush_wal" },
+            );
             return err;
         };
     }
@@ -898,7 +1084,11 @@ pub const StorageEngine = struct {
     /// Searches both memtable and SSTables following LSM-tree read path.
     /// Returns edges with memtable_manager ownership for consistency.
     pub fn find_outgoing_edges(self: *const StorageEngine, source_id: BlockId) []const OwnedGraphEdge {
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "StorageEngine self pointer is null - memory corruption detected",
+            .{},
+        );
 
         if (self.data_dir.len == 0) {
             return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
@@ -910,19 +1100,34 @@ pub const StorageEngine = struct {
         }
         assert_mod.assert_fmt(non_zero_bytes > 0, "Source block ID cannot be all zeros", .{});
 
-        fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
+        fatal_assert(
+            @intFromPtr(&self.memtable_manager) != 0,
+            "MemtableManager pointer corrupted - memory safety violation detected",
+            .{},
+        );
 
         // First check memtable (recent writes have precedence)
         const memtable_edges = self.memtable_manager.find_outgoing_edges(source_id);
 
         if (memtable_edges.len > 0) {
-            fatal_assert(@intFromPtr(memtable_edges.ptr) != 0, "MemtableManager returned null edges pointer with non-zero length - heap corruption detected", .{});
-            fatal_assert(std.mem.eql(u8, &memtable_edges[0].edge.source_id.bytes, &source_id.bytes), "First edge has wrong source_id - index corruption detected", .{});
+            fatal_assert(
+                @intFromPtr(memtable_edges.ptr) != 0,
+                "MemtableManager returned null edges pointer with non-zero length - heap corruption detected",
+                .{},
+            );
+            fatal_assert(
+                std.mem.eql(u8, &memtable_edges[0].edge.source_id.bytes, &source_id.bytes),
+                "First edge has wrong source_id - index corruption detected",
+                .{},
+            );
             return memtable_edges;
         }
 
         // Check SSTables if not found in memtable
-        const sstable_edges = self.sstable_manager.find_outgoing_edges_in_sstables(source_id, self.backing_allocator) catch |err| {
+        const sstable_edges = self.sstable_manager.find_outgoing_edges_in_sstables(
+            source_id,
+            self.backing_allocator,
+        ) catch |err| {
             log.warn("Failed to query outgoing edges from SSTables for source {}: {any}", .{ source_id, err });
             return &[_]OwnedGraphEdge{};
         };
@@ -948,7 +1153,11 @@ pub const StorageEngine = struct {
     /// Find all incoming edges to a target block.
     /// Delegates to memtable manager for reverse graph traversal operations.
     pub fn find_incoming_edges(self: *const StorageEngine, target_id: BlockId) []const OwnedGraphEdge {
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        fatal_assert(
+            @intFromPtr(self) != 0,
+            "StorageEngine self pointer is null - memory corruption detected",
+            .{},
+        );
 
         if (self.data_dir.len == 0) {
             return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
@@ -960,18 +1169,33 @@ pub const StorageEngine = struct {
         }
         assert_mod.assert_fmt(non_zero_bytes > 0, "Target block ID cannot be all zeros", .{});
 
-        fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corrupted - memory safety violation detected", .{});
+        fatal_assert(
+            @intFromPtr(&self.memtable_manager) != 0,
+            "MemtableManager pointer corrupted - memory safety violation detected",
+            .{},
+        );
 
         const edges = self.memtable_manager.find_incoming_edges(target_id);
 
         if (edges.len > 0) {
-            fatal_assert(@intFromPtr(edges.ptr) != 0, "MemtableManager returned null edges pointer with non-zero length - heap corruption detected", .{});
-            fatal_assert(std.mem.eql(u8, &edges[0].edge.target_id.bytes, &target_id.bytes), "First edge has wrong target_id - index corruption detected", .{});
+            fatal_assert(
+                @intFromPtr(edges.ptr) != 0,
+                "MemtableManager returned null edges pointer with non-zero length - heap corruption detected",
+                .{},
+            );
+            fatal_assert(
+                std.mem.eql(u8, &edges[0].edge.target_id.bytes, &target_id.bytes),
+                "First edge has wrong target_id - index corruption detected",
+                .{},
+            );
             return edges;
         }
 
         // Check SSTables if not found in memtable
-        const sstable_edges = self.sstable_manager.find_incoming_edges_in_sstables(target_id, self.backing_allocator) catch |err| {
+        const sstable_edges = self.sstable_manager.find_incoming_edges_in_sstables(
+            target_id,
+            self.backing_allocator,
+        ) catch |err| {
             log.warn("Failed to query incoming edges from SSTables for target {}: {any}", .{ target_id, err });
             return &[_]OwnedGraphEdge{};
         };

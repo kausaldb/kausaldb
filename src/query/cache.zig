@@ -163,7 +163,7 @@ fn clone_owned_block(allocator: std.mem.Allocator, owned_block: OwnedBlock) !Own
     const block = owned_block.read(.query_engine);
     const cloned_block = ContextBlock{
         .id = block.id,
-        .version = block.version,
+        .sequence = block.sequence,
         .source_uri = try allocator.dupe(u8, block.source_uri),
         .metadata_json = try allocator.dupe(u8, block.metadata_json),
         .content = try allocator.dupe(u8, block.content),
@@ -443,7 +443,7 @@ test "cache TTL expiration" {
     std.mem.writeInt(u128, &id_bytes, 1, .little);
     const test_block = ContextBlock{
         .id = BlockId{ .bytes = id_bytes },
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.fmt.allocPrint(allocator, "test://block_{}.zig", .{1}),
         .metadata_json = try allocator.dupe(u8, "{}"),
         .content = try allocator.dupe(u8, "expiring content"),
@@ -478,7 +478,7 @@ test "cache invalidation" {
     std.mem.writeInt(u128, &id_bytes, 1, .little);
     const test_block = ContextBlock{
         .id = BlockId{ .bytes = id_bytes },
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.fmt.allocPrint(allocator, "test://block_{}.zig", .{1}),
         .metadata_json = try allocator.dupe(u8, "{}"),
         .content = try allocator.dupe(u8, "invalidation test"),

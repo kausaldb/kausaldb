@@ -121,7 +121,7 @@ pub const IngestionConfig = struct {
     track_imports: bool = false,
     track_function_calls: bool = false,
     extract_all_metadata: bool = false,
-    track_versions: bool = false,
+    track_sequences: bool = false,
     generate_unicode_content: bool = false,
     allow_circular_imports: bool = false,
     generate_functions: bool = false,
@@ -284,7 +284,7 @@ pub const SimulationRunner = struct {
                 switch (operation.op_type) {
                     .put_block, .update_block => {
                         if (operation.block) |block| {
-                            log.debug("OP[{}] PUT_BLOCK id={} version={} content_len={}", .{ i, block.id, block.version, block.content.len });
+                            log.debug("OP[{}] PUT_BLOCK id={} sequence={} content_len={}", .{ i, block.id, block.sequence, block.content.len });
                         }
                     },
                     .delete_block => {
@@ -305,19 +305,19 @@ pub const SimulationRunner = struct {
 
             // FORENSIC DEBUG: Log sequence number state before operation
             if (builtin.mode == .Debug) {
-                log.debug("OP[{}] SEQUENCE_TRACKING: workload_seq={} model_global_seq={} workload_op_count={}", .{ i, operation.sequence_number, self.model.global_sequence, self.workload.operation_count });
+                log.debug("OP[{}] SEQUENCE_TRACKING: workload_seq={} model_global_seq={} workload_op_count={}", .{ i, operation.model_sequence, self.model.global_sequence, self.workload.operation_count });
 
                 // Track specific blocks that might cause issues
                 if (operation.op_type == .put_block or operation.op_type == .update_block) {
                     if (operation.block) |block| {
-                        log.debug("OP[{}] BLOCK_TRACKING: id={} version={} content_len={}", .{ i, block.id, block.version, block.content.len });
+                        log.debug("OP[{}] BLOCK_TRACKING: id={} sequence={} content_len={}", .{ i, block.id, block.sequence, block.content.len });
                     }
                 }
             }
 
             // Apply to system first to track actual success/failure
             const success = self.apply_operation_to_system(&operation) catch |err| blk: {
-                log.debug("OP[{}] SYSTEM_ERROR: {any} (workload_seq={})", .{ i, err, operation.sequence_number });
+                log.debug("OP[{}] SYSTEM_ERROR: {any} (workload_seq={})", .{ i, err, operation.model_sequence });
                 // Handle expected failures that shouldn't update model
                 switch (err) {
                     error.WriteStalled, error.WriteBlocked => break :blk false,
@@ -327,13 +327,25 @@ pub const SimulationRunner = struct {
 
             // DEBUG: Log operation success/failure with sequence tracking
             if (builtin.mode == .Debug) {
-                log.debug("OP[{}] SYSTEM_RESULT: success={} workload_seq={}", .{ i, success, operation.sequence_number });
+                log.debug("OP[{}] SYSTEM_RESULT: success={} workload_seq={}", .{ i, success, operation.model_sequence });
             }
 
             // Only update model if system operation succeeded
             if (success) {
                 const pre_model_seq = self.model.global_sequence;
-                try self.model.apply_operation(&operation);
+
+                // For put_block operations, fetch the actual stored block to get the assigned sequence
+                var model_operation = operation;
+                if (operation.op_type == .put_block or operation.op_type == .update_block) {
+                    if (operation.block) |original_block| {
+                        if (try self.storage_engine.find_block(original_block.id, .temporary)) |stored_block| {
+                            // Update the operation with the actual stored block (with correct sequence)
+                            model_operation.block = stored_block.read(.temporary).*;
+                        }
+                    }
+                }
+
+                try self.model.apply_operation(&model_operation);
 
                 // CRITICAL: Only increment workload counter when operation actually succeeds
                 self.workload.confirm_operation_success();
@@ -341,7 +353,7 @@ pub const SimulationRunner = struct {
                 const post_model_seq = self.model.global_sequence;
 
                 if (builtin.mode == .Debug) {
-                    log.debug("OP[{}] MODEL_UPDATED: workload_seq={} model_seq_before={} model_seq_after={}", .{ i, operation.sequence_number, pre_model_seq, post_model_seq });
+                    log.debug("OP[{}] MODEL_UPDATED: workload_seq={} model_seq_before={} model_seq_after={}", .{ i, operation.model_sequence, pre_model_seq, post_model_seq });
 
                     // CRITICAL: Check for sequence divergence
                     const expected_divergence = @as(i64, @intCast(self.workload.operation_count)) - @as(i64, @intCast(post_model_seq));
@@ -352,7 +364,7 @@ pub const SimulationRunner = struct {
             } else {
                 if (builtin.mode == .Debug) {
                     const divergence = @as(i64, @intCast(self.workload.operation_count)) - @as(i64, @intCast(self.model.global_sequence));
-                    log.debug("OP[{}] MODEL_SKIPPED (system failed): workload_seq={} model_seq={} divergence_now={}", .{ i, operation.sequence_number, self.model.global_sequence, divergence });
+                    log.debug("OP[{}] MODEL_SKIPPED (system failed): workload_seq={} model_seq={} divergence_now={}", .{ i, operation.model_sequence, self.model.global_sequence, divergence });
                 }
             }
 
@@ -546,7 +558,7 @@ pub const SimulationRunner = struct {
             };
 
             if (storage_result == null) {
-                log.warn("IMMEDIATE_CONSISTENCY[{}] VIOLATION: Model has block {} (seq={}) but storage doesn't", .{ current_operation, model_block.id, model_block.sequence_number });
+                log.warn("IMMEDIATE_CONSISTENCY[{}] VIOLATION: Model has block {} (seq={}) but storage doesn't", .{ current_operation, model_block.id, model_block.model_sequence });
                 // Don't fatal_assert here, just log for forensics
             }
 
@@ -826,13 +838,13 @@ pub const SimulationRunner = struct {
         if (!self.ingestion_config.simulate_incremental) return;
 
         // Check that incremental updates maintain consistency
-        // Verify that modified blocks have higher version numbers
+        // Verify that modified blocks have higher sequence numbers
         var incremental_updates: u32 = 0;
 
         var block_iterator = self.model.blocks.iterator();
         while (block_iterator.next()) |entry| {
             const model_block = entry.value_ptr;
-            if (!model_block.deleted and model_block.version > 1) {
+            if (!model_block.deleted and model_block.sequence > 1) {
                 incremental_updates += 1;
             }
         }
@@ -1095,24 +1107,24 @@ pub const SimulationRunner = struct {
         }
     }
 
-    /// Verify version tracking
-    pub fn verify_version_tracking(self: *Self) !void {
-        if (!self.ingestion_config.track_versions) return;
+    /// Verify sequence tracking
+    pub fn verify_sequence_tracking(self: *Self) !void {
+        if (!self.ingestion_config.track_sequences) return;
 
-        // Check that blocks have incremented versions after modifications
+        // Check that blocks have incremented sequences after modifications
         var block_iterator = self.model.blocks.iterator();
-        var version_tracked_count: u32 = 0;
+        var sequence_tracked_count: u32 = 0;
 
         while (block_iterator.next()) |entry| {
             const model_block = entry.value_ptr;
-            if (!model_block.deleted and model_block.version > 1) {
-                version_tracked_count += 1;
+            if (!model_block.deleted and model_block.sequence > 1) {
+                sequence_tracked_count += 1;
             }
         }
 
-        // If we're tracking versions, we should have some versioned blocks
-        if ((try self.model.active_block_count()) > 10 and version_tracked_count == 0) {
-            fatal_assert(false, "Version tracking enabled but no versioned blocks found", .{});
+        // If we're tracking sequences, we should have some sequenced blocks
+        if ((try self.model.active_block_count()) > 10 and sequence_tracked_count == 0) {
+            fatal_assert(false, "Sequence tracking enabled but no sequenced blocks found", .{});
         }
     }
 
@@ -1285,7 +1297,7 @@ pub const TestDataGenerator = struct {
 
         return ContextBlock{
             .id = create_deterministic_block_id(id_seed),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = uri,
             .metadata_json = metadata,
             .content = content,

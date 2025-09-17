@@ -32,7 +32,7 @@ pub const ComponentScenario = enum {
     bloom_filter_performance_characteristics,
     batch_writer_atomicity_guarantees,
     batch_writer_deduplication_behavior,
-    batch_writer_version_conflict_resolution,
+    batch_writer_sequence_conflict_resolution,
     metadata_indexing_consistency,
     resource_pool_efficiency_validation,
     memory_arena_cleanup_verification,
@@ -50,7 +50,7 @@ pub const ComponentScenario = enum {
             .bloom_filter_performance_characteristics => try execute_bloom_filter_performance(allocator, runner),
             .batch_writer_atomicity_guarantees => try execute_batch_writer_atomicity(allocator, runner),
             .batch_writer_deduplication_behavior => try execute_batch_writer_deduplication(allocator, runner),
-            .batch_writer_version_conflict_resolution => try execute_batch_writer_conflicts(allocator, runner),
+            .batch_writer_sequence_conflict_resolution => try execute_batch_writer_conflicts(allocator, runner),
             .metadata_indexing_consistency => try execute_metadata_indexing(allocator, runner),
             .resource_pool_efficiency_validation => try execute_resource_pool_efficiency(allocator, runner),
             .memory_arena_cleanup_verification => try execute_memory_arena_cleanup(allocator, runner),
@@ -66,7 +66,7 @@ pub const ComponentScenario = enum {
             .bloom_filter_performance_characteristics => "Measure bloom filter lookup performance and memory efficiency",
             .batch_writer_atomicity_guarantees => "Verify batch operations maintain atomicity under various failure conditions",
             .batch_writer_deduplication_behavior => "Test batch writer deduplication with duplicate blocks within batches",
-            .batch_writer_version_conflict_resolution => "Validate version conflict resolution in concurrent batch scenarios",
+            .batch_writer_sequence_conflict_resolution => "Validate sequence conflict resolution in concurrent batch scenarios",
             .metadata_indexing_consistency => "Ensure metadata indexes remain consistent with block storage",
             .resource_pool_efficiency_validation => "Verify resource pools maintain bounded memory and effective reuse",
             .memory_arena_cleanup_verification => "Test arena-based memory cleanup achieves O(1) performance",
@@ -224,7 +224,7 @@ fn execute_batch_writer_deduplication(allocator: std.mem.Allocator, runner: *Sim
     try testing.expect(final_count == initial_count + 20);
 }
 
-/// Execute batch writer version conflict resolution scenario
+/// Execute batch writer sequence conflict resolution scenario
 fn execute_batch_writer_conflicts(allocator: std.mem.Allocator, runner: *SimulationRunner) !void {
     const config = BatchConfig.DEFAULT;
     var batch_writer = try BatchWriter.init(allocator, &runner.storage_engine, config);
@@ -242,19 +242,19 @@ fn execute_batch_writer_conflicts(allocator: std.mem.Allocator, runner: *Simulat
 
     try runner.storage_engine.put_block(initial_block);
 
-    // Create updated version of same block
+    // Create updated sequence of same block
     const updated_content = try std.fmt.allocPrint(allocator, "{s}_updated", .{initial_block.content});
     defer allocator.free(updated_content);
 
     const updated_block = ContextBlock{
         .id = initial_block.id, // Same ID
-        .version = initial_block.version + 1, // Higher version
+        .sequence = initial_block.sequence + 1, // Higher sequence
         .source_uri = initial_block.source_uri,
         .metadata_json = initial_block.metadata_json,
         .content = updated_content,
     };
 
-    // Execute batch with version update
+    // Execute batch with sequence update
     const update_batch = [_]ContextBlock{updated_block};
     const stats = try batch_writer.ingest_batch(&update_batch, "test_workspace");
 
@@ -262,12 +262,12 @@ fn execute_batch_writer_conflicts(allocator: std.mem.Allocator, runner: *Simulat
     try runner.model.sync_with_storage(&runner.storage_engine);
 
     try testing.expect(stats.blocks_written == 1);
-    try testing.expect(stats.version_conflicts == 1);
+    try testing.expect(stats.sequence_conflicts == 1);
 
     // Verify updated content is stored
     const found = try runner.storage_engine.find_block(initial_block.id, .temporary);
     try testing.expect(found != null);
-    try testing.expect(found.?.block.version == updated_block.version);
+    try testing.expect(found.?.block.sequence == updated_block.sequence);
 }
 
 /// Execute metadata indexing consistency scenario
@@ -294,7 +294,7 @@ fn execute_metadata_indexing(allocator: std.mem.Allocator, runner: *SimulationRu
 
         block.* = ContextBlock{
             .id = harness.create_deterministic_block_id(@intCast(i + 60000)),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = try std.fmt.allocPrint(allocator, "test://metadata/{d}", .{i}),
             .metadata_json = metadata,
             .content = try std.fmt.allocPrint(allocator, "function_content_{d}", .{i}),
@@ -385,7 +385,7 @@ fn execute_memory_arena_cleanup(allocator: std.mem.Allocator, runner: *Simulatio
     for (0..operation_count) |i| {
         const simple_block = ContextBlock{
             .id = harness.create_deterministic_block_id(@intCast(i + 80000)),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "test://arena",
             .metadata_json = "{}",
             .content = "arena_test_content",

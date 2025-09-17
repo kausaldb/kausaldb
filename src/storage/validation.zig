@@ -491,7 +491,7 @@ test "validate_block detects corruption" {
 
     const invalid_block = ContextBlock{
         .id = BlockId.zero(), // Invalid: zero ID
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .content = "test",
         .source_uri = "test://file",
         .metadata_json = "{}",
@@ -547,14 +547,14 @@ test "batch validation aggregates errors" {
     const blocks = [_]ContextBlock{
         .{
             .id = BlockId.from_u64(1),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .content = "valid",
             .source_uri = "test://file1",
             .metadata_json = "{}",
         },
         .{
             .id = BlockId.zero(), // Invalid
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .content = "invalid",
             .source_uri = "test://file2",
             .metadata_json = "{}",

@@ -170,7 +170,7 @@ fn parse_text_file_to_blocks(
 
     const block = IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = content,
@@ -268,7 +268,7 @@ fn create_function_block(
 
     return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try content.toOwnedSlice(),
@@ -301,7 +301,7 @@ fn create_import_block(
 
     return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),
@@ -334,7 +334,7 @@ fn create_test_block(
 
     return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),
@@ -367,7 +367,7 @@ fn create_struct_block(
 
     return IngestionBlock.take_ownership(ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = try allocator.dupe(u8, line),

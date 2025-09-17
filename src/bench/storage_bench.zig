@@ -741,7 +741,7 @@ fn generate_test_block(allocator: Allocator, index: usize) !ContextBlock {
 
     return ContextBlock{
         .id = id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata,
         .content = content,

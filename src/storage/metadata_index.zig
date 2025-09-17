@@ -314,7 +314,7 @@ test "metadata field index basic operations" {
 
     const block1 = ContextBlock{
         .id = try BlockId.from_hex("11111111111111111111111111111111"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test1.zig",
         .metadata_json = "{\"unit_type\": \"function\", \"other\": \"value\"}",
         .content = "pub fn test1() void {}",
@@ -322,7 +322,7 @@ test "metadata field index basic operations" {
 
     const block2 = ContextBlock{
         .id = try BlockId.from_hex("22222222222222222222222222222222"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test2.zig",
         .metadata_json = "{\"unit_type\": \"function\", \"other\": \"value\"}",
         .content = "pub fn test2() void {}",
@@ -330,7 +330,7 @@ test "metadata field index basic operations" {
 
     const block3 = ContextBlock{
         .id = try BlockId.from_hex("33333333333333333333333333333333"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test3.zig",
         .metadata_json = "{\"unit_type\": \"struct\", \"other\": \"value\"}",
         .content = "const Test = struct {};",
@@ -372,7 +372,7 @@ test "metadata index manager integration" {
 
     const test_block = ContextBlock{
         .id = try BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "manager_test.zig",
         .metadata_json = "{\"unit_type\": \"test\", \"complexity\": \"low\"}",
         .content = "test \"manager integration\" {}",

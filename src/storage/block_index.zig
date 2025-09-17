@@ -142,7 +142,7 @@ pub const BlockIndex = struct {
         } else blk: {
             break :blk ContextBlock{
                 .id = block.id,
-                .version = block.version,
+                .sequence = block.sequence,
                 .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
                 .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
                 .content = try self.arena_coordinator.duplicate_slice(u8, block.content),
@@ -191,13 +191,17 @@ pub const BlockIndex = struct {
     /// Find a block by ID.
     /// Returns block data if found and not tombstoned.
     pub fn find_block(self: *const BlockIndex, block_id: BlockId) ?ContextBlock {
-        // Check tombstone first - tombstones shadow blocks
-        if (self.tombstones.contains(block_id)) {
-            return null;
-        }
-
         if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
-            return owned_block_ptr.read(.temporary).*;
+            const block = owned_block_ptr.read(.temporary).*;
+
+            // Check if this specific block sequence is shadowed by a tombstone
+            if (self.tombstones.get(block_id)) |tombstone_record| {
+                if (tombstone_record.shadows_block(block)) {
+                    return null;
+                }
+            }
+
+            return block;
         }
         return null;
     }
@@ -225,7 +229,7 @@ pub const BlockIndex = struct {
 
         self.blocks.clearRetainingCapacity();
         // CRITICAL: Do NOT clear tombstones during flush - they must persist to prevent
-        // data resurrection from older SSTables until compaction eliminates all shadowed versions
+        // data resurrection from older SSTables until compaction eliminates all shadowed sequences
         // Arena memory reset handled by StorageEngine - enables O(1) bulk cleanup
         self.memory_used = 0;
 
@@ -281,7 +285,7 @@ pub const BlockIndex = struct {
 
         return ContextBlock{
             .id = block.id,
-            .version = block.version,
+            .sequence = block.sequence,
             .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
             .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
             .content = content_buffer,
@@ -398,7 +402,7 @@ test "put and find block operations work correctly" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
         .content = "test content",
@@ -428,7 +432,7 @@ test "put block clones strings into arena" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
         .content = original_content,
@@ -453,7 +457,7 @@ test "remove block updates count and memory accounting" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
         .content = "test content",
@@ -478,7 +482,7 @@ test "block replacement updates memory accounting correctly" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 1, // Test sequence for memory accounting test
         .source_uri = "test://original.zig",
         .metadata_json = "{}",
         .content = "original content",
@@ -489,7 +493,7 @@ test "block replacement updates memory accounting correctly" {
 
     const replacement_block = ContextBlock{
         .id = block_id,
-        .version = 2,
+        .sequence = 2, // Test sequence for replacement validation
         .source_uri = "test://example.zig",
         .metadata_json = "{}",
         .content = "much longer content than before",
@@ -506,7 +510,7 @@ test "block replacement updates memory accounting correctly" {
 
     const found_block = index.find_block(block_id);
     try testing.expect(found_block != null);
-    try testing.expectEqual(@as(u32, 2), found_block.?.version);
+    try testing.expectEqual(@as(u32, 2), found_block.?.sequence);
     try testing.expectEqualStrings("much longer content than before", found_block.?.content);
 }
 
@@ -521,7 +525,7 @@ test "clear operation resets index to empty state efficiently" {
         const block_id = BlockId.generate();
         const test_block = ContextBlock{
             .id = block_id,
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "test://example.zig",
             .metadata_json = "{}",
             .content = try std.fmt.allocPrint(testing.allocator, "content {}", .{i}),
@@ -553,7 +557,7 @@ test "memory accounting tracks string content accurately" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = content,
@@ -581,7 +585,7 @@ test "large block content handling" {
     const block_id = BlockId.generate();
     const test_block = ContextBlock{
         .id = block_id,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://bulk.zig",
         .metadata_json = "{}",
         .content = large_content,

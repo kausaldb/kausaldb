@@ -309,7 +309,7 @@ const testing = std.testing;
 fn create_test_block() ContextBlock {
     return ContextBlock{
         .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://wal_entry.zig",
         .metadata_json = "{}",
         .content = "test content for WAL entry",
@@ -454,7 +454,7 @@ test "WALEntry create_tombstone_block" {
     const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
     const tombstone_record = tombstone.TombstoneRecord{
         .block_id = test_id,
-        .deletion_sequence = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = @intCast(std.time.microTimestamp()),
         .generation = 0,
     };
@@ -602,7 +602,7 @@ test "WALEntry extract_block success" {
     defer allocator.free(extracted_block.content);
 
     try testing.expect(test_block.id.eql(extracted_block.id));
-    try testing.expectEqual(test_block.version, extracted_block.version);
+    try testing.expectEqual(test_block.sequence, extracted_block.sequence);
     try testing.expectEqualStrings(test_block.source_uri, extracted_block.source_uri);
     try testing.expectEqualStrings(test_block.metadata_json, extracted_block.metadata_json);
     try testing.expectEqualStrings(test_block.content, extracted_block.content);
@@ -614,7 +614,7 @@ test "WALEntry extract_block invalid entry type" {
     const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
     const tombstone_record = tombstone.TombstoneRecord{
         .block_id = test_id,
-        .deletion_sequence = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = @intCast(std.time.microTimestamp()),
         .generation = 0,
     };

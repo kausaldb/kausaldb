@@ -265,10 +265,11 @@ test "Bloom filter serialization" {
     try std.testing.expect(deserialized.might_contain(block1));
     try std.testing.expect(deserialized.might_contain(block2));
 
+    // Sanity check: ensure the filter can handle a key that was never added
+    // without crashing. We ignore the result because a false positive is a
+    // valid outcome for a Bloom filter.
     const block3 = try BlockId.from_hex("11111111111111111111111111111111");
-    const result = deserialized.might_contain(block3);
-    // Note: This might be true (false positive) but should usually be false
-    std.debug.print("Absent block result: {any}\n", .{result});
+    _ = deserialized.might_contain(block3);
 }
 
 test "Bloom filter parameter calculation" {

@@ -71,7 +71,7 @@ pub const FilterTarget = enum(u8) {
     content = 0x01,
     source_uri = 0x02,
     metadata_field = 0x03,
-    version = 0x04,
+    sequence = 0x04,
     content_length = 0x05,
 
     pub fn from_u8(value: u8) !FilterTarget {
@@ -108,9 +108,9 @@ pub const FilterCondition = struct {
     pub fn matches(self: FilterCondition, block: ContextBlock, allocator: std.mem.Allocator) !bool {
         const target_value = try self.extract_target_value(block, allocator);
         defer {
-            // Free allocated buffers for version, content_length, and metadata_field
+            // Free allocated buffers for sequence, content_length, and metadata_field
             switch (self.target) {
-                .version, .content_length, .metadata_field => allocator.free(target_value),
+                .sequence, .content_length, .metadata_field => allocator.free(target_value),
                 .content, .source_uri => {}, // These are borrowed, don't free
             }
         }
@@ -123,10 +123,10 @@ pub const FilterCondition = struct {
         return switch (self.target) {
             .content => block.content,
             .source_uri => block.source_uri,
-            .version => blk: {
+            .sequence => blk: {
                 var stack_buffer: [32]u8 = undefined;
                 // Safety: u32 max value is 4,294,967,295 (10 digits), buffer is 32 bytes - guaranteed fit
-                const written_slice = std.fmt.bufPrint(&stack_buffer, "{d}", .{block.version}) catch unreachable;
+                const written_slice = std.fmt.bufPrint(&stack_buffer, "{d}", .{block.sequence}) catch unreachable;
                 break :blk try allocator.dupe(u8, written_slice);
             },
             .content_length => blk: {
@@ -403,7 +403,7 @@ fn compare_numeric_or_lexical(a: []const u8, b: []const u8) i8 {
 fn clone_block(allocator: std.mem.Allocator, block: ContextBlock) !ContextBlock {
     return ContextBlock{
         .id = block.id,
-        .version = block.version,
+        .sequence = block.sequence,
         .source_uri = try allocator.dupe(u8, block.source_uri),
         .metadata_json = try allocator.dupe(u8, block.metadata_json),
         .content = try allocator.dupe(u8, block.content),
@@ -415,7 +415,7 @@ test "filter condition - content contains" {
 
     const block = ContextBlock{
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
         .metadata_json = "{}",
         .content = "pub fn hello() void {}",
@@ -434,7 +434,7 @@ test "filter condition - metadata field extraction" {
     const block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
         .metadata_json = "{\"language\": \"zig\", \"complexity\": \"low\"}",
         .content = "content",
@@ -453,7 +453,7 @@ test "filter expression - logical AND" {
     const block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "main.zig",
         .metadata_json = "{}",
         .content = "pub fn main() void {}",
@@ -491,29 +491,29 @@ test "filter operators - comparison operations" {
 
     const block_v1 = ContextBlock{
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 1, // Test sequence for comparison operations
         .source_uri = "test_v1.zig",
         .metadata_json = "{}",
-        .content = "version 1 content",
+        .content = "sequence 1 content",
     };
 
     const block_v2 = ContextBlock{
         .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 2,
+        .sequence = 2, // Test sequence for comparison operations
         .source_uri = "test_v2.zig",
         .metadata_json = "{}",
-        .content = "version 2 content",
+        .content = "sequence 2 content",
     };
 
-    const gt_condition = FilterCondition.init(.version, .greater_than, "1");
+    const gt_condition = FilterCondition.init(.sequence, .greater_than, "1");
     try testing.expect(!try gt_condition.matches(block_v1, allocator));
     try testing.expect(try gt_condition.matches(block_v2, allocator));
 
-    const lte_condition = FilterCondition.init(.version, .less_equal, "2");
+    const lte_condition = FilterCondition.init(.sequence, .less_equal, "2");
     try testing.expect(try lte_condition.matches(block_v1, allocator));
     try testing.expect(try lte_condition.matches(block_v2, allocator));
 
-    const ne_condition = FilterCondition.init(.version, .not_equal, "1");
+    const ne_condition = FilterCondition.init(.sequence, .not_equal, "1");
     try testing.expect(!try ne_condition.matches(block_v1, allocator));
     try testing.expect(try ne_condition.matches(block_v2, allocator));
 }
@@ -524,7 +524,7 @@ test "filter operators - string operations" {
     const block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "hello_world.zig",
         .metadata_json = "{}",
         .content = "function hello_world() { return 'Hello, World!'; }",
@@ -554,7 +554,7 @@ test "filter expression - logical OR operation" {
 
     const block = ContextBlock{
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "main.zig",
         .metadata_json = "{}",
         .content = "pub fn main() void {}",
@@ -592,7 +592,7 @@ test "filter expression - logical NOT operation" {
 
     const block = ContextBlock{
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
         .metadata_json = "{}",
         .content = "test content",
@@ -627,7 +627,7 @@ test "filter target - content length filtering" {
     const short_block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "short.zig",
         .metadata_json = "{}",
         .content = "short", // 5 characters
@@ -635,7 +635,7 @@ test "filter target - content length filtering" {
 
     const long_block = ContextBlock{
         .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "long.zig",
         .metadata_json = "{}",
         .content = "this is much longer content", // 27 characters
@@ -656,22 +656,22 @@ test "complex nested filter expressions" {
     const block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 2,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "complex.zig",
         .metadata_json = "{\"language\": \"zig\", \"complexity\": \"high\"}",
         .content = "complex function implementation",
     };
 
-    // Create complex expression: (content contains "function" AND version > 1) OR metadata.language = "zig"
+    // Create complex expression: (content contains "function" AND sequence > 1) OR metadata.language = "zig"
     const content_condition = FilterExpression{ .condition = filter_by_content_contains("function") };
-    const version_condition = FilterExpression{ .condition = FilterCondition.init(.version, .greater_than, "1") };
+    const sequence_condition = FilterExpression{ .condition = FilterCondition.init(.sequence, .greater_than, "1") };
     const metadata_condition = FilterExpression{ .condition = filter_by_metadata_field("language", "zig") };
 
     const and_expr = FilterExpression{
         .logical = .{
             .operator = .and_op,
             .left = @constCast(&content_condition),
-            .right = @constCast(&version_condition),
+            .right = @constCast(&sequence_condition),
         },
     };
 
@@ -709,7 +709,7 @@ test "filter target enum parsing" {
     try testing.expectEqual(FilterTarget.content, try FilterTarget.from_u8(0x01));
     try testing.expectEqual(FilterTarget.source_uri, try FilterTarget.from_u8(0x02));
     try testing.expectEqual(FilterTarget.metadata_field, try FilterTarget.from_u8(0x03));
-    try testing.expectEqual(FilterTarget.version, try FilterTarget.from_u8(0x04));
+    try testing.expectEqual(FilterTarget.sequence, try FilterTarget.from_u8(0x04));
     try testing.expectEqual(FilterTarget.content_length, try FilterTarget.from_u8(0x05));
 
     // Invalid target should return error
@@ -721,7 +721,7 @@ test "metadata field extraction edge cases" {
 
     const malformed_block = ContextBlock{
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "malformed.zig",
         .metadata_json = "{\"incomplete\":", // Invalid JSON
         .content = "content",
@@ -732,7 +732,7 @@ test "metadata field extraction edge cases" {
 
     const empty_block = ContextBlock{
         .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "empty.zig",
         .metadata_json = "{}",
         .content = "content",
@@ -743,7 +743,7 @@ test "metadata field extraction edge cases" {
 
     const nested_block = ContextBlock{
         .id = BlockId.from_hex("33333333333333333333333333333333") catch unreachable, // Safety: hardcoded valid hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "nested.zig",
         .metadata_json = "{\"config\": {\"debug\": \"true\"}, \"level\": \"info\"}",
         .content = "content",
@@ -759,13 +759,13 @@ test "numeric comparison edge cases" {
     const block = ContextBlock{
         // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
-        .version = 42,
+        .sequence = 42, // Test sequence for numeric comparison
         .source_uri = "numeric.zig",
         .metadata_json = "{}",
         .content = "test content",
     };
 
-    const float_condition = FilterCondition.init(.version, .equal, "42.0");
+    const float_condition = FilterCondition.init(.sequence, .equal, "42.0");
     try testing.expect(try float_condition.matches(block, allocator));
 
     const lexical_condition = FilterCondition.init(.source_uri, .greater_than, "a");
@@ -795,7 +795,7 @@ test "streaming filtered query prevents memory exhaustion" {
 
         const block = ContextBlock{
             .id = block_id,
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "streaming.zig",
             .metadata_json = "{}",
             .content = content,

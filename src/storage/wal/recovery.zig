@@ -233,7 +233,7 @@ fn create_test_wal_entry(allocator: std.mem.Allocator, entry_type: u8, payload: 
 fn create_test_block() ContextBlock {
     return ContextBlock{
         .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://recovery.zig",
         .metadata_json = "{}",
         .content = "test recovery content",

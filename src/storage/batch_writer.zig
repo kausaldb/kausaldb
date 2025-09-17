@@ -1,14 +1,14 @@
 //! Batch writer with deduplication for high-performance ingestion pipeline.
 //!
 //! This module implements atomic batch ingestion with intelligent deduplication,
-//! version conflict resolution, and bounded resource management. Designed for
+//! sequence conflict resolution, and bounded resource management. Designed for
 //! high-volume ingestion scenarios where duplicate detection and atomic commits
 //! are critical for data integrity.
 //!
 //! Key design principles:
 //! - Arena-based memory management for O(1) cleanup between batches
 //! - Bounded collections prevent unbounded memory growth
-//! - Version-based conflict resolution handles concurrent updates
+//! - Sequence-based conflict resolution handles concurrent updates
 //! - Atomic batch commits ensure consistency
 //! - Comprehensive metrics for monitoring deduplication effectiveness
 
@@ -50,7 +50,7 @@ pub const BatchWriterError = error{
     StorageNotRunning,
     BatchTooLarge,
     DuplicateInBatch,
-    VersionConflict,
+    SequenceConflict,
     CommitFailed,
     InvalidBlock,
     WorkspaceViolation,
@@ -63,8 +63,8 @@ pub const BatchStatistics = struct {
     blocks_submitted: u32,
     /// Blocks deduplicated within batch
     duplicates_in_batch: u32,
-    /// Blocks skipped due to existing newer versions
-    version_conflicts: u32,
+    /// Blocks skipped due to existing newer sequences
+    sequence_conflicts: u32,
     /// Blocks successfully written
     blocks_written: u32,
     /// Total batch processing time in microseconds
@@ -78,7 +78,7 @@ pub const BatchStatistics = struct {
         return BatchStatistics{
             .blocks_submitted = 0,
             .duplicates_in_batch = 0,
-            .version_conflicts = 0,
+            .sequence_conflicts = 0,
             .blocks_written = 0,
             .processing_time_us = 0,
             .memory_used_kb = 0,
@@ -92,7 +92,7 @@ pub const BatchStatistics = struct {
             return;
         }
 
-        const duplicates_total = self.duplicates_in_batch + self.version_conflicts;
+        const duplicates_total = self.duplicates_in_batch + self.sequence_conflicts;
         self.deduplication_rate_percent = (duplicates_total * 100) / self.blocks_submitted;
     }
 
@@ -102,13 +102,13 @@ pub const BatchStatistics = struct {
     }
 };
 
-/// Version conflict resolution strategy
+/// Sequence conflict resolution strategy
 pub const ConflictResolution = enum {
-    /// Skip blocks with existing newer or equal versions
-    skip_older_versions,
+    /// Skip blocks with existing newer or equal sequences
+    skip_older_sequences,
     /// Always overwrite existing blocks
     overwrite_existing,
-    /// Fail on any version conflict
+    /// Fail on any sequence conflict
     fail_on_conflict,
 };
 
@@ -116,7 +116,7 @@ pub const ConflictResolution = enum {
 pub const BatchConfig = struct {
     /// Maximum blocks per batch (bounded for predictable memory usage)
     max_batch_size: u32,
-    /// How to handle version conflicts
+    /// How to handle sequence conflicts
     conflict_resolution: ConflictResolution,
     /// Enable workspace isolation validation
     enforce_workspace_isolation: bool,
@@ -125,7 +125,7 @@ pub const BatchConfig = struct {
 
     pub const DEFAULT = BatchConfig{
         .max_batch_size = BATCH_CAPACITY,
-        .conflict_resolution = .skip_older_versions,
+        .conflict_resolution = .skip_older_sequences,
         .enforce_workspace_isolation = true,
         .timeout_us = 30_000_000, // 30 seconds
     };
@@ -232,7 +232,7 @@ pub const BatchWriter = struct {
         // Deduplication prevents storage corruption from duplicate IDs within batch
         try self.deduplicate_and_stage(blocks, workspace);
 
-        // Version-based resolution handles concurrent writers updating same blocks
+        // Sequence-based resolution handles concurrent writers updating same blocks
         try self.resolve_storage_conflicts();
 
         // Phase 3: Atomic commit
@@ -277,7 +277,7 @@ pub const BatchWriter = struct {
         }
     }
 
-    /// Phase 2: Check staged blocks against storage for version conflicts
+    /// Phase 2: Check staged blocks against storage for sequence conflicts
     fn resolve_storage_conflicts(self: *BatchWriter) !void {
         var dedup_iter = self.dedup_map.iterator();
         while (dedup_iter.next()) |entry| {
@@ -286,11 +286,11 @@ pub const BatchWriter = struct {
 
             // Check if block exists in storage
             if (try self.storage_engine.find_block(block_data.id, .storage_engine)) |existing_block| {
-                const should_write = try self.resolve_version_conflict(block_data, existing_block.read(.storage_engine));
+                const should_write = try self.resolve_sequence_conflict(block_data, existing_block.read(.storage_engine));
                 if (should_write) {
                     try self.stage_block_for_commit(batch_entry.block, batch_entry.workspace, true);
                 } else {
-                    self.current_stats.version_conflicts += 1;
+                    self.current_stats.sequence_conflicts += 1;
                 }
             } else {
                 // New block - always stage for commit
@@ -323,10 +323,10 @@ pub const BatchWriter = struct {
         const existing_block_data = existing.block.read(.storage_engine);
 
         switch (self.config.conflict_resolution) {
-            .skip_older_versions => {
-                // Keep the block with higher version, or later submit order if versions equal
-                if (new_block.version > existing_block_data.version or
-                    (new_block.version == existing_block_data.version and submit_order > existing.submit_order))
+            .skip_older_sequences => {
+                // Keep the block with higher sequence, or later submit order if sequences equal
+                if (new_block.sequence > existing_block_data.sequence or
+                    (new_block.sequence == existing_block_data.sequence and submit_order > existing.submit_order))
                 {
                     // Update to newer block
                     const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
@@ -352,22 +352,22 @@ pub const BatchWriter = struct {
         }
     }
 
-    /// Resolve version conflict with existing storage block
-    fn resolve_version_conflict(
+    /// Resolve sequence conflict with existing storage block
+    fn resolve_sequence_conflict(
         self: *BatchWriter,
         new_block: *const ContextBlock,
         existing_block: *const ContextBlock,
     ) !bool {
         switch (self.config.conflict_resolution) {
-            .skip_older_versions => {
-                return new_block.version > existing_block.version;
+            .skip_older_sequences => {
+                return new_block.sequence > existing_block.sequence;
             },
             .overwrite_existing => {
                 return true;
             },
             .fail_on_conflict => {
-                if (new_block.version <= existing_block.version) {
-                    return error.VersionConflict;
+                if (new_block.sequence <= existing_block.sequence) {
+                    return error.SequenceConflict;
                 }
                 return true;
             },
@@ -502,7 +502,7 @@ test "BatchConfig validation" {
     if (builtin.mode != .Debug) {
         const invalid_config = BatchConfig{
             .max_batch_size = 0,
-            .conflict_resolution = .skip_older_versions,
+            .conflict_resolution = .skip_older_sequences,
             .enforce_workspace_isolation = true,
             .timeout_us = 1000,
         };
@@ -515,7 +515,7 @@ test "BatchStatistics calculations" {
     var stats = BatchStatistics.init();
     stats.blocks_submitted = 100;
     stats.duplicates_in_batch = 10;
-    stats.version_conflicts = 5;
+    stats.sequence_conflicts = 5;
     stats.blocks_written = 85;
 
     stats.calculate_deduplication_rate();
@@ -528,7 +528,7 @@ test "BatchStatistics calculations" {
 test "ConflictResolution enum values" {
     try testing.expect(@typeInfo(ConflictResolution).@"enum".fields.len == 3);
 
-    const skip = ConflictResolution.skip_older_versions;
+    const skip = ConflictResolution.skip_older_sequences;
     const overwrite = ConflictResolution.overwrite_existing;
     const fail = ConflictResolution.fail_on_conflict;
 

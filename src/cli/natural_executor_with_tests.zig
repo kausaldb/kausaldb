@@ -1064,7 +1064,7 @@ test "execution context initialization" {
 test "extract entity name from block content" {
     const test_block = ContextBlock{
         .id = try types.BlockId.from_hex("11111111111111111111111111111111"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig#my_function",
         .metadata_json = "{\"name\": \"my_function\", \"type\": \"function\"}",
         .content = "fn my_function() {}",
@@ -1076,7 +1076,7 @@ test "extract entity name from block content" {
     // Test fallback to source URI
     const uri_fallback_block = ContextBlock{
         .id = try types.BlockId.from_hex("22222222222222222222222222222222"),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example.zig#fallback_name",
         .metadata_json = "{}",
         .content = "some content",

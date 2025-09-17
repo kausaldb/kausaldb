@@ -167,7 +167,7 @@ pub const QueryResult = struct {
             const ctx_block = block_ptr.read(.query_engine);
             try writer.print("Block {} (ID: {}):\n", .{ block_index, ctx_block.id });
             try writer.print("Source: {s}\n", .{ctx_block.source_uri});
-            try writer.print("Version: {}\n", .{ctx_block.version});
+            try writer.print("Sequence: {}\n", .{ctx_block.sequence});
             try writer.print("Metadata: {s}\n", .{ctx_block.metadata_json});
             try writer.print("Content: {s}\n", .{ctx_block.content});
             try writer.writeAll("--- END CONTEXT BLOCK ---\n\n");
@@ -313,7 +313,7 @@ pub const SemanticQueryResult = struct {
                 search_result.similarity_score,
             });
             try writer.print("Source: {s}\n", .{block_data.source_uri});
-            try writer.print("Version: {}\n", .{block_data.version});
+            try writer.print("Sequence: {}\n", .{block_data.sequence});
             try writer.print("Metadata: {s}\n", .{block_data.metadata_json});
             try writer.print("Content: {s}\n", .{block_data.content});
             try writer.writeAll("--- END CONTEXT BLOCK ---\n\n");
@@ -450,7 +450,7 @@ fn semantic_result_less_than(context: void, a: SemanticResult, b: SemanticResult
 fn clone_block(allocator: std.mem.Allocator, block: ContextBlock) !ContextBlock {
     return ContextBlock{
         .id = block.id,
-        .version = block.version,
+        .sequence = block.sequence,
         .source_uri = try allocator.dupe(u8, block.source_uri),
         .metadata_json = try allocator.dupe(u8, block.metadata_json),
         .content = try allocator.dupe(u8, block.content),

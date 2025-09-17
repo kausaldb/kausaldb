@@ -33,7 +33,7 @@ pub const OperationType = enum {
 /// Represents realistic API usage patterns, not internal storage operations
 pub const OperationMix = struct {
     put_block_weight: u32 = 35, // Primary write operations
-    update_block_weight: u32 = 10, // Block version updates
+    update_block_weight: u32 = 10, // Block sequence updates
     find_block_weight: u32 = 35, // Primary read operations
     delete_block_weight: u32 = 5, // Occasional deletions
     put_edge_weight: u32 = 10, // Graph relationship creation
@@ -56,7 +56,7 @@ pub const Operation = struct {
     block_id: ?BlockId = null,
     block: ?ContextBlock = null,
     edge: ?GraphEdge = null,
-    sequence_number: u64,
+    model_sequence: u64,
 };
 
 /// Deterministic workload generator for realistic operation patterns
@@ -148,11 +148,11 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_block,
             .block = block,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
-    /// Generate update_block operation for existing block with higher version
+    /// Generate update_block operation for existing block with higher sequence
     fn generate_update_block(self: *Self) !Operation {
         const random = self.prng.random();
 
@@ -165,13 +165,13 @@ pub const WorkloadGenerator = struct {
         const block_index = random.uintLessThan(usize, self.created_blocks.items.len);
         const existing_block_id = self.created_blocks.items[block_index];
 
-        // Create updated version with higher version number
+        // Create updated sequence with higher sequence number
         const block = try self.create_updated_block(existing_block_id);
 
         return Operation{
             .op_type = .update_block,
             .block = block,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
@@ -186,7 +186,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_block,
             .block_id = block_id,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
@@ -201,7 +201,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .delete_block,
             .block_id = block_id,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
@@ -240,7 +240,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_edge,
             .edge = edge,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
@@ -255,7 +255,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_edges,
             .block_id = block_id,
-            .sequence_number = self.operation_count + 1,
+            .model_sequence = self.operation_count + 1,
         };
     }
 
@@ -300,41 +300,41 @@ pub const WorkloadGenerator = struct {
             .source_uri = try std.fmt.allocPrint(self.allocator, "/test/file_{d}.zig", .{block_number}),
             .content = content,
             .metadata_json = metadata,
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
         };
     }
 
-    /// Create updated version of existing block with higher version number
+    /// Create updated sequence of existing block with higher sequence number
     fn create_updated_block(self: *Self, existing_block_id: BlockId) !ContextBlock {
         const random = self.prng.random();
 
-        // Generate new version number (increment from base version)
-        const new_version = random.uintAtMost(u64, 10) + 2; // Version 2-12
+        // Generate new sequence number (increment from base sequence)
+        const new_sequence = random.uintAtMost(u64, 10) + 2; // Sequence 2-12
 
         const source_uri = try std.fmt.allocPrint(
             self.allocator,
             "/test/updated_file_v{d}.zig",
-            .{new_version},
+            .{new_sequence},
         );
 
         // Create updated content
         const content = try std.fmt.allocPrint(
             self.allocator,
-            \\// Updated version {d}
+            \\// Updated sequence {d}
             \\pub fn updated_function() void {{
             \\    // Updated implementation
             \\    const updated_value = {d};
             \\}}
         ,
-            .{ new_version, random.uintLessThan(u32, 1000) },
+            .{ new_sequence, random.uintLessThan(u32, 1000) },
         );
 
         // Create updated metadata
         const metadata = try std.fmt.allocPrint(
             self.allocator,
-            \\{{"type": "function", "version": {d}, "updated": true}}
+            \\{{"type": "function", "sequence": {d}, "updated": true}}
         ,
-            .{new_version},
+            .{new_sequence},
         );
 
         return ContextBlock{
@@ -342,7 +342,7 @@ pub const WorkloadGenerator = struct {
             .source_uri = source_uri,
             .content = content,
             .metadata_json = metadata,
-            .version = new_version, // Higher version number
+            .sequence = new_sequence, // Higher sequence number
         };
     }
 
@@ -397,7 +397,7 @@ test "workload generator creates deterministic operations" {
     const op2 = try generator.generate_operation();
 
     // Should generate valid operations
-    try testing.expect(op1.sequence_number < op2.sequence_number);
+    try testing.expect(op1.model_sequence < op2.model_sequence);
 
     // Clean up
     generator.cleanup_operation(&op1);

@@ -163,7 +163,7 @@ test "regression: issue #156 - compaction preserves all blocks" {
     // Original bug: Tiered compaction occasionally lost blocks when merging
     // SSTables with overlapping key ranges.
     // Root cause: Iterator merge logic skipped entries with identical keys.
-    // Fix: Properly handle duplicate keys by version comparison.
+    // Fix: Properly handle duplicate keys by sequence comparison.
     // Found: 2024-02-01 in integration tests
 
     const allocator = testing.allocator;

@@ -23,11 +23,15 @@ const assert_mod = @import("../core/assert.zig");
 const bloom_filter = @import("bloom_filter.zig");
 const config_mod = @import("config.zig");
 const context_block = @import("../core/types.zig");
+const error_context = @import("../core/error_context.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
-const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
+
+// Import BlockIdContext for HashMap
+const block_index_mod = @import("block_index.zig");
+const BlockIdContext = block_index_mod.BlockIndex.BlockIdContext;
 
 const comptime_assert = assert_mod.comptime_assert;
 const log = std.log.scoped(.sstable);
@@ -41,7 +45,7 @@ const EdgeType = context_block.EdgeType;
 const GraphEdge = context_block.GraphEdge;
 const OwnedBlock = ownership.OwnedBlock;
 const ParsedBlock = context_block.ParsedBlock;
-const SimulationVFS = simulation_vfs.SimulationVFS;
+
 const TombstoneRecord = tombstone.TombstoneRecord;
 const VFS = vfs.VFS;
 const VFile = vfs.VFile;
@@ -1077,8 +1081,13 @@ pub const Compactor = struct {
             }
         }
 
-        const unique_blocks = try self.dedup_blocks(all_blocks.items);
-        const unique_tombstones = try self.dedup_and_gc_tombstones(all_tombstones.items);
+        // Apply MVCC filtering between blocks and tombstones
+        const mvcc_filtered = try self.apply_mvcc_filtering(all_blocks.items, all_tombstones.items);
+        defer mvcc_filtered.blocks.deinit();
+        defer mvcc_filtered.tombstones.deinit();
+
+        const unique_blocks = try self.dedup_blocks(mvcc_filtered.blocks.items);
+        const unique_tombstones = try self.dedup_and_gc_tombstones(mvcc_filtered.tombstones.items);
         const unique_edges = try self.dedup_edges(all_edges.items);
 
         defer self.backing_allocator.free(unique_blocks);
@@ -1095,7 +1104,7 @@ pub const Compactor = struct {
         }
     }
 
-    /// Remove duplicate blocks, keeping the one with highest version
+    /// Remove duplicate blocks, keeping the one with highest sequence
     fn dedup_blocks(self: *Compactor, blocks: []ContextBlock) ![]ContextBlock {
         // Safety: Converting pointer to integer for null pointer validation
         assert_mod.assert_fmt(
@@ -1114,7 +1123,7 @@ pub const Compactor = struct {
                 const b_data = b;
                 const order = std.mem.order(u8, &a_data.id.bytes, &b_data.id.bytes);
                 if (order == .eq) {
-                    return a_data.version > b_data.version;
+                    return a_data.sequence > b_data.sequence;
                 }
                 return order == .lt;
             }
@@ -1131,7 +1140,7 @@ pub const Compactor = struct {
             if (prev_id == null or !block_data.id.eql(prev_id.?)) {
                 const cloned = ContextBlock{
                     .id = block_data.id,
-                    .version = block_data.version,
+                    .sequence = block_data.sequence,
                     .source_uri = try self.arena_coordinator.allocator().dupe(u8, block_data.source_uri),
                     .metadata_json = try self.arena_coordinator.allocator().dupe(u8, block_data.metadata_json),
                     .content = try self.arena_coordinator.allocator().dupe(u8, block_data.content),
@@ -1156,7 +1165,7 @@ pub const Compactor = struct {
                 _ = context;
                 const order = std.mem.order(u8, &a.block_id.bytes, &b.block_id.bytes);
                 if (order == .eq) {
-                    return a.deletion_sequence > b.deletion_sequence;
+                    return a.sequence > b.sequence;
                 }
                 return order == .lt;
             }
@@ -1189,6 +1198,61 @@ pub const Compactor = struct {
 
         self.backing_allocator.free(sorted);
         return unique.toOwnedSlice();
+    }
+
+    /// MVCC filtering result for compaction
+    const MVCCFilterResult = struct {
+        blocks: std.array_list.Managed(ContextBlock),
+        tombstones: std.array_list.Managed(TombstoneRecord),
+    };
+
+    /// Apply MVCC semantics during compaction: for each block ID, keep either
+    /// the live blocks OR the tombstones based on highest sequence number
+    fn apply_mvcc_filtering(self: *Compactor, blocks: []ContextBlock, tombstones: []TombstoneRecord) !MVCCFilterResult {
+        // Build a map of highest sequence for each block ID
+        var highest_sequences = std.HashMap(BlockId, struct { sequence: u64, is_tombstone: bool }, BlockIdContext, std.hash_map.default_max_load_percentage).init(self.backing_allocator);
+        defer highest_sequences.deinit();
+
+        // Check all blocks
+        for (blocks) |block| {
+            const existing = highest_sequences.get(block.id);
+            if (existing == null or block.sequence > existing.?.sequence) {
+                try highest_sequences.put(block.id, .{ .sequence = block.sequence, .is_tombstone = false });
+            }
+        }
+
+        // Check all tombstones
+        for (tombstones) |tombstone_record| {
+            const existing = highest_sequences.get(tombstone_record.block_id);
+            if (existing == null or tombstone_record.sequence > existing.?.sequence) {
+                try highest_sequences.put(tombstone_record.block_id, .{ .sequence = tombstone_record.sequence, .is_tombstone = true });
+            }
+        }
+
+        // Filter blocks and tombstones based on MVCC winners
+        var filtered_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
+        var filtered_tombstones = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
+
+        for (blocks) |block| {
+            const winner = highest_sequences.get(block.id).?;
+            // Keep block only if it wins over tombstones for this ID
+            if (!winner.is_tombstone) {
+                try filtered_blocks.append(block);
+            }
+        }
+
+        for (tombstones) |tombstone_record| {
+            const winner = highest_sequences.get(tombstone_record.block_id).?;
+            // Keep tombstone only if it wins over blocks for this ID
+            if (winner.is_tombstone) {
+                try filtered_tombstones.append(tombstone_record);
+            }
+        }
+
+        return MVCCFilterResult{
+            .blocks = filtered_blocks,
+            .tombstones = filtered_tombstones,
+        };
     }
 
     /// Deduplicate edges during compaction.

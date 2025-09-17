@@ -423,7 +423,7 @@ fn generate_test_block(allocator: std.mem.Allocator, index: usize) ContextBlock 
 
     return ContextBlock{
         .id = BlockId.generate(),
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "bench://test",
         .metadata_json = "{}",
         .content = content,

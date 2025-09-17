@@ -148,7 +148,7 @@ fn fuzz_edge_cases(allocator: std.mem.Allocator, input: []const u8) !void {
     if (input.len == 0) {
         const empty_block = ContextBlock{
             .id = BlockId.generate(),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://empty",
             .metadata_json = "{}",
             .content = "",
@@ -163,7 +163,7 @@ fn fuzz_edge_cases(allocator: std.mem.Allocator, input: []const u8) !void {
         const large_content = std.fmt.allocPrint(alloc, "fuzz_large_content_{X}_repeated", .{std.hash.Wyhash.hash(0, sample)}) catch "fuzz_large_fallback";
         const large_block = ContextBlock{
             .id = BlockId.generate(),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://large",
             .metadata_json = "{}",
             .content = large_content,
@@ -176,14 +176,14 @@ fn fuzz_edge_cases(allocator: std.mem.Allocator, input: []const u8) !void {
         const id = fuzz_generate_block_id(input);
         const block1 = ContextBlock{
             .id = id,
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://dup1",
             .metadata_json = "{}",
             .content = "duplicate_test_1",
         };
         const block2 = ContextBlock{
             .id = id,
-            .version = 2,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://dup2",
             .metadata_json = "{}",
             .content = "duplicate_test_2",
@@ -245,7 +245,7 @@ fn fuzz_test_recovery(allocator: std.mem.Allocator, vfs: VFS, input: []const u8)
         for (0..10) |i| {
             const block = ContextBlock{
                 .id = BlockId.generate(),
-                .version = 1,
+                .sequence = 0, // Storage engine will assign the actual global sequence
                 .source_uri = "fuzz://recovery",
                 .metadata_json = "{}",
                 .content = std.fmt.allocPrint(arena_alloc, "recovery_test_{}", .{i}) catch "test",
@@ -268,7 +268,7 @@ fn fuzz_test_recovery(allocator: std.mem.Allocator, vfs: VFS, input: []const u8)
         // Verify recovery succeeded by attempting operations
         const test_block = ContextBlock{
             .id = BlockId.generate(),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://post_recovery",
             .metadata_json = "{}",
             .content = "post_recovery_test",
@@ -366,7 +366,7 @@ fn fuzz_generate_block(allocator: std.mem.Allocator, data: []const u8) ContextBl
 
     return ContextBlock{
         .id = fuzz_generate_block_id(data),
-        .version = if (data.len > 0) @max(data[0] % 255, 1) else 1, // Version 1-255, always > 0
+        .sequence = if (data.len > 0) @max(data[0] % 255, 1) else 1, // Sequence 1-255, always > 0
         .source_uri = source_uri,
         .metadata_json = metadata_json,
         .content = content,

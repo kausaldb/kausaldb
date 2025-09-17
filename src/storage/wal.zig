@@ -50,7 +50,7 @@ test "WAL entry serialization roundtrip" {
 
     const test_block = ContextBlock{
         .id = BlockId.from_hex("0123456789abcdeffedcba9876543210") catch unreachable, // Safety: hardcoded valid hex
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example",
         .metadata_json = "{}",
         .content = "Hello, WAL!",
@@ -90,7 +90,7 @@ test "WAL basic write and recovery" {
 
     const test_block = ContextBlock{
         .id = BlockId.from_hex("1234567890abcdef1234567890abcdef") catch unreachable, // Safety: hardcoded valid hex
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://source",
         .metadata_json = "{}",
         .content = "Test content",
@@ -148,7 +148,7 @@ test "WAL segment rotation" {
     while (entries_written < 100) { // Reasonable upper bound
         const test_block = ContextBlock{
             .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "test://large",
             .metadata_json = "{}",
             .content = large_content,

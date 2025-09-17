@@ -114,7 +114,7 @@ fn populate_fuzz_data(storage: *StorageEngine, allocator: std.mem.Allocator) !vo
     for (0..20) |i| {
         const block = ContextBlock{
             .id = BlockId.generate(),
-            .version = 1,
+            .sequence = 0, // Storage engine will assign the actual global sequence
             .source_uri = "fuzz://query_test.zig",
             .metadata_json = "{}",
             .content = std.fmt.allocPrint(allocator, "fn query_test_{}() {{ return; }}", .{i}) catch "fn test() { return; }",

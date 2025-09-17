@@ -34,9 +34,9 @@ pub const TombstoneRecord = struct {
     /// Block being marked as deleted
     block_id: BlockId,
 
-    /// Monotonic sequence number for version ordering
+    /// Global sequence number for tombstone ordering
     /// Higher sequences shadow lower sequences
-    deletion_sequence: u64,
+    sequence: u64,
 
     /// Unix timestamp (microseconds) for time-based GC policies
     deletion_timestamp: u64,
@@ -48,17 +48,16 @@ pub const TombstoneRecord = struct {
     /// Determines if this tombstone shadows a block with given sequence.
     /// Shadowing means the block should be considered deleted.
     pub fn shadows_sequence(self: TombstoneRecord, block_sequence: u64) bool {
-        return self.deletion_sequence > block_sequence;
+        return self.sequence > block_sequence;
     }
 
-    /// Determines if this tombstone shadows a specific block version.
-    /// Version comparison uses sequence numbers, not version fields.
+    /// Determines if this tombstone shadows a specific block.
+    /// Sequence comparison uses global ordering for MVCC semantics.
     pub fn shadows_block(self: TombstoneRecord, block: types.ContextBlock) bool {
         if (!self.block_id.eql(block.id)) {
             return false;
         }
-        // Block version is u32, tombstone sequence is u64 for future expansion
-        return self.deletion_sequence > block.version;
+        return self.sequence > block.sequence;
     }
 
     /// Check if tombstone can be garbage collected based on age.
@@ -81,8 +80,8 @@ pub const TombstoneRecord = struct {
         @memcpy(buffer[offset..][0..16], &self.block_id.bytes);
         offset += 16;
 
-        // Deletion sequence (8 bytes)
-        std.mem.writeInt(u64, buffer[offset..][0..8], self.deletion_sequence, .little);
+        // Sequence (8 bytes)
+        std.mem.writeInt(u64, buffer[offset..][0..8], self.sequence, .little);
         offset += 8;
 
         // Deletion timestamp (8 bytes)
@@ -106,8 +105,8 @@ pub const TombstoneRecord = struct {
         const block_id = BlockId{ .bytes = block_id_bytes };
         offset += 16;
 
-        // Read deletion sequence
-        const deletion_sequence = std.mem.readInt(u64, buffer[offset..][0..8], .little);
+        // Read sequence
+        const sequence = std.mem.readInt(u64, buffer[offset..][0..8], .little);
         offset += 8;
 
         // Read deletion timestamp
@@ -115,7 +114,7 @@ pub const TombstoneRecord = struct {
 
         return TombstoneRecord{
             .block_id = block_id,
-            .deletion_sequence = deletion_sequence,
+            .sequence = sequence,
             .deletion_timestamp = deletion_timestamp,
             .generation = 0, // Default for single-node deployment
         };
@@ -128,7 +127,7 @@ pub const TombstoneRecord = struct {
         if (id_cmp == .lt) return true;
         if (id_cmp == .gt) return false;
         // Same block_id, sort by sequence (newer first)
-        return a.deletion_sequence > b.deletion_sequence;
+        return a.sequence > b.sequence;
     }
 
     /// Format tombstone for debugging output.
@@ -142,7 +141,7 @@ pub const TombstoneRecord = struct {
         _ = options;
         try writer.print("Tombstone{{id={}, seq={}, ts={}}}", .{
             self.block_id,
-            self.deletion_sequence,
+            self.sequence,
             self.deletion_timestamp,
         });
     }
@@ -234,7 +233,7 @@ test "TombstoneRecord shadowing logic" {
 
     const tombstone = TombstoneRecord{
         .block_id = block_id,
-        .deletion_sequence = 100,
+        .sequence = 100, // Test sequence for shadowing logic
         .deletion_timestamp = 1000000,
         .generation = 0,
     };
@@ -255,7 +254,7 @@ test "TombstoneRecord serialization round-trip" {
 
     const original = TombstoneRecord{
         .block_id = block_id,
-        .deletion_sequence = 42,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = 1234567890,
         .generation = 7,
     };
@@ -270,7 +269,7 @@ test "TombstoneRecord serialization round-trip" {
 
     // Verify round-trip (generation not persisted in single-node format)
     try testing.expect(deserialized.block_id.eql(original.block_id));
-    try testing.expectEqual(original.deletion_sequence, deserialized.deletion_sequence);
+    try testing.expectEqual(original.sequence, deserialized.sequence);
     try testing.expectEqual(original.deletion_timestamp, deserialized.deletion_timestamp);
     try testing.expectEqual(@as(u32, 0), deserialized.generation); // Always 0 in single-node deployment
 }
@@ -278,7 +277,7 @@ test "TombstoneRecord serialization round-trip" {
 test "TombstoneRecord garbage collection eligibility" {
     const tombstone = TombstoneRecord{
         .block_id = BlockId.zero(),
-        .deletion_sequence = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = 1000000, // 1 second in microseconds
         .generation = 0,
     };
@@ -304,14 +303,14 @@ test "TombstoneSet operations" {
     // Add tombstones
     try set.add_tombstone(TombstoneRecord{
         .block_id = block_id1,
-        .deletion_sequence = 100,
+        .sequence = 50, // Test sequence for tombstone shadowing
         .deletion_timestamp = 1000000,
         .generation = 0,
     });
 
     try set.add_tombstone(TombstoneRecord{
         .block_id = block_id2,
-        .deletion_sequence = 200,
+        .sequence = 75, // Test sequence for second tombstone
         .deletion_timestamp = 2000000,
         .generation = 0,
     });
@@ -319,7 +318,7 @@ test "TombstoneSet operations" {
     // Test shadowing
     const block1 = types.ContextBlock{
         .id = block_id1,
-        .version = 50, // Lower than tombstone sequence
+        .sequence = 25, // Lower than tombstone sequence - should be shadowed
         .source_uri = "test",
         .metadata_json = "{}",
         .content = "test",
@@ -328,7 +327,7 @@ test "TombstoneSet operations" {
 
     const block2 = types.ContextBlock{
         .id = block_id1,
-        .version = 150, // Higher than tombstone sequence
+        .sequence = 100, // Higher than tombstone sequence - should not be shadowed
         .source_uri = "test",
         .metadata_json = "{}",
         .content = "test",
@@ -345,14 +344,14 @@ test "TombstoneSet garbage collection" {
     // Add old and new tombstones
     try set.add_tombstone(TombstoneRecord{
         .block_id = BlockId.zero(),
-        .deletion_sequence = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = 1000000, // Old
         .generation = 0,
     });
 
     try set.add_tombstone(TombstoneRecord{
         .block_id = try BlockId.from_hex("11111111111111111111111111111111"),
-        .deletion_sequence = 2,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = 5000000, // Recent
         .generation = 0,
     });
@@ -370,7 +369,7 @@ test "TombstoneRecord serialization consistency" {
 
     const tombstone = TombstoneRecord{
         .block_id = block_id,
-        .deletion_sequence = 999,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .deletion_timestamp = 87654321,
         .generation = 3,
     };
@@ -381,7 +380,7 @@ test "TombstoneRecord serialization consistency" {
     // Verify serialization/deserialization works without checksum
     const result = try TombstoneRecord.deserialize(&buffer);
     try testing.expect(result.block_id.eql(tombstone.block_id));
-    try testing.expectEqual(tombstone.deletion_sequence, result.deletion_sequence);
+    try testing.expectEqual(tombstone.sequence, result.sequence);
 }
 
 test "TombstoneRecord sorting order" {
@@ -389,16 +388,16 @@ test "TombstoneRecord sorting order" {
     const id2 = try BlockId.from_hex("22222222222222222222222222222222");
 
     var tombstones = [_]TombstoneRecord{
-        .{ .block_id = id2, .deletion_sequence = 100, .deletion_timestamp = 0, .generation = 0 },
-        .{ .block_id = id1, .deletion_sequence = 200, .deletion_timestamp = 0, .generation = 0 },
-        .{ .block_id = id1, .deletion_sequence = 150, .deletion_timestamp = 0, .generation = 0 },
+        .{ .block_id = id2, .sequence = 100, .deletion_timestamp = 0, .generation = 0 }, // Test sequence for sorting order
+        .{ .block_id = id1, .sequence = 150, .deletion_timestamp = 0, .generation = 0 }, // Test sequence for sorting order
+        .{ .block_id = id1, .sequence = 200, .deletion_timestamp = 0, .generation = 0 }, // Test sequence for sorting order
     };
 
     std.sort.pdq(TombstoneRecord, &tombstones, {}, TombstoneRecord.less_than);
 
     // Should be sorted by block_id first, then by sequence (descending)
     try testing.expect(tombstones[0].block_id.eql(id1));
-    try testing.expectEqual(@as(u64, 200), tombstones[0].deletion_sequence);
-    try testing.expectEqual(@as(u64, 150), tombstones[1].deletion_sequence);
+    try testing.expectEqual(@as(u64, 200), tombstones[0].sequence);
+    try testing.expectEqual(@as(u64, 150), tombstones[1].sequence);
     try testing.expect(tombstones[2].block_id.eql(id2));
 }

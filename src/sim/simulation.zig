@@ -701,7 +701,7 @@ test "ownership violation injection" {
     // Create a test block owned by storage engine
     const test_block = types.ContextBlock{
         .id = types.BlockId.from_hex("1234567890abcdef1234567890abcdef") catch unreachable, // Safety: Valid 32-char hex string
-        .version = 1,
+        .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://simulation_violation.zig",
         .metadata_json = "{}",
         .content = "Test content for ownership violation injection",

@@ -25,7 +25,7 @@ pub const PhaseData = union(LifecyclePhase) {
     model_add: struct {
         sequence_number: u64,
         content_hash: u64,
-        version: u32,
+        sequence: u32,
     },
     wal_write: struct {
         entry_sequence: u64,
@@ -108,7 +108,7 @@ pub const BlockLifecycle = struct {
 
             switch (event.data) {
                 .model_add => |data| {
-                    try writer.print(" seq={} hash=0x{x} ver={}", .{ data.sequence_number, data.content_hash, data.version });
+                    try writer.print(" seq={} hash=0x{x} ver={}", .{ data.sequence_number, data.content_hash, data.sequence });
                 },
                 .wal_write => |data| {
                     try writer.print(" seq={} bytes={}/{}", .{ data.entry_sequence, data.bytes_written, data.expected_bytes });
@@ -267,11 +267,13 @@ test "basic tracking" {
     defer tracker.deinit();
 
     const test_block = BlockId{ .bytes = [_]u8{1} ++ [_]u8{0} ** 15 };
-    tracker.record_block_event(test_block, .model_add, true, .{ .model_add = .{
-        .sequence_number = 42,
-        .content_hash = 0x1234,
-        .version = 1,
-    } }, null);
+    tracker.record_block_event(test_block, .model_add, true, .{
+        .model_add = .{
+            .sequence_number = 42,
+            .content_hash = 0x1234,
+            .sequence = 0, // Storage engine will assign the actual global sequence
+        },
+    }, null);
 
     const lifecycle = tracker.find_block_lifecycle(test_block);
     try testing.expect(lifecycle != null);
@@ -286,11 +288,13 @@ test "forensic summary generation" {
     const test_block = BlockId{ .bytes = [_]u8{2} ++ [_]u8{0} ** 15 };
 
     // Simulate data loss pattern: model + wal success, verification failure
-    tracker.record_block_event(test_block, .model_add, true, .{ .model_add = .{
-        .sequence_number = 100,
-        .content_hash = 0xABCD,
-        .version = 1,
-    } }, null);
+    tracker.record_block_event(test_block, .model_add, true, .{
+        .model_add = .{
+            .sequence_number = 100,
+            .content_hash = 0xABCD,
+            .sequence = 0, // Storage engine will assign the actual global sequence
+        },
+    }, null);
 
     tracker.record_block_event(test_block, .wal_write, true, .{ .wal_write = .{
         .entry_sequence = 50,
