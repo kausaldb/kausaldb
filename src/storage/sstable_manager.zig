@@ -223,12 +223,9 @@ pub const SSTableManager = struct {
             loaded_sstables.deinit();
         }
 
-        // Load all SSTables in reverse order (newest first)
-        var i: usize = sstable_paths.items.len;
-        while (i > 0) {
-            i -= 1;
-            const sstable_path = sstable_paths.items[i];
-
+        // Load all SSTables in correct LSM precedence order (newest first)
+        // TieredCompactionManager now provides paths in correct search order
+        for (sstable_paths.items) |sstable_path| {
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
             var sstable_file = SSTable.init(
                 self.arena_coordinator,

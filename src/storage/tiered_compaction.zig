@@ -229,8 +229,11 @@ pub const TieredCompactionManager = struct {
         var paths = std.array_list.Managed([]const u8).init(allocator);
 
         for (self.tiers) |tier| {
-            for (tier.sstables.items) |info| {
-                try paths.append(info.path);
+            // Within each tier, search newest SSTables first (reverse append order)
+            var i: usize = tier.sstables.items.len;
+            while (i > 0) {
+                i -= 1;
+                try paths.append(tier.sstables.items[i].path);
             }
         }
 
