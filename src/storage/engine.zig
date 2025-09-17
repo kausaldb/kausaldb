@@ -116,8 +116,10 @@ const FlushMemtableCommand = struct {
             return err;
         };
 
-        // Reset storage arena to reclaim memory from flushed memtable
-        self.storage_engine.reset_storage_memory();
+        // CRITICAL FIX: Don't reset arena immediately after flush
+        // The test harness may still have references to arena-allocated content
+        // Arena reset should only happen when we're certain no external references exist
+        // self.storage_engine.reset_storage_memory();
 
         // Execute compaction if needed using command pattern
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };

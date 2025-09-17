@@ -212,7 +212,7 @@ pub const ModelState = struct {
             .blocks = std.HashMap(BlockId, ModelBlock, BlockIdContext, std.hash_map.default_max_load_percentage).init(arena_allocator),
             .edges = std.array_list.Managed(GraphEdge).init(arena_allocator),
             .operation_count = 0,
-            .global_sequence = 1, // Start at 1 for mathematical consistency
+            .global_sequence = 0, // Start at 0 to match WorkloadGenerator.operation_count
             .last_flush_sequence = 0,
             .flush_count = 0,
             .compaction_count = 0,
@@ -947,12 +947,15 @@ pub const ModelState = struct {
     /// Synchronize model state with storage engine after crash recovery.
     /// Aligns model state with actual storage contents to prevent consistency violations.
     pub fn sync_with_storage(self: *Self, storage_engine: anytype) !void {
+        var blocks_to_remove = std.array_list.Managed(BlockId).init(self.backing_allocator);
+        defer blocks_to_remove.deinit();
+
         var block_iterator = self.blocks.iterator();
         while (block_iterator.next()) |entry| {
             const block_id = entry.key_ptr.*;
             const model_block = entry.value_ptr;
 
-            const found_in_storage = storage_engine.find_block(block_id, .temporary) catch |err| switch (err) {
+            const found_in_storage = storage_engine.*.find_block(block_id, .temporary) catch |err| switch (err) {
                 error.BlockNotFound => null,
                 else => return err,
             };
@@ -961,8 +964,14 @@ pub const ModelState = struct {
             if (found_in_storage != null) {
                 model_block.deleted = false;
             } else {
-                model_block.deleted = true;
+                // Mark for removal instead of just setting deleted = true
+                try blocks_to_remove.append(block_id);
             }
+        }
+
+        // Remove blocks that don't exist in storage after crash recovery
+        for (blocks_to_remove.items) |block_id| {
+            _ = self.blocks.remove(block_id);
         }
 
         // Rebuild edge list from storage
@@ -991,7 +1000,7 @@ pub const ModelState = struct {
             if (model_block.deleted) continue;
 
             // Get outgoing edges from storage for this block
-            const outgoing_edges = storage_engine.find_outgoing_edges(block_id);
+            const outgoing_edges = storage_engine.*.find_outgoing_edges(block_id);
             for (outgoing_edges) |owned_edge| {
                 const edge = owned_edge.read(.temporary);
                 try all_edges.append(edge.*);

@@ -12,6 +12,9 @@ pub const std_options = .{
 };
 
 comptime {
+    // Debug tests for harness issues
+    _ = @import("tests/isolate_delete_bug.zig");
+
     // Scenarios
     _ = @import("tests/scenarios/storage.zig");
     _ = @import("tests/scenarios/component.zig");
