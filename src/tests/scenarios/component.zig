@@ -175,6 +175,9 @@ fn execute_batch_writer_atomicity(allocator: std.mem.Allocator, runner: *Simulat
         try testing.expect(found != null);
     }
 
+    // Sync model state with storage after batch operation
+    try runner.model.sync_with_storage(&runner.storage_engine);
+
     const final_count = try runner.model.active_block_count();
     try testing.expect(final_count == initial_count + normal_batch.len);
 }
@@ -204,6 +207,9 @@ fn execute_batch_writer_deduplication(allocator: std.mem.Allocator, runner: *Sim
 
     // Execute batch with duplicates
     const stats = try batch_writer.ingest_batch(batch_with_dupes, "test_workspace");
+
+    // Sync model state with storage after batch operation
+    try runner.model.sync_with_storage(&runner.storage_engine);
 
     // Should only commit unique blocks
     try testing.expect(stats.blocks_written == 20);
@@ -248,7 +254,11 @@ fn execute_batch_writer_conflicts(allocator: std.mem.Allocator, runner: *Simulat
     const update_batch = [_]ContextBlock{updated_block};
     const stats = try batch_writer.ingest_batch(&update_batch, "test_workspace");
 
+    // Sync model state with storage after batch operation
+    try runner.model.sync_with_storage(&runner.storage_engine);
+
     try testing.expect(stats.blocks_written == 1);
+    try testing.expect(stats.version_conflicts == 1);
 
     // Verify updated content is stored
     const found = try runner.storage_engine.find_block(initial_block.id, .temporary);

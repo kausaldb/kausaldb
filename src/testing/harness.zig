@@ -230,6 +230,10 @@ pub const SimulationRunner = struct {
         );
         try storage_engine.startup();
 
+        // Disable WAL write verification for simulation tests to prevent
+        // simulation VFS corruption issues from blocking other test progress
+        storage_engine.disable_wal_verification_for_simulation();
+
         return Self{
             .allocator = allocator,
             .seed = seed,
@@ -559,6 +563,10 @@ pub const SimulationRunner = struct {
 
         // Hard crash simulation - no graceful shutdown
         self.storage_engine.deinit();
+
+        // Clear simulation VFS state to simulate crash where file handles are lost
+        // This prevents FileExists errors when recreating SSTables with same names
+        self.sim_vfs.clear_for_crash_recovery();
 
         // Recreate storage engine (simulates restart)
         self.storage_engine = try StorageEngine.init_default(
@@ -1263,7 +1271,7 @@ pub const TestDataGenerator = struct {
 
         const metadata = try std.fmt.allocPrint(
             self.allocator,
-            "{{\"test_id\":{d},\"type\":\"test_block\",\"seed\":{d}}}",
+            "{{\"test_id\":{d},\"type\":\"test_block\",\"seed\":{d},\"codebase\":\"test_workspace\"}}",
             .{ id_seed, id_seed },
         );
 

@@ -647,6 +647,28 @@ pub const SimulationVFS = struct {
         self.file_arena.deinit();
     }
 
+    /// Clear all VFS state for crash recovery simulation
+    /// Simulates the effect of a crash where all file handles are lost
+    pub fn clear_for_crash_recovery(self: *SimulationVFS) void {
+        // Close all active handles
+        self.handle_registry.close_all();
+
+        // Clear file mappings (free the path strings first)
+        var file_iter = self.files.iterator();
+        while (file_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.files.clearAndFree();
+
+        // Clear storage arrays
+        self.file_storage.clearRetainingCapacity();
+        self.handle_to_storage.clearAndFree();
+
+        // Reset the arena to clear all file content
+        self.file_arena.deinit();
+        self.file_arena = std.heap.ArenaAllocator.init(self.allocator);
+    }
+
     /// Get VFS interface for this implementation
     pub fn vfs(self: *Self) VFS {
         return VFS{

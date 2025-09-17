@@ -1127,18 +1127,51 @@ test "model state tracks put_edge operations" {
     var model = try ModelState.init(allocator);
     defer model.deinit();
 
+    // Create source block first
+    const source_block = ContextBlock{
+        .id = BlockId.from_u64(1),
+        .version = 1,
+        .source_uri = "test://source",
+        .metadata_json = "{}",
+        .content = "source block",
+    };
+
+    const source_operation = workload_mod.Operation{
+        .op_type = .put_block,
+        .block = source_block,
+        .sequence_number = 1,
+    };
+    try model.apply_operation(&source_operation);
+
+    // Create target block second
+    const target_block = ContextBlock{
+        .id = BlockId.from_u64(2),
+        .version = 1,
+        .source_uri = "test://target",
+        .metadata_json = "{}",
+        .content = "target block",
+    };
+
+    const target_operation = workload_mod.Operation{
+        .op_type = .put_block,
+        .block = target_block,
+        .sequence_number = 2,
+    };
+    try model.apply_operation(&target_operation);
+
+    // Now create edge between existing blocks
     const edge = GraphEdge{
         .source_id = BlockId.from_u64(1),
         .target_id = BlockId.from_u64(2),
         .edge_type = .calls,
     };
 
-    const operation = workload_mod.Operation{
+    const edge_operation = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 1,
+        .sequence_number = 3,
     };
-    try model.apply_operation(&operation);
+    try model.apply_operation(&edge_operation);
 
     // Verify edge was added
     try testing.expectEqual(@as(u32, 1), model.edge_count());
@@ -1152,27 +1185,59 @@ test "model prevents duplicate edges" {
     var model = try ModelState.init(allocator);
     defer model.deinit();
 
+    // Create source block first
+    const source_block = ContextBlock{
+        .id = BlockId.from_u64(1),
+        .version = 1,
+        .source_uri = "test://source",
+        .metadata_json = "{}",
+        .content = "source block",
+    };
+
+    const source_operation = workload_mod.Operation{
+        .op_type = .put_block,
+        .block = source_block,
+        .sequence_number = 1,
+    };
+    try model.apply_operation(&source_operation);
+
+    // Create target block second
+    const target_block = ContextBlock{
+        .id = BlockId.from_u64(2),
+        .version = 1,
+        .source_uri = "test://target",
+        .metadata_json = "{}",
+        .content = "target block",
+    };
+
+    const target_operation = workload_mod.Operation{
+        .op_type = .put_block,
+        .block = target_block,
+        .sequence_number = 2,
+    };
+    try model.apply_operation(&target_operation);
+
+    // Now test duplicate edge creation
     const edge = GraphEdge{
         .source_id = BlockId.from_u64(1),
         .target_id = BlockId.from_u64(2),
         .edge_type = .calls,
     };
 
-    // Add same edge twice
     const op1 = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 1,
+        .sequence_number = 3,
     };
+    try model.apply_operation(&op1);
+
     const op2 = workload_mod.Operation{
         .op_type = .put_edge,
         .edge = edge,
-        .sequence_number = 2,
+        .sequence_number = 4,
     };
-
-    try model.apply_operation(&op1);
     try model.apply_operation(&op2);
 
-    // Should only have one edge
+    // Should still only have one edge (duplicate rejected)
     try testing.expectEqual(@as(u32, 1), model.edge_count());
 }

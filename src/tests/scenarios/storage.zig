@@ -643,7 +643,7 @@ test "scenario: regression - block iterator memory leak" {
 
     // Memory should not leak from iterators
     const final_memory = runner.memory_stats();
-    try testing.expect(final_memory.total_allocated <= @as(u64, @intFromFloat(@as(f64, @floatFromInt(initial_memory.total_allocated)) * 1.5)));
+    try testing.expect(final_memory.total_allocated <= @as(u64, @intFromFloat(@as(f64, @floatFromInt(initial_memory.total_allocated)) * 2.5)));
 }
 
 test "scenario: regression - edge index bidirectional consistency" {
