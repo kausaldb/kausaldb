@@ -286,6 +286,7 @@ pub const VFile = struct {
         current_time_fn: *const fn (*anyopaque) i64,
         fault_injection_fn: *const fn (*anyopaque, usize) VFileError!usize,
         read_corruption_fn: *const fn (*anyopaque, []u8) void,
+        disk_usage_update_fn: *const fn (*anyopaque, usize, usize) void,
     };
 
     pub const SeekFrom = enum(u8) {
@@ -357,6 +358,12 @@ pub const VFile = struct {
                     return err;
                 };
 
+                // Track old file size for disk usage update
+                const old_file_size = size_blk: {
+                    const file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
+                    break :size_blk file_data.content.items.len;
+                };
+
                 {
                     const file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
                     if (sim.position + actual_write_size > file_data.content.items.len) {
@@ -404,6 +411,11 @@ pub const VFile = struct {
 
                 const time_update_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
                 time_update_file_data.modified_time = sim.current_time_fn(sim.vfs_ptr);
+
+                // Update disk usage tracking
+                const new_file_size = time_update_file_data.content.items.len;
+                sim.disk_usage_update_fn(sim.vfs_ptr, old_file_size, new_file_size);
+
                 break :blk actual_write_size;
             },
         };

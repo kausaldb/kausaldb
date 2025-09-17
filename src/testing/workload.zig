@@ -407,7 +407,8 @@ test "workload generator creates deterministic operations" {
 test "operation mix calculates correct total weight" {
     const mix = OperationMix{
         .put_block_weight = 10,
-        .find_block_weight = 20,
+        .update_block_weight = 5,
+        .find_block_weight = 15,
         .delete_block_weight = 5,
         .put_edge_weight = 3,
         .find_edges_weight = 7,

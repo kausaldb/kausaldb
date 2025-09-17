@@ -591,6 +591,16 @@ pub const SimulationVFS = struct {
         return write_size;
     }
 
+    /// Update disk usage tracking for file size changes
+    fn disk_usage_update_fn(vfs_ptr: *anyopaque, old_size: usize, new_size: usize) void {
+        assert(@intFromPtr(vfs_ptr) >= 0x1000);
+
+        // Safety: VFS pointer guaranteed by interface contract
+        const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
+
+        self.fault_injection.update_disk_usage(old_size, new_size);
+    }
+
     /// Create new file storage entry using proper handle registry with O(1) mapping
     fn create_file_storage(
         self: *SimulationVFS,
@@ -779,6 +789,7 @@ pub const SimulationVFS = struct {
                 .current_time_fn = current_time_fn,
                 .fault_injection_fn = fault_injection_fn,
                 .read_corruption_fn = read_corruption_fn,
+                .disk_usage_update_fn = disk_usage_update_fn,
             } },
         };
     }
@@ -824,6 +835,7 @@ pub const SimulationVFS = struct {
                 .current_time_fn = current_time_fn,
                 .fault_injection_fn = fault_injection_fn,
                 .read_corruption_fn = read_corruption_fn,
+                .disk_usage_update_fn = disk_usage_update_fn,
             } },
         };
     }
