@@ -40,7 +40,7 @@ const StorageEngine = engine.StorageEngine;
 
 /// Create deterministic test block for reproducible testing
 fn create_test_block(comptime id_suffix: []const u8, version: u32) !ContextBlock {
-    const id_hex = "1111111111111111111111111111" ++ id_suffix;
+    const id_hex = "11111111111111111111111111111" ++ id_suffix;
     return ContextBlock{
         .id = try BlockId.from_hex(id_hex),
         .version = version,
@@ -298,12 +298,12 @@ test "simulation: heavy deletion workload with compaction" {
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
         // Add blocks
-        const block = try create_test_block("sim", i);
+        const block = try create_test_block("abc", i + 1);
         try storage_engine.put_block(block);
 
         // Occasionally delete and compact
         if (i % 10 == 0 and i > 0) {
-            const delete_id = try BlockId.from_hex("111111111111111111111111111073696D"); // "sim" suffix
+            const delete_id = try BlockId.from_hex("11111111111111111111111111111abc"); // "abc" suffix
             try storage_engine.delete_block(delete_id);
             try deleted_blocks.put(delete_id, {});
         }
