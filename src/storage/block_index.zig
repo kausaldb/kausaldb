@@ -224,14 +224,15 @@ pub const BlockIndex = struct {
         // Clear operation validation is expensive and should be selective
 
         self.blocks.clearRetainingCapacity();
-        self.tombstones.clearRetainingCapacity();
+        // CRITICAL: Do NOT clear tombstones during flush - they must persist to prevent
+        // data resurrection from older SSTables until compaction eliminates all shadowed versions
         // Arena memory reset handled by StorageEngine - enables O(1) bulk cleanup
         self.memory_used = 0;
 
         // Validate cleared state in debug builds
         if (builtin.mode == .Debug) {
             fatal_assert(self.blocks.count() == 0, "Clear operation failed - blocks still present", .{});
-            fatal_assert(self.tombstones.count() == 0, "Clear operation failed - tombstones still present", .{});
+            // Tombstones are intentionally preserved to prevent data resurrection from SSTables
             fatal_assert(self.memory_used == 0, "Clear operation failed - memory not reset", .{});
         }
     }

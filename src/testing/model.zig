@@ -327,7 +327,11 @@ pub const ModelState = struct {
     /// Creates mathematically precise model block with cryptographic
     /// content verification and temporal ordering guarantees.
     pub fn apply_put_block(self: *Self, block: ContextBlock) !void {
-        const model_block = ModelBlock.from_context_block(block, self.global_sequence, @truncate(self.operation_count));
+        var model_block = ModelBlock.from_context_block(block, self.global_sequence, @truncate(self.operation_count));
+
+        // Preserve deletion state to prevent resurrection of tombstoned blocks
+        const existing_deleted = if (self.blocks.get(block.id)) |existing| existing.deleted else false;
+        model_block.deleted = existing_deleted;
 
         // Validate block consistency before insertion
         if (comptime std.debug.runtime_safety) {
