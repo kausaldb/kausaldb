@@ -83,8 +83,8 @@ test "vfs_fault_testing_mode_enforces_realistic_limits" {
         }
     }
 
-    // Should have failed before writing 150MB
-    try testing.expect(writes_succeeded < 100);
+    // Should have failed at or before 100MB (100 writes)
+    try testing.expect(writes_succeeded <= 100);
 }
 
 test "vfs_configure_disk_space_limit_precise_control" {

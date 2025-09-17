@@ -179,6 +179,7 @@ fn execute_batch_writer_atomicity(allocator: std.mem.Allocator, runner: *Simulat
     try runner.model.sync_with_storage(&runner.storage_engine);
 
     const final_count = try runner.model.active_block_count();
+
     try testing.expect(final_count == initial_count + normal_batch.len);
 }
 
