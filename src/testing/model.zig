@@ -1076,13 +1076,23 @@ pub const ModelState = struct {
         var block_iterator = self.blocks.iterator();
         while (block_iterator.next()) |entry| {
             const block_id = entry.key_ptr.*;
-            const model_block = entry.value_ptr;
 
-            // Only check active blocks
-            if (model_block.deleted) continue;
+            // Verify block exists in storage (ignore model deleted flag during sync)
+            const storage_block = storage_engine.*.find_block(block_id, .temporary) catch |err| switch (err) {
+                error.BlockNotFound => continue, // Skip blocks that don't exist in storage
+                else => return err,
+            };
+            _ = storage_block; // Block exists in storage, proceed with edge loading
 
             // Get outgoing edges from storage for this block
             const outgoing_edges = storage_engine.*.find_outgoing_edges(block_id);
+            defer {
+                // Only free edges that were allocated by the engine (ownership == .sstable_manager)
+                // Memtable edges (.memtable_manager) and static empty slices should not be freed
+                if (outgoing_edges.len > 0 and outgoing_edges[0].ownership == .sstable_manager) {
+                    self.backing_allocator.free(outgoing_edges);
+                }
+            }
             for (outgoing_edges) |owned_edge| {
                 const edge = owned_edge.read(.temporary);
                 try all_edges.append(edge.*);

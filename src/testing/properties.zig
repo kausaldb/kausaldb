@@ -213,18 +213,27 @@ pub const PropertyChecker = struct {
     pub fn check_bidirectional_consistency(model: *ModelState, system: *StorageEngine) !void {
         var missing_edges: usize = 0;
         var total_edges: usize = 0;
+        var skipped_edges: usize = 0;
 
         for (model.edges.items) |model_edge| {
             // Skip edges involving deleted blocks
             if (model.blocks.get(model_edge.source_id)) |source_block| {
-                if (source_block.deleted) continue;
+                if (source_block.deleted) {
+                    skipped_edges += 1;
+                    continue;
+                }
             } else {
+                skipped_edges += 1;
                 continue;
             }
 
             if (model.blocks.get(model_edge.target_id)) |target_block| {
-                if (target_block.deleted) continue;
+                if (target_block.deleted) {
+                    skipped_edges += 1;
+                    continue;
+                }
             } else {
+                skipped_edges += 1;
                 continue;
             }
 
@@ -232,6 +241,12 @@ pub const PropertyChecker = struct {
 
             // Verify edge exists in forward direction
             const outgoing_edges = system.find_outgoing_edges(model_edge.source_id);
+            defer {
+                // Only free edges that were allocated by the engine (ownership == .sstable_manager)
+                if (outgoing_edges.len > 0 and outgoing_edges[0].ownership == .sstable_manager) {
+                    system.backing_allocator.free(outgoing_edges);
+                }
+            }
             var found = false;
 
             for (outgoing_edges) |sys_edge| {

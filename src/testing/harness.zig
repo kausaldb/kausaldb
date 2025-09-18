@@ -422,7 +422,6 @@ pub const SimulationRunner = struct {
                         else => return false, // Report failure
                     };
                 }
-                return true;
             },
             .put_edge => {
                 if (operation.edge) |edge| {
@@ -442,7 +441,14 @@ pub const SimulationRunner = struct {
             },
             .find_edges => {
                 if (operation.block_id) |id| {
-                    _ = self.storage_engine.find_outgoing_edges(id);
+                    const edges = self.storage_engine.find_outgoing_edges(id);
+                    defer {
+                        // Only free edges that were allocated by the engine (ownership == .sstable_manager)
+                        // Memtable edges (.memtable_manager) and static empty slices should not be freed
+                        if (edges.len > 0 and edges[0].ownership == .sstable_manager) {
+                            self.storage_engine.backing_allocator.free(edges);
+                        }
+                    }
                 }
                 return true;
             },
