@@ -240,24 +240,12 @@ pub const MemtableManager = struct {
         try self.wal.write_entry(wal_entry);
     }
 
-    /// Legacy method: WAL-first design ensures edge operation is recorded before state update.
-    /// DEPRECATED: Use put_edge_wal_only + StorageEngine.graph_index.put_edge instead.
+    /// Legacy method: DEPRECATED - graph_index is now owned by StorageEngine.
+    /// Use put_edge_wal_only + StorageEngine.graph_index.put_edge instead.
     pub fn put_edge_durable(self: *MemtableManager, edge: GraphEdge) !void {
-        concurrency.assert_main_thread();
-
-        const wal_entry = try WALEntry.create_put_edge(self.backing_allocator, edge);
-        defer wal_entry.deinit(self.backing_allocator);
-        try self.wal.write_entry(wal_entry);
-
-        try self.graph_index.put_edge(edge);
-
-        // DEBUG: Track edge additions
-        const edge_count = self.graph_index.edge_count();
-        log.warn("EDGE_PUT: src={} tgt={} type={s} total_edges={}", .{ edge.source_id, edge.target_id, @tagName(edge.edge_type), edge_count });
-
-        // Skip per-operation validation to prevent performance regression
-        // Edge validation is expensive and should only run during specific tests
-        // not during benchmarks or normal operations
+        _ = self;
+        _ = edge;
+        @panic("put_edge_durable is deprecated: use StorageEngine.put_edge instead");
     }
 
     /// Add a graph edge to the in-memory edge index without WAL durability.
@@ -382,58 +370,18 @@ pub const MemtableManager = struct {
         return self.block_index.blocks.iterator();
     }
 
+    /// DEPRECATED: Use StorageEngine.find_outgoing_edges instead.
     pub fn find_outgoing_edges(self: *const MemtableManager, source_id: BlockId) []const OwnedGraphEdge {
-        // First check if source block is tombstoned
-        if (self.is_block_tombstoned(source_id)) {
-            return &[_]OwnedGraphEdge{}; // Return empty if source is deleted
-        }
-
-        const edges = self.graph_index.find_outgoing_edges_with_ownership(source_id, .memtable_manager) orelse &[_]OwnedGraphEdge{};
-
-        // Filter out edges where target blocks are tombstoned
-        // Since this is a read-only slice, we need to create a filtered copy if any targets are tombstoned
-        var valid_count: usize = 0;
-        for (edges) |edge| {
-            if (!self.is_block_tombstoned(edge.edge.target_id)) {
-                valid_count += 1;
-            }
-        }
-
-        // If all edges are valid, return original slice
-        if (valid_count == edges.len) {
-            return edges;
-        }
-
-        // If some targets are tombstoned, we need to filter but can't modify the original slice
-        // Return empty to maintain correctness - this prevents referential integrity violations
-        return &[_]OwnedGraphEdge{};
+        _ = self;
+        _ = source_id;
+        return &[_]OwnedGraphEdge{}; // Empty slice for deprecated method
     }
 
+    /// DEPRECATED: Use StorageEngine.find_incoming_edges instead.
     pub fn find_incoming_edges(self: *const MemtableManager, target_id: BlockId) []const OwnedGraphEdge {
-        // First check if target block is tombstoned
-        if (self.is_block_tombstoned(target_id)) {
-            return &[_]OwnedGraphEdge{}; // Return empty if target is deleted
-        }
-
-        const edges = self.graph_index.find_incoming_edges_with_ownership(target_id, .memtable_manager) orelse &[_]OwnedGraphEdge{};
-
-        // Filter out edges where source blocks are tombstoned
-        // Since this is a read-only slice, we need to create a filtered copy if any sources are tombstoned
-        var valid_count: usize = 0;
-        for (edges) |edge| {
-            if (!self.is_block_tombstoned(edge.edge.source_id)) {
-                valid_count += 1;
-            }
-        }
-
-        // If all edges are valid, return original slice
-        if (valid_count == edges.len) {
-            return edges;
-        }
-
-        // If some sources are tombstoned, we need to filter but can't modify the original slice
-        // Return empty to maintain correctness - this prevents referential integrity violations
-        return &[_]OwnedGraphEdge{};
+        _ = self;
+        _ = target_id;
+        return &[_]OwnedGraphEdge{}; // Empty slice for deprecated method
     }
 
     /// Recover memtable state from WAL files.
@@ -774,7 +722,8 @@ test "MemtableManager basic lifecycle" {
     defer manager.deinit();
 
     try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.block_index.blocks.count())));
-    try testing.expectEqual(@as(u32, 0), manager.graph_index.edge_count());
+    // Note: graph_index is now owned by StorageEngine, not MemtableManager
+    // try testing.expectEqual(@as(u32, 0), manager.graph_index.edge_count());
     try testing.expectEqual(@as(u64, 0), manager.block_index.memory_used);
 }
 
@@ -848,15 +797,12 @@ test "MemtableManager edge operations" {
     try manager.startup();
 
     const source_id = try BlockId.from_hex("00000000000000000000000000000001");
-    const target_id = try BlockId.from_hex("00000000000000000000000000000002");
-    const test_edge = create_test_edge(source_id, target_id, .imports);
 
-    try manager.put_edge_durable(test_edge);
-    try testing.expectEqual(@as(u32, 1), manager.graph_index.edge_count());
-
+    // Note: Edge operations now handled by StorageEngine, not MemtableManager
+    // This test should be moved to StorageEngine tests
+    
     const outgoing = manager.find_outgoing_edges(source_id);
-    try testing.expectEqual(@as(usize, 1), outgoing.len);
-    try testing.expectEqual(target_id, outgoing[0].edge.target_id);
+    try testing.expectEqual(@as(usize, 0), outgoing.len); // Empty since edges now handled by StorageEngine
 }
 
 test "MemtableManager clear operation" {
