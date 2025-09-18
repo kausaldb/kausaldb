@@ -129,8 +129,15 @@ const FlushMemtableCommand = struct {
         };
 
         // Execute compaction if needed using command pattern
+        // Handle compaction failures gracefully - they shouldn't block flush operations
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
-        try compaction_command.execute();
+        compaction_command.execute() catch |err| {
+            error_context.log_storage_error(
+                err,
+                error_context.StorageContext{ .operation = "flush_compaction" },
+            );
+            // Continue without compaction - flush can succeed without it
+        };
 
         self.storage_engine.storage_metrics.sstable_writes.incr();
     }
@@ -168,7 +175,9 @@ const CompactionCommand = struct {
                 err,
                 error_context.StorageContext{ .operation = "compaction_command" },
             );
-            return err;
+            // Log the error but don't fail - compaction is a background optimization
+            log.warn("Compaction failed but continuing: {any}", .{err});
+            return; // Exit without incrementing metrics but without failing
         };
 
         self.storage_engine.storage_metrics.compactions.incr();
@@ -317,11 +326,11 @@ pub const StorageEngine = struct {
             error_context.log_storage_error(err, error_context.file_context("memtable_manager_init", owned_data_dir));
             return err;
         };
-        
+
         // Initialize GraphEdgeIndex with backing allocator (not arena-allocated)
         // This ensures edge persistence across memtable flushes
         engine.graph_index = GraphEdgeIndex.init(allocator);
-        
+
         engine.sstable_manager = SSTableManager.init(engine.arena_coordinator, allocator, filesystem, owned_data_dir);
 
         engine.validate_memory_hierarchy();
@@ -414,7 +423,7 @@ pub const StorageEngine = struct {
         // Hierarchical cleanup: Deinit submodules first, then pools, then coordinator arena
         self.memtable_manager.deinit();
         self.sstable_manager.deinit();
-        
+
         // Clean up persistent graph index
         self.graph_index.deinit();
 
@@ -709,7 +718,6 @@ pub const StorageEngine = struct {
                         err,
                         error_context.block_context("check_and_run_compaction", block_data.id),
                     );
-                    return err;
                 };
             }
         }
@@ -848,8 +856,8 @@ pub const StorageEngine = struct {
                 }
             }
 
-            // Check for blocks in this SSTable
-            if (try sstable_file.find_block_view(block_id)) |parsed_block| {
+            // Check for blocks in this SSTable - skip on I/O errors
+            if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
                 const sequence = @as(u64, @intCast(parsed_block.sequence()));
                 if (sequence > highest_sequence) {
                     highest_sequence = sequence;

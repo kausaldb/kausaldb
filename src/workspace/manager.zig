@@ -267,11 +267,6 @@ pub const WorkspaceManager = struct {
 
         if (metadata_block) |block| {
             try self.deserialize_workspace_config(block.block.content);
-
-            // Clean up the cloned OwnedBlock to prevent memory leaks
-            self.backing_allocator.free(block.block.source_uri);
-            self.backing_allocator.free(block.block.metadata_json);
-            self.backing_allocator.free(block.block.content);
         }
     }
 

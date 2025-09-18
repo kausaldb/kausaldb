@@ -175,6 +175,12 @@ pub const SSTable = struct {
             offset += 16;
 
             const edge_type_raw = std.mem.readInt(u16, buffer[offset..][0..2], .little);
+
+            if (edge_type_raw < 1 or edge_type_raw > 10) {
+                log.warn("Corrupted edge data: invalid EdgeType value {} (valid range: 1-10)", .{edge_type_raw});
+                return error.ChecksumMismatch;
+            }
+
             const edge_type: EdgeType = @enumFromInt(edge_type_raw);
             offset += 2;
 

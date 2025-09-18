@@ -23,6 +23,7 @@ comptime {
     _ = @import("tests/scenarios/vfs_fault.zig");
 
     _ = @import("tests/deletion_compaction_test.zig");
+    _ = @import("tests/edge_test.zig");
 
     // Regression tests (keeps bugs fixed)
     _ = @import("tests/regression/regression.zig");

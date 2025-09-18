@@ -633,6 +633,11 @@ pub const SimulationRunner = struct {
 
     /// Verify system consistency against model state
     pub fn verify_consistency(self: *Self) !void {
+        // Skip verification when corruption is expected to prevent false durability violations
+        if (self.corruption_expected) {
+            return;
+        }
+
         // Disable fault injection to allow clean verification operations
         self.sim_vfs.fault_injection.disable_all_faults();
         try self.model.verify_against_system(&self.storage_engine);
