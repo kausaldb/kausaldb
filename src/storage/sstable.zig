@@ -1088,7 +1088,9 @@ pub const Compactor = struct {
 
         const unique_blocks = try self.dedup_blocks(mvcc_filtered.blocks.items);
         const unique_tombstones = try self.dedup_and_gc_tombstones(mvcc_filtered.tombstones.items);
-        const unique_edges = try self.dedup_edges(all_edges.items);
+        const filtered_edges = try self.filter_edges_by_blocks(all_edges.items, unique_blocks);
+        const unique_edges = try self.dedup_edges(filtered_edges);
+        defer self.backing_allocator.free(filtered_edges);
 
         defer self.backing_allocator.free(unique_blocks);
         defer self.backing_allocator.free(unique_tombstones);
@@ -1253,6 +1255,35 @@ pub const Compactor = struct {
             .blocks = filtered_blocks,
             .tombstones = filtered_tombstones,
         };
+    }
+
+    /// Filter edges to only include those where both endpoints exist in the given blocks
+    fn filter_edges_by_blocks(self: *Compactor, edges: []GraphEdge, blocks: []ContextBlock) ![]GraphEdge {
+        // Build a set of available block IDs
+        var block_ids = std.HashMap(BlockId, void, BlockIdContext, std.hash_map.default_max_load_percentage).init(self.backing_allocator);
+        defer block_ids.deinit();
+
+        for (blocks) |block| {
+            try block_ids.put(block.id, {});
+        }
+
+        var filtered_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
+        defer filtered_edges.deinit();
+
+        var kept_count: usize = 0;
+        var filtered_count: usize = 0;
+
+        for (edges) |edge| {
+            // Only keep edges where both source and target blocks exist
+            if (block_ids.contains(edge.source_id) and block_ids.contains(edge.target_id)) {
+                try filtered_edges.append(edge);
+                kept_count += 1;
+            } else {
+                filtered_count += 1;
+            }
+        }
+
+        return filtered_edges.toOwnedSlice();
     }
 
     /// Deduplicate edges during compaction.
