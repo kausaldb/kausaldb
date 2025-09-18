@@ -259,6 +259,14 @@ pub const PropertyChecker = struct {
             }
 
             if (!found) {
+                // Diagnostic: Check if source block exists in storage
+                const source_block_exists = (system.find_block(model_edge.source_id, .simulation_test) catch null) != null;
+                if (!source_block_exists) {
+                    log.err("BLOCK_MISSING: Source block .{any} DOES NOT EXIST in storage", .{model_edge.source_id});
+                } else {
+                    log.err("EDGE_DATA_MISSING: Source block .{any} exists but has no edge data", .{model_edge.source_id});
+                }
+
                 missing_edges += 1;
             }
         }

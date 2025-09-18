@@ -102,7 +102,7 @@ pub const OwnedBlock = struct {
     /// Create owned block from existing block with ownership transfer.
     pub fn take_ownership(block: ContextBlock, new_ownership: BlockOwnership) OwnedBlock {
         if (builtin.mode == .Debug) {
-            log.debug("Taking ownership of block {any} as {s}", .{ block.id, new_ownership.name() });
+            // log.debug("Taking ownership of block {any} as {s}", .{ block.id, new_ownership.name() });
         }
         return OwnedBlock{
             .block = block,

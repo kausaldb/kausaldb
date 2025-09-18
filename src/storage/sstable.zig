@@ -372,6 +372,7 @@ pub const SSTable = struct {
 
     /// Write blocks, tombstones, and edges to SSTable file in sorted order
     pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord, edges: []const GraphEdge) !void {
+        log.warn("SSTable write_blocks: Writing {} blocks, {} tombstones, {} edges to {s}", .{ blocks.len, tombstones.len, edges.len, self.file_path });
         const BlocksType = @TypeOf(blocks);
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
@@ -510,6 +511,7 @@ pub const SSTable = struct {
 
         // Store edge offset before writing edges
         const edge_offset = current_offset;
+        log.warn("SSTable write_blocks: About to write {} edges at offset {}", .{ sorted_edges.len, edge_offset });
 
         // Write edges
         for (sorted_edges) |edge| {

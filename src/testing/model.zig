@@ -783,6 +783,14 @@ pub const ModelState = struct {
             }
 
             if (!found) {
+                // Diagnostic: Check if source block exists in storage
+                const source_block_exists = (storage.find_block(edge.source_id, .simulation_test) catch null) != null;
+                if (!source_block_exists) {
+                    log.err("BLOCK_MISSING: Source block .{any} DOES NOT EXIST in storage", .{edge.source_id});
+                } else {
+                    log.err("EDGE_DATA_MISSING: Source block .{any} exists but has no edge data", .{edge.source_id});
+                }
+
                 graph_metrics.missing_edges += 1;
             } else {
                 graph_metrics.verified_edges += 1;

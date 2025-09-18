@@ -633,6 +633,8 @@ pub const SimulationRunner = struct {
 
     /// Verify system consistency against model state
     pub fn verify_consistency(self: *Self) !void {
+        // Disable fault injection to allow clean verification operations
+        self.sim_vfs.fault_injection.disable_all_faults();
         try self.model.verify_against_system(&self.storage_engine);
     }
 
@@ -747,6 +749,11 @@ pub const SimulationRunner = struct {
     }
 
     /// Verify edge consistency between model and system
+    /// Disable fault injection to allow clean verification operations
+    pub fn disable_fault_injection(self: *Self) void {
+        self.sim_vfs.fault_injection.disable_all_faults();
+    }
+
     pub fn verify_edge_consistency(self: *Self) !void {
         try PropertyChecker.check_bidirectional_consistency(&self.model, &self.storage_engine);
     }

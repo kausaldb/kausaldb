@@ -675,6 +675,9 @@ test "scenario: regression - edge index bidirectional consistency" {
     // Focus on edge operations
     try runner.run(500);
 
+    // Disable fault injection to allow clean verification operations
+    runner.disable_fault_injection();
+
     // Verify bidirectional consistency
     try runner.verify_edge_consistency();
 }

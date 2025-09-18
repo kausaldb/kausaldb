@@ -57,6 +57,7 @@ const ContextBlock = context_block.ContextBlock;
 const GraphEdge = context_block.GraphEdge;
 const ParsedBlock = context_block.ParsedBlock;
 const OwnedBlock = ownership.OwnedBlock;
+const GraphEdgeIndex = graph_edge_index.GraphEdgeIndex;
 const OwnedGraphEdge = graph_edge_index.OwnedGraphEdge;
 const SimulationVFS = simulation_vfs.SimulationVFS;
 const StorageState = state_machines.StorageState;
@@ -118,6 +119,7 @@ const FlushMemtableCommand = struct {
 
         self.storage_engine.memtable_manager.flush_to_sstable(
             &self.storage_engine.sstable_manager,
+            &self.storage_engine.graph_index,
         ) catch |err| {
             error_context.log_storage_error(
                 err,
@@ -186,6 +188,9 @@ pub const StorageEngine = struct {
     config: Config,
     memtable_manager: MemtableManager,
     sstable_manager: SSTableManager,
+    /// Graph edge index for managing relationships between blocks.
+    /// Decoupled from memtable lifecycle to ensure edge persistence across flushes.
+    graph_index: GraphEdgeIndex,
     state: StorageState,
     storage_metrics: StorageMetrics,
     /// Heap-allocated arena for ALL storage subsystem memory allocation.
@@ -283,6 +288,7 @@ pub const StorageEngine = struct {
             .config = storage_config,
             .memtable_manager = undefined, // Initialize after arena coordinator is stable
             .sstable_manager = undefined, // Coordinator must be in final location first
+            .graph_index = undefined, // Initialize after arena coordinator is stable
             .state = .initialized,
             .storage_metrics = StorageMetrics.init(),
             .storage_arena = storage_arena,
@@ -311,6 +317,11 @@ pub const StorageEngine = struct {
             error_context.log_storage_error(err, error_context.file_context("memtable_manager_init", owned_data_dir));
             return err;
         };
+        
+        // Initialize GraphEdgeIndex with backing allocator (not arena-allocated)
+        // This ensures edge persistence across memtable flushes
+        engine.graph_index = GraphEdgeIndex.init(allocator);
+        
         engine.sstable_manager = SSTableManager.init(engine.arena_coordinator, allocator, filesystem, owned_data_dir);
 
         engine.validate_memory_hierarchy();
@@ -370,7 +381,7 @@ pub const StorageEngine = struct {
 
         // Clear submodule structures before arena reset
         self.memtable_manager.block_index.clear();
-        self.memtable_manager.graph_index.clear();
+        // Note: graph_index is now owned by StorageEngine and persists across flushes
 
         // O(1) reset through coordinator - interface remains valid after operation
         self.arena_coordinator.reset();
@@ -403,6 +414,9 @@ pub const StorageEngine = struct {
         // Hierarchical cleanup: Deinit submodules first, then pools, then coordinator arena
         self.memtable_manager.deinit();
         self.sstable_manager.deinit();
+        
+        // Clean up persistent graph index
+        self.graph_index.deinit();
 
         // TEMP: Skip object pool cleanup since pools are commented out
         // Clean up object pools - must be done after submodules that might use pooled objects
@@ -949,7 +963,7 @@ pub const StorageEngine = struct {
             .generation = 0,
         };
 
-        self.memtable_manager.put_tombstone_durable(tombstone_record) catch |err| {
+        self.memtable_manager.put_tombstone_durable(tombstone_record, &self.graph_index) catch |err| {
             error_context.log_storage_error(
                 err,
                 error_context.block_context("put_tombstone_durable", block_id),
@@ -1018,10 +1032,20 @@ pub const StorageEngine = struct {
             .{},
         );
 
-        self.memtable_manager.put_edge_durable(edge) catch |err| {
+        // Write edge to WAL for durability (memtable_manager owns WAL)
+        self.memtable_manager.put_edge_wal_only(edge) catch |err| {
             error_context.log_storage_error(
                 err,
-                error_context.block_context("put_edge_durable", edge.source_id),
+                error_context.block_context("put_edge_wal", edge.source_id),
+            );
+            return err;
+        };
+
+        // Add edge to persistent graph index (StorageEngine now owns this)
+        self.graph_index.put_edge(edge) catch |err| {
+            error_context.log_storage_error(
+                err,
+                error_context.block_context("put_edge_index", edge.source_id),
             );
             return err;
         };
@@ -1069,7 +1093,7 @@ pub const StorageEngine = struct {
         return MemoryUsage{
             .total_bytes = self.memtable_manager.block_index.memory_used,
             .block_count = @as(u32, @intCast(self.memtable_manager.block_index.blocks.count())),
-            .edge_count = self.memtable_manager.graph_index.edge_count(),
+            .edge_count = self.graph_index.edge_count(),
         };
     }
 
@@ -1106,24 +1130,24 @@ pub const StorageEngine = struct {
             .{},
         );
 
-        // First check memtable (recent writes have precedence)
-        const memtable_edges = self.memtable_manager.find_outgoing_edges(source_id);
+        // First check persistent graph index (in-memory edges)
+        const in_memory_edges = self.graph_index.find_outgoing_edges_with_ownership(source_id, .storage_engine) orelse &[_]OwnedGraphEdge{};
 
-        if (memtable_edges.len > 0) {
+        if (in_memory_edges.len > 0) {
             fatal_assert(
-                @intFromPtr(memtable_edges.ptr) != 0,
-                "MemtableManager returned null edges pointer with non-zero length - heap corruption detected",
+                @intFromPtr(in_memory_edges.ptr) != 0,
+                "Graph index returned null edges pointer with non-zero length - heap corruption detected",
                 .{},
             );
             fatal_assert(
-                std.mem.eql(u8, &memtable_edges[0].edge.source_id.bytes, &source_id.bytes),
+                std.mem.eql(u8, &in_memory_edges[0].edge.source_id.bytes, &source_id.bytes),
                 "First edge has wrong source_id - index corruption detected",
                 .{},
             );
-            return memtable_edges;
+            return in_memory_edges;
         }
 
-        // Check SSTables if not found in memtable
+        // Check SSTables if not found in in-memory graph index
         const sstable_edges = self.sstable_manager.find_outgoing_edges_in_sstables(
             source_id,
             self.backing_allocator,

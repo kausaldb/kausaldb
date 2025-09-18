@@ -820,9 +820,14 @@ pub const SimulationVFS = struct {
 
         const handle = try self.create_file_storage(path, file_data, .read_write);
 
-        const path_copy = try self.allocator.dupe(u8, path);
+        const path_copy = self.allocator.dupe(u8, path) catch return VFSError.OutOfMemory;
 
-        try self.files.put(path_copy, handle);
+        self.files.put(path_copy, handle) catch |err| {
+            self.allocator.free(path_copy);
+            return switch (err) {
+                error.OutOfMemory => VFSError.OutOfMemory,
+            };
+        };
 
         return VFile{
             .impl = .{ .simulation = .{

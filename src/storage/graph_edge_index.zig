@@ -126,7 +126,7 @@ pub const GraphEdgeIndex = struct {
         assert_mod.assert_fmt(target_non_zero > 0, "Edge target_id cannot be all zeros", .{});
         assert_mod.assert_fmt(!std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes), "Edge cannot be self-referential", .{});
 
-        const owned_edge = OwnedGraphEdge.init(edge, .memtable_manager);
+        const owned_edge = OwnedGraphEdge.init(edge, .storage_engine);
 
         var outgoing_result = try self.outgoing_edges.getOrPut(edge.source_id);
         if (!outgoing_result.found_existing) {
@@ -307,9 +307,12 @@ pub const GraphEdgeIndex = struct {
         var total: u32 = 0;
         var iterator = self.outgoing_edges.iterator();
         while (iterator.next()) |entry| {
-            const count = @as(u32, @intCast(entry.value_ptr.items.len));
-            assert_mod.assert_fmt(count < 1000000, "Suspicious edge count for single block: {}", .{count});
-            total += count;
+            // Use the same logic as collect_edges() to ensure consistency
+            if (entry.value_ptr.items.len > 0) {
+                const count = @as(u32, @intCast(entry.value_ptr.items.len));
+                assert_mod.assert_fmt(count < 1000000, "Suspicious edge count for single block: {}", .{count});
+                total += count;
+            }
         }
         return total;
     }
@@ -341,23 +344,21 @@ pub const GraphEdgeIndex = struct {
     pub fn collect_edges(self: *const GraphEdgeIndex, allocator: std.mem.Allocator) ![]const GraphEdge {
         assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
 
-        const total_edges = self.edge_count();
-        if (total_edges == 0) {
-            return &[_]GraphEdge{};
-        }
-
+        // Use direct iteration instead of edge_count() to avoid any counting bugs
         var edges = std.array_list.Managed(GraphEdge).init(allocator);
         defer edges.deinit();
-        try edges.ensureTotalCapacity(total_edges);
 
         // Iterate through outgoing edges only to avoid duplicates
         var iterator = self.outgoing_edges.iterator();
         while (iterator.next()) |entry| {
-            for (entry.value_ptr.items) |owned_edge| {
-                try edges.append(owned_edge.edge);
+            // Ensure the edge list exists and has items
+            if (entry.value_ptr.items.len > 0) {
+                for (entry.value_ptr.items) |owned_edge| {
+                    try edges.append(owned_edge.edge);
+                }
             }
         }
-
+        
         return edges.toOwnedSlice();
     }
 };

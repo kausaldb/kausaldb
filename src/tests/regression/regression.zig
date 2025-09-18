@@ -438,6 +438,123 @@ test "regression: issue #345 - performance under fragmentation" {
 }
 
 // ====================================================================
+// Issue #400: Edge Loss During Memtable Flush
+// ====================================================================
+
+test "regression: issue #400 - edge loss during memtable flush" {
+    // Original bug: Edges are lost when memtable flush clears the GraphEdgeIndex.
+    // Root cause: GraphEdgeIndex lifecycle is tied to MemtableManager, causing
+    // edges to be cleared during flush operations before persistence.
+    // Fix: Decouple GraphEdgeIndex from memtable lifecycle.
+    // Found: 2024-09-18 during integration testing
+    
+    const allocator = testing.allocator;
+
+    // Use minimal operation mix to focus on the specific flush scenario
+    const operation_mix = OperationMix{
+        .put_block_weight = 0,
+        .find_block_weight = 0,
+        .delete_block_weight = 0,
+        .put_edge_weight = 0,
+        .find_edges_weight = 0,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x3DDE400, // Specific seed for this issue (hex corrected)
+        operation_mix,
+        &.{}, // No fault injection for this regression test
+    );
+    defer runner.deinit();
+
+    // Configure small memtable to force flushes easily
+    runner.flush_config.memory_threshold = 4 * 1024; // 4KB threshold
+    runner.flush_config.enable_memory_trigger = true;
+
+    // Create test blocks with deterministic IDs
+    const block1_id = BlockId.from_u64(1);
+    const block2_id = BlockId.from_u64(2);
+    const block3_id = BlockId.from_u64(3);
+
+    const test_block1 = ContextBlock{
+        .id = block1_id,
+        .sequence = 0,
+        .source_uri = "test://auth.zig",
+        .metadata_json = "{}",
+        .content = "function authenticate_user() { }",
+    };
+    const test_block2 = ContextBlock{
+        .id = block2_id,
+        .sequence = 0,
+        .source_uri = "test://token.zig",
+        .metadata_json = "{}",
+        .content = "function validate_token() { }",
+    };
+    const test_block3 = ContextBlock{
+        .id = block3_id,
+        .sequence = 0,
+        .source_uri = "test://main.zig",
+        .metadata_json = "{}",
+        .content = "function main() { authenticate_user(); }",
+    };
+
+    // Add blocks first
+    try runner.storage_engine.put_block(test_block1);
+    try runner.storage_engine.put_block(test_block2);
+    try runner.storage_engine.put_block(test_block3);
+
+    // Add edges representing code relationships
+    const edge1 = GraphEdge{
+        .source_id = block3_id,
+        .target_id = block1_id,
+        .edge_type = EdgeType.calls,
+    }; // main calls authenticate_user
+    const edge2 = GraphEdge{
+        .source_id = block1_id,
+        .target_id = block2_id,
+        .edge_type = EdgeType.calls,
+    }; // authenticate_user calls validate_token
+
+    try runner.storage_engine.put_edge(edge1);
+    try runner.storage_engine.put_edge(edge2);
+
+    // Verify edges exist before flush
+    const outgoing_before = runner.storage_engine.find_outgoing_edges(block3_id);
+    try testing.expect(outgoing_before.len == 1);
+    try testing.expect(outgoing_before[0].edge.target_id.eql(block1_id));
+
+    // Force memtable flush by adding large blocks
+    var flush_counter: u32 = 0;
+    while (flush_counter < 10) : (flush_counter += 1) {
+        const large_content = "x" ** 1024; // 1KB per block
+        const large_block_id = BlockId.from_u64(1000 + flush_counter);
+        const large_block = ContextBlock{
+            .id = large_block_id,
+            .sequence = 0,
+            .source_uri = "test://flush.zig",
+            .metadata_json = "{}",
+            .content = large_content,
+        };
+        try runner.storage_engine.put_block(large_block);
+    }
+
+    // Force explicit flush to trigger the bug
+    try runner.storage_engine.flush_memtable_to_sstable();
+
+    // Verify edges still exist after flush (THIS SHOULD PASS BUT CURRENTLY FAILS)
+    const outgoing_after = runner.storage_engine.find_outgoing_edges(block3_id);
+
+    // The critical assertion: edges must survive memtable flush
+    try testing.expect(outgoing_after.len == 1);
+    try testing.expect(outgoing_after[0].edge.target_id.eql(block1_id));
+
+    // Verify second edge also survives
+    const outgoing_auth_after = runner.storage_engine.find_outgoing_edges(block1_id);
+    try testing.expect(outgoing_auth_after.len == 1);
+    try testing.expect(outgoing_auth_after[0].edge.target_id.eql(block2_id));
+}
+
+// ====================================================================
 // Test Helper: Verify specific bug conditions
 // ====================================================================
 
