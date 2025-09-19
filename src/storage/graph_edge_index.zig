@@ -358,7 +358,7 @@ pub const GraphEdgeIndex = struct {
                 }
             }
         }
-        
+
         return edges.toOwnedSlice();
     }
 };

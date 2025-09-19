@@ -473,7 +473,6 @@ pub const PropertyChecker = struct {
     // correctness that can be formally verified.
     // ========================================================================
 
-
     /// Model-Based K-Hop Collection: Breadth-First Traversal Through Model State
     /// Implements the mathematical definition of k-hop reachability using model edges
     fn collect_k_hop_neighbors_model(model: *ModelState, source: BlockId, k: u32, neighbors: *std.AutoHashMap(BlockId, void)) !void {

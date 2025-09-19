@@ -128,6 +128,10 @@ const FlushMemtableCommand = struct {
             return err;
         };
 
+        // Reset storage arena to reclaim memory after successful flush
+        // This implements the "Memory allocated from this arena is freed on next memtable flush" contract
+        self.storage_engine.reset_storage_memory();
+
         // Execute compaction if needed using command pattern
         // Handle compaction failures gracefully - they shouldn't block flush operations
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
@@ -388,11 +392,8 @@ pub const StorageEngine = struct {
     pub fn reset_storage_memory(self: *StorageEngine) void {
         concurrency.assert_main_thread();
 
-        // Clear submodule structures before arena reset
-        self.memtable_manager.block_index.clear();
-        // Note: graph_index is now owned by StorageEngine and persists across flushes
-
         // O(1) reset through coordinator - interface remains valid after operation
+        // Note: memtable should already be cleared by flush_to_sstable before this is called
         self.arena_coordinator.reset();
 
         self.validate_memory_hierarchy();
@@ -1290,8 +1291,8 @@ pub const StorageEngine = struct {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
-                // Clone with storage_engine ownership using backing allocator to avoid arena accumulation
-                const cloned_block = try owned_block.clone_with_ownership(self.backing_allocator, .storage_engine, null);
+                // Clone with storage_engine ownership using iteration arena (cleaned up when iterator is destroyed)
+                const cloned_block = try owned_block.clone_with_ownership(self.iteration_arena.allocator(), .storage_engine, null);
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
                 self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
                 return cloned_block;
