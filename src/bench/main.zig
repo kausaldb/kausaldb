@@ -7,6 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const internal = @import("internal");
+const e2e_bench = @import("e2e_workload_bench.zig");
 
 const Timer = std.time.Timer;
 const Allocator = std.mem.Allocator;
@@ -17,6 +18,7 @@ const Component = enum {
     query,
     ingestion,
     core,
+    e2e,
     all,
 
     fn from_string(str: []const u8) ?Component {
@@ -271,18 +273,24 @@ pub fn main() !void {
     std.debug.print("Component: {s}\n", .{@tagName(component)});
     std.debug.print("Iterations: {}, Warmup: {}\n\n", .{ config.iterations, config.warmup_iterations });
 
-    // Component dispatch - storage only for now
+    // Component dispatch
     switch (component) {
         .storage => {
             const storage = @import("storage.zig");
             try storage.run_benchmarks(&harness);
         },
+        .e2e => {
+            std.debug.print("Running realistic end-to-end workload benchmark...\n", .{});
+            try e2e_bench.run_e2e_benchmark(allocator);
+            return; // E2E benchmark handles its own output
+        },
         .query, .ingestion, .core => {
             std.debug.print("Component not implemented yet\n", .{});
         },
         .all => {
-            const storage = @import("storage.zig");
-            try storage.run_benchmarks(&harness);
+            std.debug.print("Running realistic end-to-end workload benchmark...\n", .{});
+            try e2e_bench.run_e2e_benchmark(allocator);
+            return; // E2E benchmark handles its own output
         },
     }
 

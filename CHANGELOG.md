@@ -10,13 +10,21 @@ Initial release. Core storage and query engine.
 - Graph traversal with typed edges
 - Arena coordinator memory pattern
 - Deterministic simulation testing
-- Binary protocol server
 
 ### Performance
 
-- 30µs block writes (33K ops/sec) optimized benchmark
-- 33ns block reads (29.9M ops/sec) from memtable
-- 56ns single queries (17.9M ops/sec)
+Realistic end-to-end benchmark results (Apple M1, macOS ARM64, ReleaseFast):
+
+- **Ingestion Pipeline** (`link` + `sync`): P95 69ms
+- **Find Function Queries**: P95 429ms
+- **Show File Queries**: P95 505ms
+- **Trace Call Chain Queries**: P95 1,107ms
+
+Performance level: **ACCEPTABLE** for development tooling (< 1s P95 for most operations).
+Run `./zig/zig build bench -- e2e` to reproduce on your system.
+
+Additional optimizations:
+
 - O(1) memory cleanup through arena coordinator
 
 ### Known Limitations

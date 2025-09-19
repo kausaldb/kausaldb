@@ -31,7 +31,7 @@ kausaldb find function "authenticate_user" in myproject
 # What calls this function?
 kausaldb show callers "authenticate_user" in myproject
 
-# Trace deep call chains with microsecond-level performance
+# Trace deep call chains
 kausaldb trace callees "StorageEngine.put_block" --depth 3
 
 [+] MemtableManager.put_block_durable
@@ -40,7 +40,7 @@ kausaldb trace callees "StorageEngine.put_block" --depth 3
 [+] GraphEdgeIndex.put_edge
 └── ArenaAllocator.alloc
     └── HashMap.put
-...and 47 other callees in 0.06µs
+...and 47 other callees
 ```
 
 Pattern-based parsing extracts semantic structure from source code, storing relationships (`imports`, `calls`, `defines`, `references`) for fast graph traversal.
@@ -50,6 +50,7 @@ Pattern-based parsing extracts semantic structure from source code, storing rela
 Built from scratch in Zig with **zero-cost abstractions**, no hidden allocations, O(1) memory cleanup and no data races by design.
 
 **LSM-tree storage** optimized for write-heavy ingestion:
+
 - Write-Ahead Log for durability
 - In-memory indexes for fast reads
 - Size-tiered compaction
@@ -60,9 +61,31 @@ Built from scratch in Zig with **zero-cost abstractions**, no hidden allocations
 
 **Correctness over performance**. Property-based testing with deterministic simulation finds edge cases traditional unit tests miss.
 
+## Performance
+
+Realistic end-to-end benchmark results measuring complete user workflows on Apple M1 (macOS ARM64, ReleaseFast build):
+
+**Test Methodology:**
+
+- Workload: 25-file codebase with 6 functions per file and realistic cross-module dependencies
+- Operations: 50 iterations each of `find`, `show`, and `trace` commands
+- Metrics: P95 latencies (95th percentile) representing real-world performance expectations
+
+**Results:**
+
+- **Ingestion Pipeline** (`link` + `sync`): P95 69ms
+- **Find Function Queries**: P95 429ms
+- **Show File Queries**: P95 505ms
+- **Trace Call Chain Queries**: P95 1,107ms
+
+Current performance level: **ACCEPTABLE** for development tooling (< 1s P95 for most operations).
+
+_Run `./zig/zig build bench -- e2e` to reproduce these benchmarks on your system._
+
 **Simplicity over features**. Arena memory management, explicit control flow, and zero-cost abstractions keep the design clean and maintainable.
 
 **Every test failure is reproducible**:
+
 ```bash
 # Same seed, same destruction, same recovery. Zero flakes.
 ./zig/zig build test -Dseed=0xDEADBEEF

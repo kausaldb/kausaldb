@@ -66,12 +66,13 @@ fn bench_block_write(
     const iterations = harness.config.iterations;
 
     // Generate test blocks
-    var blocks = try std.ArrayList(ContextBlock).initCapacity(allocator, iterations);
-    defer blocks.deinit(allocator);
+    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    defer blocks.deinit();
+    try blocks.ensureTotalCapacity(iterations);
 
     for (0..iterations) |i| {
         const block = generate_test_block(allocator, i);
-        try blocks.append(allocator, block);
+        try blocks.append(block);
     }
 
     // Warmup phase
@@ -106,12 +107,13 @@ fn bench_block_read_hot(
     const iterations = harness.config.iterations;
 
     // Insert blocks into memtable
-    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations);
-    defer block_ids.deinit(allocator);
+    var block_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer block_ids.deinit();
+    try block_ids.ensureTotalCapacity(iterations);
 
     for (0..iterations) |i| {
         const block = generate_test_block(allocator, i);
-        try block_ids.append(allocator, block.id);
+        try block_ids.append(block.id);
         try storage.put_block(block);
     }
 
@@ -122,15 +124,16 @@ fn bench_block_read_hot(
     }
 
     // Measurement phase
-    var samples = try std.ArrayList(u64).initCapacity(allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (block_ids.items) |id| {
         const start = timer.read();
         _ = try storage.find_block(id, BlockOwnership.simulation_test);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_block_read_hot", samples.items);
@@ -146,13 +149,13 @@ fn bench_block_read_cold(
     const iterations = @min(100, harness.config.iterations); // Limit for SSTable operations
 
     // Fill and flush memtable to create SSTable
-    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations);
-    defer block_ids.deinit(allocator);
+    var block_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer block_ids.deinit();
 
     for (0..1000) |i| { // Fill memtable
         const block = generate_test_block(allocator, i);
         if (i < iterations) {
-            try block_ids.append(allocator, block.id);
+            try block_ids.append(block.id);
         }
         try storage.put_block(block);
     }
@@ -161,15 +164,16 @@ fn bench_block_read_cold(
     try storage.flush_memtable_to_sstable();
 
     // Measurement phase - reads should now come from SSTable
-    var samples = try std.ArrayList(u64).initCapacity(allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (block_ids.items) |id| {
         const start = timer.read();
         _ = try storage.find_block(id, BlockOwnership.simulation_test);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_block_read_cold", samples.items);
@@ -185,24 +189,25 @@ fn bench_wal_append(
     const iterations = harness.config.iterations;
 
     // Generate blocks for WAL operations
-    var blocks = try std.ArrayList(ContextBlock).initCapacity(allocator, iterations);
-    defer blocks.deinit(allocator);
+    var blocks = std.array_list.Managed(ContextBlock).init(allocator);
+    defer blocks.deinit();
 
     for (0..iterations) |i| {
         const block = generate_test_block(allocator, i);
-        try blocks.append(allocator, block);
+        try blocks.append(block);
     }
 
     // Measurement phase - WAL append happens internally in put_block
-    var samples = try std.ArrayList(u64).initCapacity(allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (blocks.items) |block| {
         const start = timer.read();
         try storage.put_block(block);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_wal_append", samples.items);
@@ -217,8 +222,9 @@ fn bench_memtable_flush(
 ) !void {
     const flush_iterations = @min(10, harness.config.iterations / 100); // Limit flush count
 
-    var samples = try std.ArrayList(u64).initCapacity(allocator, flush_iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(flush_iterations);
 
     var timer = try std.time.Timer.start();
 
@@ -233,7 +239,7 @@ fn bench_memtable_flush(
         const start = timer.read();
         try storage.flush_memtable_to_sstable();
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_memtable_flush", samples.items);
@@ -249,18 +255,20 @@ fn bench_edge_insert(
     const iterations = harness.config.iterations;
 
     // First create blocks that edges will reference (referential integrity requirement)
-    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations * 2);
-    defer block_ids.deinit(allocator);
+    var block_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer block_ids.deinit();
+    try block_ids.ensureTotalCapacity(iterations * 2);
 
     for (0..iterations * 2) |i| {
         const block = generate_test_block(allocator, i);
-        try block_ids.append(allocator, block.id);
+        try block_ids.append(block.id);
         try storage.put_block(block);
     }
 
     // Generate test edges using existing block IDs
-    var edges = try std.ArrayList(GraphEdge).initCapacity(allocator, iterations);
-    defer edges.deinit(allocator);
+    var edges = std.array_list.Managed(GraphEdge).init(allocator);
+    defer edges.deinit();
+    try edges.ensureTotalCapacity(iterations);
 
     for (0..iterations) |i| {
         const source_idx = i * 2;
@@ -270,7 +278,7 @@ fn bench_edge_insert(
             .target_id = block_ids.items[target_idx],
             .edge_type = EdgeType.calls,
         };
-        try edges.append(allocator, edge);
+        try edges.append(edge);
     }
 
     // Warmup phase
@@ -280,15 +288,16 @@ fn bench_edge_insert(
     }
 
     // Measurement phase
-    var samples = try std.ArrayList(u64).initCapacity(allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (edges.items) |edge| {
         const start = timer.read();
         try storage.put_edge(edge);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_edge_insert", samples.items);
@@ -304,18 +313,20 @@ fn bench_edge_lookup(
     const iterations = harness.config.iterations;
 
     // First create blocks that edges will reference (referential integrity requirement)
-    var block_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations * 2);
-    defer block_ids.deinit(allocator);
+    var block_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer block_ids.deinit();
+    try block_ids.ensureTotalCapacity(iterations * 2);
 
     for (0..iterations * 2) |i| {
         const block = generate_test_block(allocator, i);
-        try block_ids.append(allocator, block.id);
+        try block_ids.append(block.id);
         try storage.put_block(block);
     }
 
     // Insert edges for lookup
-    var source_ids = try std.ArrayList(BlockId).initCapacity(allocator, iterations);
-    defer source_ids.deinit(allocator);
+    var source_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer source_ids.deinit();
+    try source_ids.ensureTotalCapacity(iterations);
 
     for (0..iterations) |i| {
         const source_idx = i * 2;
@@ -325,20 +336,21 @@ fn bench_edge_lookup(
             .target_id = block_ids.items[target_idx],
             .edge_type = EdgeType.calls,
         };
-        try source_ids.append(allocator, edge.source_id);
+        try source_ids.append(edge.source_id);
         try storage.put_edge(edge);
     }
 
     // Measurement phase
-    var samples = try std.ArrayList(u64).initCapacity(allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (source_ids.items) |source_id| {
         const start = timer.read();
         _ = storage.find_outgoing_edges(source_id);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_edge_lookup", samples.items);
@@ -359,12 +371,13 @@ fn bench_graph_traversal(
 
     // Create nodes
     var root_id: ?BlockId = null;
-    var prev_level_ids = try std.ArrayList(BlockId).initCapacity(harness.allocator, nodes_per_level);
-    defer prev_level_ids.deinit(harness.allocator);
+    var prev_level_ids = std.array_list.Managed(BlockId).init(allocator);
+    defer prev_level_ids.deinit();
 
     for (0..depth) |level| {
-        var current_level_ids = try std.ArrayList(BlockId).initCapacity(harness.allocator, nodes_per_level);
-        defer current_level_ids.deinit(harness.allocator);
+        var current_level_ids = std.array_list.Managed(BlockId).init(allocator);
+        defer current_level_ids.deinit();
+        try current_level_ids.ensureTotalCapacity(nodes_per_level);
 
         for (0..nodes_per_level) |node| {
             // Create actual block to satisfy referential integrity
@@ -373,7 +386,7 @@ fn bench_graph_traversal(
             const block_id = block.id;
             try storage.put_block(block);
 
-            try current_level_ids.append(harness.allocator, block_id);
+            try current_level_ids.append(block_id);
 
             if (level == 0 and node == 0) {
                 root_id = block_id;
@@ -394,19 +407,20 @@ fn bench_graph_traversal(
 
         // Swap levels
         prev_level_ids.clearRetainingCapacity();
-        try prev_level_ids.appendSlice(harness.allocator, current_level_ids.items);
+        try prev_level_ids.appendSlice(current_level_ids.items);
     }
 
     // Measurement phase - traverse from root
-    var samples = try std.ArrayList(u64).initCapacity(harness.allocator, iterations);
-    defer samples.deinit(allocator);
+    var samples = std.array_list.Managed(u64).init(allocator);
+    defer samples.deinit();
+    try samples.ensureTotalCapacity(iterations);
 
     var timer = try std.time.Timer.start();
     for (0..iterations) |_| {
         const start = timer.read();
         _ = storage.find_outgoing_edges(root_id.?);
         const elapsed = timer.read() - start;
-        try samples.append(allocator, elapsed);
+        try samples.append(elapsed);
     }
 
     const result = calculate_benchmark_result("storage_graph_traversal", samples.items);
