@@ -253,7 +253,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           ./zig/zig build fuzz \
-            -Dfuzz-iterations=100000 \
+            -Dfuzz-iterations=10000 \
             -Dfuzz-corpus=fuzz-corpus
 
       - name: Save Corpus Statistics

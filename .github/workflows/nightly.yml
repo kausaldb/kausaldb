@@ -55,10 +55,10 @@ jobs:
         run: |
           echo "========================================="
           echo "Deep fuzzing ${{ matrix.target }} target"
-          echo "Running 50,000 iterations"
+          echo "Running 100,000 iterations"
           echo "========================================="
           ./zig/zig build fuzz \
-            -Dfuzz-iterations=50000 \
+            -Dfuzz-iterations=100000 \
             -Dfuzz-corpus=fuzz-corpus-${{ matrix.target }} \
             -- ${{ matrix.target }}
 
