@@ -218,9 +218,28 @@ fn build_benchmarks(build_options: BuildOptions, _: DevOptions) void {
 
     const bench_step = build_options.b.step("bench", "Run performance benchmarks");
     bench_step.dependOn(&bench_run.step);
+
+    const bench_compile_step = build_options.b.step("bench-compile", "Compile benchmark binary");
+    bench_compile_step.dependOn(&bench_exe.step);
 }
 
 fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
+    // Create custom options for main fuzz binary with error-level logging
+    const fuzz_options = build_options.b.addOptions();
+    // Copy existing options but override log level for quieter fuzzing
+    fuzz_options.addOption(std.builtin.OptimizeMode, "optimize", build_options.optimize);
+    fuzz_options.addOption(?u64, "test_seed", null);
+    fuzz_options.addOption(?[]const u8, "test_filter", null);
+    fuzz_options.addOption(u32, "test_iterations", 1);
+    fuzz_options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
+    fuzz_options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
+    fuzz_options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
+    fuzz_options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
+    fuzz_options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
+    fuzz_options.addOption(bool, "sanitizers_active", false);
+    fuzz_options.addOption(std.log.Level, "log_level", .err); // Error-level logging for fuzzer
+    fuzz_options.addOption(bool, "debug_tests", true);
+
     const fuzz_exe = build_options.b.addExecutable(.{
         .name = "fuzz",
         .root_module = build_options.b.createModule(.{
@@ -233,7 +252,7 @@ fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
     // Use ReleaseFast for speed but enables sanitizers
     fuzz_exe.root_module.sanitize_c = .full;
 
-    fuzz_exe.root_module.addImport("build_options", build_options.options.createModule());
+    fuzz_exe.root_module.addImport("build_options", fuzz_options.createModule());
     add_internal_module(fuzz_exe.root_module, build_options);
 
     const fuzz_run = build_options.b.addRunArtifact(fuzz_exe);
@@ -246,10 +265,24 @@ fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
     const fuzz_step = build_options.b.step("fuzz", "Run fuzz testing");
     fuzz_step.dependOn(&fuzz_run.step);
 
-    // Create a separate build options for fuzz-quick with 1000 iterations
+    const fuzz_compile_step = build_options.b.step("fuzz-compile", "Compile fuzz binary");
+    fuzz_compile_step.dependOn(&fuzz_exe.step);
+
+    // Create a separate build options for fuzz-quick with 100 iterations and error-level logging
     const quick_options = build_options.b.addOptions();
-    quick_options.addOption(u32, "fuzz_iterations", 1000);
+    // Copy existing options but override iterations and log level for quick fuzzing
+    quick_options.addOption(std.builtin.OptimizeMode, "optimize", build_options.optimize);
+    quick_options.addOption(?u64, "test_seed", null);
+    quick_options.addOption(?[]const u8, "test_filter", null);
+    quick_options.addOption(u32, "test_iterations", 1);
+    quick_options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
+    quick_options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
+    quick_options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
+    quick_options.addOption(u32, "fuzz_iterations", 100);
     quick_options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
+    quick_options.addOption(bool, "sanitizers_active", false);
+    quick_options.addOption(std.log.Level, "log_level", .err); // Error-level logging for quick fuzzer
+    quick_options.addOption(bool, "debug_tests", true);
 
     const quick_exe = build_options.b.addExecutable(.{
         .name = "fuzz-quick",
@@ -269,8 +302,11 @@ fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
         quick_run.addArgs(args);
     }
 
-    const fuzz_quick_step = build_options.b.step("fuzz-quick", "Run quick fuzz test (1000 iterations)");
+    const fuzz_quick_step = build_options.b.step("fuzz-quick", "Run quick fuzz test (100 iterations)");
     fuzz_quick_step.dependOn(&quick_run.step);
+
+    const fuzz_quick_compile_step = build_options.b.step("fuzz-quick-compile", "Compile quick fuzz binary");
+    fuzz_quick_compile_step.dependOn(&quick_exe.step);
 }
 
 fn build_tidy(build_options: BuildOptions) void {

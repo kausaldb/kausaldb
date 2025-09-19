@@ -10,6 +10,7 @@ CLAUDE.md
 TODO.md
 performance-baseline.json
 fuzz_reports/
+fuzz-corpus/
 .fuzzing_monitoring
 
 # Data directories (runtime generated)
