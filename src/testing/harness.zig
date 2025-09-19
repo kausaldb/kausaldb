@@ -693,6 +693,13 @@ pub const SimulationRunner = struct {
         var total_content_size: u64 = 0;
 
         while (try iterator.next()) |block| {
+            // Ensure block memory is freed after use to prevent memory leaks
+            defer {
+                self.allocator.free(block.block.source_uri);
+                self.allocator.free(block.block.content);
+                self.allocator.free(block.block.metadata_json);
+            }
+            
             // Validate block structure
             if (block.block.content.len == 0) {
                 fatal_assert(false, "Block {} has empty content during full scan", .{block.block.id});

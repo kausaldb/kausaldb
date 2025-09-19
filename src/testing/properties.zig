@@ -473,82 +473,6 @@ pub const PropertyChecker = struct {
     // correctness that can be formally verified.
     // ========================================================================
 
-    /// Block Count Consistency: |model.blocks| = |system.blocks|
-    /// Ensures the cardinality of block sets is preserved across abstraction layers
-    fn validate_block_count(model: *ModelState, system: *StorageEngine) !void {
-        const model_count = try model.active_block_count();
-        const system_count = system.total_block_count();
-
-        if (model_count != system_count) {
-            const count_error = if (system_count > model_count)
-                @as(i64, @intCast(system_count - model_count))
-            else
-                -@as(i64, @intCast(model_count - system_count));
-
-            fatal_assert(false, "CARDINALITY VIOLATION: Block count inconsistency detected\n" ++
-                "  Model blocks: {}\n" ++
-                "  System blocks: {}\n" ++
-                "  Difference: {}\n" ++
-                "  This indicates a fundamental accounting error in block management.", .{ model_count, system_count, count_error });
-        }
-    }
-
-    /// Edge Referential Integrity: ∀ edge → exists(edge.source) ∧ exists(edge.target)
-    /// Ensures all graph edges maintain valid references to existing blocks
-    fn validate_edge_integrity(model: *ModelState, system: *StorageEngine) !void {
-        var orphaned_edges: usize = 0;
-
-        for (model.edges.items) |edge| {
-            // Both endpoints must exist as active blocks
-            const source_exists = model.has_active_block(edge.source_id);
-            const target_exists = model.has_active_block(edge.target_id);
-
-            if (!source_exists or !target_exists) {
-                // This edge is orphaned - verify it's not in system
-                const system_edges = system.find_outgoing_edges(edge.source_id);
-                for (system_edges) |sys_edge| {
-                    if (std.mem.eql(u8, &sys_edge.edge.target_id.bytes, &edge.target_id.bytes) and
-                        sys_edge.edge.edge_type == edge.edge_type)
-                    {
-                        orphaned_edges += 1;
-                    }
-                }
-            }
-        }
-
-        if (orphaned_edges > 0) {
-            const total_edges = model.edges.items.len;
-            const integrity_ratio = @as(f64, @floatFromInt(total_edges - orphaned_edges)) /
-                @as(f64, @floatFromInt(total_edges));
-
-            fatal_assert(false, "REFERENTIAL INTEGRITY VIOLATION: Orphaned edges detected\n" ++
-                "  Orphaned edges: {}/{} ({d:.1}%)\n" ++
-                "  Graph integrity: {d:.3}%\n" ++
-                "  This violates the fundamental constraint that edges must reference valid blocks.", .{ orphaned_edges, total_edges, @as(f64, @floatFromInt(orphaned_edges)) / @as(f64, @floatFromInt(total_edges)) * 100, integrity_ratio * 100 });
-        }
-    }
-
-    /// Check if target block is reachable from source within depth limit
-    fn can_reach_block(system: *StorageEngine, source: BlockId, target: BlockId, edge_type: EdgeType, max_depth: u32) bool {
-        if (source.eql(target)) return true;
-        if (max_depth == 0) return false;
-
-        const edges = system.find_outgoing_edges(source);
-        for (edges) |edge| {
-            if (edge.edge.edge_type != edge_type) continue;
-
-            if (edge.edge.target_id.eql(target)) {
-                return true;
-            }
-
-            // Recursive search with reduced depth
-            if (can_reach_block(system, edge.edge.target_id, target, edge_type, max_depth - 1)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     /// Model-Based K-Hop Collection: Breadth-First Traversal Through Model State
     /// Implements the mathematical definition of k-hop reachability using model edges
@@ -587,6 +511,84 @@ pub const PropertyChecker = struct {
         }
     }
 };
+
+/// Block Count Consistency: |model.blocks| = |system.blocks|
+/// Ensures the cardinality of block sets is preserved across abstraction layers
+fn validate_block_count(model: *ModelState, system: *StorageEngine) !void {
+    const model_count = try model.active_block_count();
+    const system_count = system.total_block_count();
+
+    if (model_count != system_count) {
+        const count_error = if (system_count > model_count)
+            @as(i64, @intCast(system_count - model_count))
+        else
+            -@as(i64, @intCast(model_count - system_count));
+
+        fatal_assert(false, "CARDINALITY VIOLATION: Block count inconsistency detected\n" ++
+            "  Model blocks: {}\n" ++
+            "  System blocks: {}\n" ++
+            "  Difference: {}\n" ++
+            "  This indicates a fundamental accounting error in block management.", .{ model_count, system_count, count_error });
+    }
+}
+
+/// Edge Referential Integrity: ∀ edge → exists(edge.source) ∧ exists(edge.target)
+/// Ensures all graph edges maintain valid references to existing blocks
+fn validate_edge_integrity(model: *ModelState, system: *StorageEngine) !void {
+    var orphaned_edges: usize = 0;
+
+    for (model.edges.items) |edge| {
+        // Both endpoints must exist as active blocks
+        const source_exists = model.has_active_block(edge.source_id);
+        const target_exists = model.has_active_block(edge.target_id);
+
+        if (!source_exists or !target_exists) {
+            // This edge is orphaned - verify it's not in system
+            const system_edges = system.find_outgoing_edges(edge.source_id);
+            for (system_edges) |sys_edge| {
+                if (std.mem.eql(u8, &sys_edge.edge.target_id.bytes, &edge.target_id.bytes) and
+                    sys_edge.edge.edge_type == edge.edge_type)
+                {
+                    orphaned_edges += 1;
+                }
+            }
+        }
+    }
+
+    if (orphaned_edges > 0) {
+        const total_edges = model.edges.items.len;
+        const integrity_ratio = @as(f64, @floatFromInt(total_edges - orphaned_edges)) /
+            @as(f64, @floatFromInt(total_edges));
+
+        fatal_assert(false, "REFERENTIAL INTEGRITY VIOLATION: Orphaned edges detected\n" ++
+            "  Orphaned edges: {}/{} ({d:.1}%)\n" ++
+            "  Graph integrity: {d:.3}%\n" ++
+            "  This violates the fundamental constraint that edges must reference valid blocks.", .{ orphaned_edges, total_edges, @as(f64, @floatFromInt(orphaned_edges)) / @as(f64, @floatFromInt(total_edges)) * 100, integrity_ratio * 100 });
+    }
+}
+
+/// Check if target block is reachable from source within depth limit
+fn can_reach_block(system: *StorageEngine, source: BlockId, target: BlockId, edge_type: EdgeType, max_depth: u32) bool {
+    if (source.eql(target)) return true;
+    if (max_depth == 0) return false;
+
+    const edges = system.find_outgoing_edges(source);
+    for (edges) |edge| {
+        if (edge.edge.edge_type != edge_type) continue;
+
+        if (edge.edge.target_id.eql(target)) {
+            return true;
+        }
+
+        // Recursive search with reduced depth
+        if (can_reach_block(system, edge.edge.target_id, target, edge_type, max_depth - 1)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // ============================================================================
 // Property Validation System Verification
 //

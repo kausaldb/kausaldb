@@ -65,6 +65,7 @@ pub const WorkloadGenerator = struct {
     prng: std.Random.DefaultPrng,
     operation_mix: OperationMix,
     operation_count: u64,
+    workload_sequence: u64,
     block_counter: u32,
     edge_counter: u32,
     config: WorkloadConfig,
@@ -82,6 +83,7 @@ pub const WorkloadGenerator = struct {
             .prng = std.Random.DefaultPrng.init(seed),
             .operation_mix = mix,
             .operation_count = 0,
+            .workload_sequence = 0,
             .block_counter = 0,
             .edge_counter = 0,
             .config = config,
@@ -125,6 +127,9 @@ pub const WorkloadGenerator = struct {
             break :blk .find_edges;
         };
 
+        // Increment workload sequence before generating to get unique sequence numbers
+        self.workload_sequence += 1;
+
         const operation = switch (op_type) {
             .put_block => try self.generate_put_block(),
             .update_block => try self.generate_update_block(),
@@ -148,7 +153,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_block,
             .block = block,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -171,7 +176,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .update_block,
             .block = block,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -186,7 +191,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_block,
             .block_id = block_id,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -201,7 +206,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .delete_block,
             .block_id = block_id,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -240,7 +245,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .put_edge,
             .edge = edge,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -255,7 +260,7 @@ pub const WorkloadGenerator = struct {
         return Operation{
             .op_type = .find_edges,
             .block_id = block_id,
-            .model_sequence = self.operation_count + 1,
+            .model_sequence = self.workload_sequence,
         };
     }
 
@@ -391,17 +396,16 @@ test "workload generator creates deterministic operations" {
 
     const config = @import("harness.zig").WorkloadConfig{};
     var generator = WorkloadGenerator.init(allocator, 0x12345, mix, config);
+    defer generator.deinit();
 
     // Generate operations
-    const op1 = try generator.generate_operation();
-    const op2 = try generator.generate_operation();
+    var op1 = try generator.generate_operation();
+    defer generator.cleanup_operation(&op1);
+    var op2 = try generator.generate_operation();
+    defer generator.cleanup_operation(&op2);
 
     // Should generate valid operations
     try testing.expect(op1.model_sequence < op2.model_sequence);
-
-    // Clean up
-    generator.cleanup_operation(&op1);
-    generator.cleanup_operation(&op2);
 }
 
 test "operation mix calculates correct total weight" {

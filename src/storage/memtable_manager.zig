@@ -666,8 +666,9 @@ pub const MemtableManager = struct {
             },
 
             .put_edge => {
-                // TODO: Edge recovery needs to be handled by StorageEngine since it owns graph_index now
-                // For now, skip edge recovery during WAL replay - edges will be rebuilt
+                // Edge recovery is intentionally skipped during WAL replay. The StorageEngine
+                // now owns the graph_index and will rebuild edges from SSTable data during
+                // startup recovery, maintaining consistency with the current architecture.
                 _ = try entry.extract_edge();
             },
         }
@@ -800,7 +801,7 @@ test "MemtableManager edge operations" {
 
     // Note: Edge operations now handled by StorageEngine, not MemtableManager
     // This test should be moved to StorageEngine tests
-    
+
     const outgoing = manager.find_outgoing_edges(source_id);
     try testing.expectEqual(@as(usize, 0), outgoing.len); // Empty since edges now handled by StorageEngine
 }

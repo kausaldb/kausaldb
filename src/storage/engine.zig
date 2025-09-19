@@ -1290,8 +1290,8 @@ pub const StorageEngine = struct {
             // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
-                // Clone with storage_engine ownership using iteration arena for automatic cleanup
-                const cloned_block = try owned_block.clone_with_ownership(self.iteration_arena.allocator(), .storage_engine, null);
+                // Clone with storage_engine ownership using backing allocator to avoid arena accumulation
+                const cloned_block = try owned_block.clone_with_ownership(self.backing_allocator, .storage_engine, null);
                 // Track block to prevent duplicates from SSTables (skip dedup on OOM)
                 self.seen_blocks.put(cloned_block.read(.storage_engine).id, {}) catch {};
                 return cloned_block;
