@@ -313,41 +313,37 @@ pub const WorkloadGenerator = struct {
     fn create_updated_block(self: *Self, existing_block_id: BlockId) !ContextBlock {
         const random = self.prng.random();
 
-        // Generate new sequence number (increment from base sequence)
-        const new_sequence = random.uintAtMost(u64, 10) + 2; // Sequence 2-12
+        // Storage engine will assign the actual sequence number
 
         const source_uri = try std.fmt.allocPrint(
             self.allocator,
             "/test/updated_file_v{d}.zig",
-            .{new_sequence},
+            .{random.uintAtMost(u64, 10) + 2},
         );
 
         // Create updated content
         const content = try std.fmt.allocPrint(
             self.allocator,
-            \\// Updated sequence {d}
+            \\// Updated content
             \\pub fn updated_function() void {{
             \\    // Updated implementation
             \\    const updated_value = {d};
             \\}}
         ,
-            .{ new_sequence, random.uintLessThan(u32, 1000) },
+            .{random.uintLessThan(u32, 1000)},
         );
 
         // Create updated metadata
-        const metadata = try std.fmt.allocPrint(
-            self.allocator,
-            \\{{"type": "function", "sequence": {d}, "updated": true}}
-        ,
-            .{new_sequence},
-        );
+        const metadata = try std.fmt.allocPrint(self.allocator,
+            \\{{"type": "function", "updated": true}}
+        , .{});
 
         return ContextBlock{
             .id = existing_block_id, // Same ID as existing block
             .source_uri = source_uri,
             .content = content,
             .metadata_json = metadata,
-            .sequence = new_sequence, // Higher sequence number
+            .sequence = 0, // Storage engine will assign the actual global sequence
         };
     }
 
