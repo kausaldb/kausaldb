@@ -583,7 +583,82 @@ pub const StorageEngine = struct {
             return err;
         };
 
+        // Initialize global sequence number by scanning existing data
+        // to ensure new blocks always get higher sequence numbers than existing ones
+        self.initialize_global_sequence() catch |err| {
+            error_context.log_storage_error(
+                err,
+                error_context.file_context("initialize_global_sequence", self.data_dir),
+            );
+            return err;
+        };
+
         self.state.transition(.running);
+    }
+
+    /// Initialize global sequence counter by scanning existing data.
+    /// Ensures new blocks always get higher sequence numbers than existing ones,
+    /// preventing stale data from appearing current after storage engine restarts.
+    fn initialize_global_sequence(self: *StorageEngine) !void {
+        var max_sequence: u64 = 0;
+
+        // Scan memtable for highest sequence number
+        var memtable_iterator = self.memtable_manager.block_index.blocks.iterator();
+        while (memtable_iterator.next()) |entry| {
+            const owned_block = entry.value_ptr.*;
+            if (owned_block.block.sequence > max_sequence) {
+                max_sequence = owned_block.block.sequence;
+            }
+        }
+
+        // Scan memtable tombstones for highest sequence number
+        var tombstone_iterator = self.memtable_manager.block_index.tombstones.iterator();
+        while (tombstone_iterator.next()) |entry| {
+            const tombstone_record = entry.value_ptr.*;
+            if (tombstone_record.sequence > max_sequence) {
+                max_sequence = tombstone_record.sequence;
+            }
+        }
+
+        // Scan SSTables for highest sequence number
+        var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
+        defer sstable_paths.deinit();
+
+        for (sstable_paths.items) |sstable_path| {
+            const sstable_path_copy = try self.backing_allocator.dupe(u8, sstable_path);
+            var sstable_file = SSTable.init(
+                self.arena_coordinator,
+                self.backing_allocator,
+                self.vfs,
+                sstable_path_copy,
+            );
+            defer sstable_file.deinit(); // SSTable.deinit() will free the path
+
+            // Load index - skip corrupted SSTables during sequence scanning
+            sstable_file.read_index() catch continue;
+
+            // Check tombstones in this SSTable for sequence numbers
+            for (sstable_file.tombstone_index.items) |tombstone_record| {
+                if (tombstone_record.sequence > max_sequence) {
+                    max_sequence = tombstone_record.sequence;
+                }
+            }
+
+            // Iterate through all blocks in this SSTable using iterator
+            var iterator = sstable_file.iterator();
+            defer iterator.deinit();
+
+            while (iterator.next() catch null) |block| {
+                if (block.sequence > max_sequence) {
+                    max_sequence = block.sequence;
+                }
+            }
+        }
+
+        // Set global sequence to one higher than the maximum found
+        // This ensures new blocks always get higher sequence numbers
+        const next_sequence = max_sequence + 1;
+        self.global_sequence.store(next_sequence, .monotonic);
     }
 
     /// Write an OwnedBlock to storage with full durability guarantees.

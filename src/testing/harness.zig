@@ -646,12 +646,12 @@ pub const SimulationRunner = struct {
     /// Get current memory usage statistics
     pub fn memory_stats(self: *Self) MemoryStats {
         const usage = self.storage_engine.memory_usage();
-        
+
         // For memory leak testing, focus on memtable memory which should be bounded
-            
+
         return .{
             .total_bytes = usage.total_bytes,
-            .arena_bytes = 0, // Arena metrics not yet exposed by storage engine  
+            .arena_bytes = 0, // Arena metrics not yet exposed by storage engine
             .total_allocated = usage.total_bytes,
             .block_count = usage.block_count,
             .edge_count = usage.edge_count,
@@ -691,7 +691,7 @@ pub const SimulationRunner = struct {
         // Use a temporary arena for all scan-related allocations to ensure cleanup
         var scan_arena = std.heap.ArenaAllocator.init(self.allocator);
         defer scan_arena.deinit();
-        
+
         // Create iterator using a custom storage engine that uses our scan arena
         var iterator = self.storage_engine.iterate_all_blocks();
         defer iterator.deinit();
@@ -701,7 +701,7 @@ pub const SimulationRunner = struct {
 
         while (try iterator.next()) |block| {
             // Block memory will be cleaned up when iterator.deinit() is called
-            
+
             // Validate block structure
             if (block.block.content.len == 0) {
                 fatal_assert(false, "Block {} has empty content during full scan", .{block.block.id});
