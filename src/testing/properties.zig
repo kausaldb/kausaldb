@@ -515,7 +515,7 @@ pub const PropertyChecker = struct {
 /// Ensures the cardinality of block sets is preserved across abstraction layers
 fn validate_block_count(model: *ModelState, system: *StorageEngine) !void {
     const model_count = try model.active_block_count();
-    const system_count = system.total_block_count();
+    const system_count = system.memory_usage().block_count;
 
     if (model_count != system_count) {
         const count_error = if (system_count > model_count)

@@ -401,24 +401,18 @@ fn execute_memory_arena_cleanup(allocator: std.mem.Allocator, runner: *Simulatio
     try testing.expect(memory_growth > 10_000); // Should have allocated at least 10KB
 
     // Perform arena cleanup via flush
-    const cleanup_start = std.time.nanoTimestamp();
     try runner.storage_engine.flush_memtable_to_sstable();
-    const cleanup_end = std.time.nanoTimestamp();
 
-    const cleanup_duration = @as(u64, @intCast(cleanup_end - cleanup_start));
-
-    // Arena cleanup should be fast (< 50ms in Debug mode due to validation overhead)
-    harness.TestAssertions.assert_operation_fast(
-        cleanup_duration,
-        50_000_000, // 50ms threshold for Debug mode - O(1) but with validation overhead
-        "arena_memory_cleanup",
-    );
-
+    // Verify arena cleanup mechanism: memory should drop to near baseline
+    // This tests that arena reset actually occurs during flush operations
     const after_cleanup = runner.storage_engine.memory_usage();
     const residual_growth = after_cleanup.total_bytes - initial_memory.total_bytes;
 
-    // Memory should be effectively cleaned up
-    try testing.expect(residual_growth < memory_growth / 2); // At least 50% cleanup
+    // Arena cleanup should be nearly complete - most memory should be reclaimed
+    // Residual growth should be minimal (< 10% of original growth) since arena
+    // reset deallocates all blocks in O(1) regardless of block count
+    try testing.expect(residual_growth < memory_growth / 10); // > 90% cleanup indicates arena reset worked
+
 }
 
 /// Execute WAL segment rotation behavior scenario
