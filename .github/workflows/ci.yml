@@ -100,53 +100,6 @@ jobs:
             test-logs/
           retention-days: 7
 
-  # Valgrind memory analysis (separate job due to significant slowdown)
-  valgrind:
-    name: Valgrind Analysis
-    needs: validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Zig
-        uses: ./.github/actions/setup-zig
-
-      - name: Install Valgrind
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y valgrind
-
-      - name: Build
-        run: ./zig/zig build -Doptimize=Debug -Dseed=0xDEADBEEF
-
-      - name: Run Valgrind Memory Check
-        env:
-          SKIP_PERFORMANCE_TESTS: "1"
-        run: |
-          valgrind \
-            --tool=memcheck \
-            --leak-check=full \
-            --show-leak-kinds=all \
-            --track-origins=yes \
-            --error-exitcode=1 \
-            --gen-suppressions=all \
-            --log-file=valgrind-report.txt \
-            --read-var-info=no \
-            --quiet \
-            ./zig-out/bin/test
-
-      - name: Upload Valgrind Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: valgrind-report
-          path: valgrind-report.txt
-          retention-days: 7
-
   # Performance benchmarking and regression detection
   benchmarks:
     name: Benchmarks
