@@ -154,6 +154,17 @@ fn apply_operation_to_system(storage: *StorageEngine, op: Operation) !bool {
             }
             return false;
         },
+        .update_block => {
+            if (op.block) |block| {
+                storage.put_block(block) catch |err| switch (err) {
+                    // Update operations can also experience backpressure.
+                    error.WriteStalled, error.WriteBlocked => return false,
+                    else => return err,
+                };
+                return true;
+            }
+            return false;
+        },
         .find_block => {
             if (op.block_id) |id| {
                 _ = try storage.find_block(id, .query_engine);

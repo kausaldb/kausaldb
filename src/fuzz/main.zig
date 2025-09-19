@@ -9,6 +9,10 @@ const builtin = @import("builtin");
 const internal = @import("internal");
 const build_options = @import("build_options");
 
+pub const std_options: std.Options = .{
+    .log_level = @enumFromInt(@intFromEnum(build_options.log_level)),
+};
+
 const Allocator = std.mem.Allocator;
 
 /// Target selection for component fuzzing
