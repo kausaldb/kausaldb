@@ -9,6 +9,11 @@
 //! predictable cleanup during shutdown sequences.
 
 const std = @import("std");
+const build_options = @import("build_options");
+
+pub const std_options: std.Options = .{
+    .log_level = @enumFromInt(@intFromEnum(build_options.log_level)),
+};
 
 const cli = @import("cli/mod.zig");
 const concurrency = @import("core/concurrency.zig");
