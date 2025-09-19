@@ -431,9 +431,34 @@ pub const TieredCompactionManager = struct {
         );
         defer self.backing_allocator.free(output_path);
 
-        try self.compactor.compact_sstables(job.input_paths.items, output_path);
+        // Validate input files exist and filter out missing ones
+        var valid_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
+        defer valid_paths.deinit();
 
         for (job.input_paths.items) |path| {
+            // Check if file exists by trying to get file info
+            _ = self.compactor.filesystem.stat(path) catch |err| switch (err) {
+                error.FileNotFound => {
+                    // File doesn't exist, remove from tracking and continue
+                    self.remove_sstable(path, 0); // L0 compaction, so level 0
+                    continue;
+                },
+                else => return err, // Other errors should still fail
+            };
+
+            // File exists, add to valid paths
+            try valid_paths.append(path);
+        }
+
+        // If no valid files or only one file, nothing to compact
+        if (valid_paths.items.len <= 1) {
+            return; // No error - just nothing to do
+        }
+
+        try self.compactor.compact_sstables(valid_paths.items, output_path);
+
+        // Only remove files that were successfully compacted
+        for (valid_paths.items) |path| {
             self.remove_sstable(path, 0);
         }
 
@@ -453,9 +478,34 @@ pub const TieredCompactionManager = struct {
         );
         defer self.backing_allocator.free(output_path);
 
-        try self.compactor.compact_sstables(job.input_paths.items, output_path);
+        // Validate input files exist and filter out missing ones
+        var valid_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
+        defer valid_paths.deinit();
 
         for (job.input_paths.items) |path| {
+            // Check if file exists by trying to get file info
+            _ = self.compactor.filesystem.stat(path) catch |err| switch (err) {
+                error.FileNotFound => {
+                    // File doesn't exist, remove from tracking and continue
+                    self.remove_sstable(path, job.input_level);
+                    continue;
+                },
+                else => return err, // Other errors should still fail
+            };
+
+            // File exists, add to valid paths
+            try valid_paths.append(path);
+        }
+
+        // If no valid files or only one file, nothing to compact
+        if (valid_paths.items.len <= 1) {
+            return; // No error - just nothing to do
+        }
+
+        try self.compactor.compact_sstables(valid_paths.items, output_path);
+
+        // Only remove files that were successfully compacted
+        for (valid_paths.items) |path| {
             self.remove_sstable(path, job.input_level);
         }
 
