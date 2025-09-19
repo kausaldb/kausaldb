@@ -82,7 +82,9 @@ pub const E2EHarness = struct {
 
     pub fn init(allocator: std.mem.Allocator, test_name: []const u8) !Self {
         // Try to ensure binary exists, build if needed (CI fallback)
-        const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+        const relative_binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+        defer allocator.free(relative_binary_path);
+        const binary_path = try std.fs.cwd().realpathAlloc(allocator, relative_binary_path);
 
         // Check if binary exists, if not try to build it
         std.fs.cwd().access(binary_path, .{}) catch {
@@ -112,8 +114,7 @@ pub const E2EHarness = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // Clean up database state to prevent SSTable accumulation across tests
-        self.cleanup_database_state();
+        // Database state is automatically cleaned up with the test workspace
 
         // Clean up all registered paths with robust error handling
         for (self.cleanup_paths.items) |path| {
@@ -139,23 +140,6 @@ pub const E2EHarness = struct {
     }
 
     /// Clean up KausalDB database state to prevent SSTable accumulation
-    fn cleanup_database_state(self: *Self) void {
-        // Remove .kausal-data directory to reset database state
-        // This prevents WriteBlocked errors caused by accumulated SSTables
-        std.fs.cwd().deleteTree(".kausal-data") catch {
-            // Ignore all cleanup errors - the directory might not exist or be busy
-        };
-
-        // Also cleanup any database state in test workspace
-        const db_path = std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, ".kausal-data" }) catch return;
-        defer self.allocator.free(db_path);
-
-        std.fs.deleteTreeAbsolute(db_path) catch |err| switch (err) {
-            error.FileNotFound => {}, // Already clean
-            else => {}, // Ignore cleanup errors in test workspace
-        };
-    }
-
     /// Execute KausalDB command and return structured result
     pub fn execute_command(self: *Self, args: []const []const u8) !CommandResult {
         // Build argv array with binary + args
@@ -170,6 +154,7 @@ pub const E2EHarness = struct {
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = argv_list.items,
+            .cwd = self.test_workspace, // Run in isolated test workspace
             .max_output_bytes = 4 * 1024 * 1024, // 4MB
         });
 
@@ -220,6 +205,7 @@ pub const E2EHarness = struct {
         const result = try std.process.Child.run(.{
             .allocator = arena_allocator,
             .argv = argv.items,
+            .cwd = self.test_workspace, // Run in isolated test workspace
             .max_output_bytes = 4 * 1024 * 1024, // 4MB
         });
 
