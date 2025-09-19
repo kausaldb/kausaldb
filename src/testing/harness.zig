@@ -325,6 +325,19 @@ pub const SimulationRunner = struct {
                 }
             };
 
+            // FORENSIC: Track successful block operations for debugging data loss
+            if (success and (operation.op_type == .put_block or operation.op_type == .update_block)) {
+                if (operation.block) |original_block| {
+                    // Fetch the actual stored block to get the assigned sequence number
+                    if (try self.storage_engine.find_block(original_block.id, .temporary)) |stored_block| {
+                        const actual_block = stored_block.read(.temporary).*;
+                        log.warn("FORENSIC[{}] BLOCK_STORED: id={} seq={} content_hash=0x{x} op_seq={}", .{ i, actual_block.id, actual_block.sequence, std.hash_map.hashString(actual_block.content), operation.model_sequence });
+                    } else {
+                        log.warn("FORENSIC[{}] BLOCK_STORED_BUT_MISSING: id={} input_seq={} op_seq={}", .{ i, original_block.id, original_block.sequence, operation.model_sequence });
+                    }
+                }
+            }
+
             // DEBUG: Log operation success/failure with sequence tracking
             if (builtin.mode == .Debug) {
                 log.debug("OP[{}] SYSTEM_RESULT: success={} workload_seq={}", .{ i, success, operation.model_sequence });
@@ -565,7 +578,15 @@ pub const SimulationRunner = struct {
 
             if (storage_result == null) {
                 log.warn("IMMEDIATE_CONSISTENCY[{}] VIOLATION: Model has block {} (seq={}) but storage doesn't", .{ current_operation, model_block.id, model_block.model_sequence });
+                log.warn("FORENSIC[{}] MISSING_BLOCK: id={} model_seq={} storage_seq={} content_hash=0x{x}", .{ current_operation, model_block.id, model_block.model_sequence, model_block.sequence, model_block.content_hash });
                 // Don't fatal_assert here, just log for forensics
+            } else {
+                // Verify the block content matches
+                const stored_block = storage_result.?.read(.temporary);
+                const stored_hash = std.hash_map.hashString(stored_block.content);
+                if (stored_hash != model_block.content_hash) {
+                    log.warn("IMMEDIATE_CONSISTENCY[{}] CONTENT_MISMATCH: Block {} hash mismatch model=0x{x} storage=0x{x}", .{ current_operation, model_block.id, model_block.content_hash, stored_hash });
+                }
             }
 
             checked += 1;

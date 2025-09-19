@@ -1245,16 +1245,16 @@ pub const Compactor = struct {
 
         for (blocks) |block| {
             const winner = highest_sequences.get(block.id).?;
-            // Keep block only if it wins over tombstones for this ID
-            if (!winner.is_tombstone) {
+            // Keep block only if THIS specific block is the winner
+            if (!winner.is_tombstone and block.sequence == winner.sequence) {
                 try filtered_blocks.append(block);
             }
         }
 
         for (tombstones) |tombstone_record| {
             const winner = highest_sequences.get(tombstone_record.block_id).?;
-            // Keep tombstone only if it wins over blocks for this ID
-            if (winner.is_tombstone) {
+            // Keep tombstone only if THIS specific tombstone is the winner
+            if (winner.is_tombstone and tombstone_record.sequence == winner.sequence) {
                 try filtered_tombstones.append(tombstone_record);
             }
         }
