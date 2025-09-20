@@ -749,13 +749,14 @@ pub const SSTable = struct {
     /// Uses the bloom filter for fast negative lookups, then performs binary search
     /// on the index. Returns null if the block is not found in this SSTable.
     pub fn find_block(self: *SSTable, block_id: BlockId) !?ContextBlock {
-        // Skip per-operation index validation to prevent read path performance regression
-        // Index ordering validation on every find_block call causes significant overhead
-
         // Check tombstones first - tombstoned blocks should not be returned
+        // However, we need to compare sequences to handle MVCC correctly:
+        // Only tombstones with higher sequences than the block should hide it
+        var tombstone_sequence: ?u64 = null;
         for (self.tombstone_index.items) |tombstone_record| {
             if (tombstone_record.block_id.eql(block_id)) {
-                return null;
+                tombstone_sequence = tombstone_record.sequence;
+                break;
             }
         }
 
@@ -799,6 +800,13 @@ pub const SSTable = struct {
         _ = try file.read(buffer);
 
         const block_data = try ContextBlock.deserialize(self.arena_coordinator.allocator(), buffer);
+
+        if (tombstone_sequence) |tomb_seq| {
+            if (tomb_seq > block_data.sequence) {
+                return null; // Tombstone hides this block version
+            }
+        }
+
         return block_data;
     }
 
@@ -810,9 +818,13 @@ pub const SSTable = struct {
         // Index ordering validation on every find_block call causes significant overhead
 
         // Check tombstones first - tombstoned blocks should not be returned
+        // However, we need to compare sequences to handle MVCC correctly:
+        // Only tombstones with higher sequences than the block should hide it
+        var tombstone_sequence: ?u64 = null;
         for (self.tombstone_index.items) |tombstone_record| {
             if (tombstone_record.block_id.eql(block_id)) {
-                return null;
+                tombstone_sequence = tombstone_record.sequence;
+                break;
             }
         }
 
@@ -855,7 +867,16 @@ pub const SSTable = struct {
 
         _ = try file.read(buffer);
 
-        return try ParsedBlock.parse(buffer);
+        const parsed_block = try ParsedBlock.parse(buffer);
+
+        // Apply MVCC tombstone filtering after parsing block to access sequence
+        if (tombstone_sequence) |tomb_seq| {
+            if (tomb_seq > parsed_block.sequence()) {
+                return null; // Tombstone hides this block version
+            }
+        }
+
+        return parsed_block;
     }
 
     /// Get iterator for all blocks in sorted order
