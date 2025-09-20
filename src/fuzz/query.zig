@@ -104,13 +104,9 @@ fn fuzz_query_operations(allocator: std.mem.Allocator, input: []const u8) !void 
     try fuzz_corrupted_graph_operations(&query_engine, input);
 }
 
-/// Populate storage with test data for query fuzzing
 fn populate_fuzz_data(storage: *StorageEngine, allocator: std.mem.Allocator) !void {
-    // Create a small test graph for query operations
     var block_ids = std.array_list.Managed(BlockId).init(allocator);
     defer block_ids.deinit();
-
-    // Create test blocks
     for (0..20) |i| {
         const block = ContextBlock{
             .id = BlockId.generate(),
@@ -122,8 +118,6 @@ fn populate_fuzz_data(storage: *StorageEngine, allocator: std.mem.Allocator) !vo
         try storage.put_block(block);
         try block_ids.append(block.id);
     }
-
-    // Create test edges between blocks
     for (0..block_ids.items.len - 1) |i| {
         const edge = GraphEdge{
             .source_id = block_ids.items[i],
@@ -132,8 +126,6 @@ fn populate_fuzz_data(storage: *StorageEngine, allocator: std.mem.Allocator) !vo
         };
         try storage.put_edge(edge);
     }
-
-    // Create some circular references for edge case testing
     if (block_ids.items.len >= 3) {
         const circular_edge = GraphEdge{
             .source_id = block_ids.items[block_ids.items.len - 1],
@@ -144,35 +136,26 @@ fn populate_fuzz_data(storage: *StorageEngine, allocator: std.mem.Allocator) !vo
     }
 }
 
-/// Fuzz query parsing with malformed inputs
 fn fuzz_query_parsing(query_engine: *QueryEngine, query_text: []const u8) !void {
     _ = query_engine;
 
-    // Mock query parsing - in real implementation would call actual parser
     if (query_text.len == 0) return;
 
-    // Simulate parsing different query types
     if (std.mem.startsWith(u8, query_text, "SELECT")) {
-        // Mock SQL-like query parsing
+        // SQL-like query parsing
     } else if (std.mem.startsWith(u8, query_text, "TRAVERSE")) {
-        // Mock graph traversal query parsing
+        // Graph traversal query parsing
     } else if (std.mem.startsWith(u8, query_text, "SEARCH")) {
-        // Mock semantic search query parsing
+        // Semantic search query parsing
     }
-
-    // Parsing should handle invalid syntax gracefully
 }
 
-/// Fuzz breadth-first traversal operations
 fn fuzz_graph_traversal_bfs(query_engine: *QueryEngine, start_id: BlockId) !void {
     _ = query_engine;
     _ = start_id;
-
-    // Mock BFS traversal with potential infinite loops
     var visited = std.HashMap(BlockId, void, BlockIdContext, std.hash_map.default_max_load_percentage).init(std.heap.page_allocator);
     defer visited.deinit();
 
-    // Simulate traversal bounds checking
     var depth: u32 = 0;
     const max_depth = 100; // Prevent infinite traversal
 
@@ -182,40 +165,28 @@ fn fuzz_graph_traversal_bfs(query_engine: *QueryEngine, start_id: BlockId) !void
     }
 }
 
-/// Fuzz depth-first traversal operations
 fn fuzz_graph_traversal_dfs(query_engine: *QueryEngine, start_id: BlockId) !void {
     _ = query_engine;
     _ = start_id;
-
-    // Mock DFS traversal with stack overflow protection
     var call_depth: u32 = 0;
     const max_call_depth = 500; // Prevent stack overflow
 
     try mock_dfs_recursive(BlockId.generate(), &call_depth, max_call_depth);
 }
-
-/// Recursive DFS simulation for fuzzing
 fn mock_dfs_recursive(node_id: BlockId, call_depth: *u32, max_depth: u32) !void {
     _ = node_id;
 
     if (call_depth.* >= max_depth) return;
     call_depth.* += 1;
     defer call_depth.* -= 1;
-
-    // Mock recursive traversal
     if (call_depth.* < max_depth / 2) {
         try mock_dfs_recursive(BlockId.generate(), call_depth, max_depth);
     }
 }
 
-/// Fuzz semantic search operations
 fn fuzz_semantic_search(query_engine: *QueryEngine, search_term: []const u8) !void {
     _ = query_engine;
-
-    // Mock semantic search with various input types
     if (search_term.len == 0) return;
-
-    // Test different search term characteristics
     var has_special_chars = false;
     var has_unicode = false;
     var has_null_bytes = false;
@@ -226,102 +197,86 @@ fn fuzz_semantic_search(query_engine: *QueryEngine, search_term: []const u8) !vo
         if (byte < 32 and byte != 9 and byte != 10 and byte != 13) has_special_chars = true;
     }
 
-    // Different search behaviors based on input characteristics
     if (has_null_bytes) {
-        // Handle null-terminated strings
+        // Null-terminated strings
     } else if (has_unicode) {
-        // Handle Unicode search terms
+        // Unicode search terms
     } else if (has_special_chars) {
-        // Handle control characters
+        // Control characters
     }
-
-    // Mock search result ranking
     const relevance_score = std.hash.Wyhash.hash(0, search_term) % 100;
     _ = relevance_score;
 }
 
-/// Fuzz filtered traversal operations
 fn fuzz_filtered_traversal(query_engine: *QueryEngine, filter_data: []const u8) !void {
     _ = query_engine;
-
-    // Mock filter parsing and application
     if (filter_data.len < 2) return;
 
     const filter_type = filter_data[0] % 4;
     switch (filter_type) {
-        0 => { // Edge type filter
+        0 => {
             const edge_type_val = filter_data[1] % 4;
             _ = @as(EdgeType, @enumFromInt(edge_type_val));
         },
-        1 => { // Content filter
-            // Mock content-based filtering
+        1 => {
+            // Content-based filtering
         },
-        2 => { // Metadata filter
-            // Mock metadata-based filtering
+        2 => {
+            // Metadata-based filtering
         },
-        3 => { // Combined filter
-            // Mock multiple filter criteria
+        3 => {
+            // Multiple filter criteria
         },
         else => {},
     }
 }
 
-/// Fuzz query caching operations
 fn fuzz_query_caching(query_engine: *QueryEngine, cache_key: []const u8) !void {
     _ = query_engine;
-
-    // Mock cache operations with various key types
     if (cache_key.len == 0) return;
 
-    // Simulate cache key validation
     const key_hash = std.hash.Wyhash.hash(0, cache_key);
 
-    // Mock cache hit/miss scenarios
     const cache_hit = (key_hash % 100) < 30; // 30% hit rate
     if (cache_hit) {
-        // Mock cache retrieval
+        // Cache retrieval
     } else {
-        // Mock cache population
+        // Cache population
     }
 
-    // Test cache eviction scenarios
     if (cache_key.len > 1000) {
-        // Large keys might trigger different behavior
+        // Large keys trigger different behavior
     }
 }
 
-/// Fuzz complex query operations
 fn fuzz_complex_query_operations(query_engine: *QueryEngine, input: []const u8) !void {
     _ = query_engine;
 
     if (input.len < 8) return;
-
-    // Mock complex query with multiple parts
     var i: usize = 0;
     while (i + 4 < input.len) : (i += 4) {
         const query_part = input[i] % 5;
         switch (query_part) {
-            0 => { // JOIN operation
-                // Mock graph join operations
+            0 => {
+                // Graph join operations
             },
-            1 => { // AGGREGATION
-                // Mock result aggregation
+            1 => {
+                // Result aggregation
             },
-            2 => { // SUBQUERY
-                // Mock nested query operations
+            2 => {
+                // Nested query operations
             },
-            3 => { // UNION
-                // Mock result combination
+            3 => {
+                // Result combination
             },
-            4 => { // SORT
-                // Mock result sorting
+            4 => {
+                // Result sorting
             },
             else => {},
         }
     }
 }
 
-/// Fuzz edge case query scenarios
 fn fuzz_edge_case_queries(query_engine: *QueryEngine, input: []const u8) !void {
     _ = query_engine;
 
@@ -329,38 +284,32 @@ fn fuzz_edge_case_queries(query_engine: *QueryEngine, input: []const u8) !void {
 
     const edge_case = input[0] % 6;
     switch (edge_case) {
-        0 => { // Empty result set
-            // Test queries that return no results
+        0 => {
+            // Empty result set
         },
-        1 => { // Single result
-            // Test queries with exactly one result
+        1 => {
+            // Single result
         },
-        2 => { // Massive result set
-            // Test queries with many results (stress test)
+        2 => {
+            // Massive result set
         },
-        3 => { // Circular references
-            // Test queries on graphs with cycles
+        3 => {
+            // Circular references
         },
-        4 => { // Disconnected components
-            // Test queries on fragmented graphs
+        4 => {
+            // Disconnected components
         },
-        5 => { // Self-referencing nodes
-            // Test queries on nodes that reference themselves
+        5 => {
+            // Self-referencing nodes
         },
         else => {},
     }
 }
 
-/// Test query operations on corrupted graph data
 fn fuzz_corrupted_graph_operations(query_engine: *QueryEngine, input: []const u8) !void {
     _ = query_engine;
     _ = input;
-
-    // Mock operations on potentially corrupted graph structures
-    // This would test error recovery and graceful degradation
 }
-
-/// Generate fuzzed query text from input data
 fn fuzz_generate_query_text(data: []const u8) []const u8 {
     if (data.len < 8) return "SELECT * FROM blocks";
 
@@ -373,8 +322,6 @@ fn fuzz_generate_query_text(data: []const u8) []const u8 {
         else => return "MALFORMED",
     }
 }
-
-/// Generate fuzzed search term from input data
 fn fuzz_generate_search_term(allocator: std.mem.Allocator, data: []const u8) []const u8 {
     if (data.len < 4) return "default_search";
 
@@ -388,20 +335,14 @@ fn fuzz_generate_search_term(allocator: std.mem.Allocator, data: []const u8) []c
         else => return "unknown",
     }
 }
-
-/// Generate fuzzed filter data
 fn fuzz_generate_filter(data: []const u8) []const u8 {
     if (data.len < 2) return &[_]u8{ 0, 1 };
     return data[0..@min(data.len, 16)];
 }
-
-/// Generate fuzzed cache key
 fn fuzz_generate_cache_key(allocator: std.mem.Allocator, data: []const u8) []const u8 {
     const key_hash = std.hash.Wyhash.hash(0, data);
     return std.fmt.allocPrint(allocator, "cache_key_{x}", .{key_hash}) catch "default_cache_key";
 }
-
-/// Generate a fuzzed BlockId from input data
 fn fuzz_generate_block_id(data: []const u8) BlockId {
     if (data.len >= 16) {
         var bytes: [16]u8 = undefined;
@@ -410,8 +351,6 @@ fn fuzz_generate_block_id(data: []const u8) BlockId {
     }
     return BlockId.generate();
 }
-
-/// Context for BlockId HashMap
 const BlockIdContext = struct {
     pub fn hash(self: @This(), key: BlockId) u64 {
         _ = self;

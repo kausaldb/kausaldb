@@ -69,13 +69,11 @@ const CrashEntry = struct {
     iteration: u64,
 
     fn save_to_disk(self: CrashEntry, allocator: Allocator, corpus_dir: []const u8) !void {
-        // Ensure corpus directory exists
         std.fs.cwd().makePath(corpus_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
 
-        // Generate crash filename
         const crash_path = try std.fmt.allocPrint(
             allocator,
             "{s}/crash_{}_{x}.bin",
@@ -83,7 +81,6 @@ const CrashEntry = struct {
         );
         defer allocator.free(crash_path);
 
-        // Save crash input
         const file = try std.fs.cwd().createFile(crash_path, .{});
         defer file.close();
         try file.writeAll(self.input);
@@ -115,7 +112,6 @@ pub const Fuzzer = struct {
     }
 
     pub fn deinit(self: *Fuzzer) void {
-        // Clean up crash entries
         for (self.crashes.items) |crash| {
             self.allocator.free(crash.input);
             self.allocator.free(crash.error_type);
@@ -123,7 +119,6 @@ pub const Fuzzer = struct {
         self.crashes.deinit();
     }
 
-    /// Generate random input for fuzzing
     pub fn generate_input(self: *Fuzzer) ![]u8 {
         const size = self.random.intRangeAtMost(usize, 1, 4096);
         const input = try self.allocator.alloc(u8, size);
@@ -131,13 +126,11 @@ pub const Fuzzer = struct {
         return input;
     }
 
-    /// Handle a crash during fuzzing
     pub fn handle_crash(self: *Fuzzer, input: []const u8, err: anyerror) !void {
         self.stats.crashes += 1;
 
         const error_name = @errorName(err);
 
-        // Check if this is a unique crash type
         var is_unique = true;
         for (self.crashes.items) |existing_crash| {
             if (std.mem.eql(u8, existing_crash.error_type, error_name)) {
@@ -150,7 +143,6 @@ pub const Fuzzer = struct {
             self.stats.unique_crashes += 1;
         }
 
-        // Save crash entry
         const crash = CrashEntry{
             .input = try self.allocator.dupe(u8, input),
             .error_type = try self.allocator.dupe(u8, error_name),
@@ -174,11 +166,9 @@ pub const Fuzzer = struct {
         }
     }
 
-    /// Update iteration statistics
     pub fn record_iteration(self: *Fuzzer) void {
         self.stats.iterations += 1;
 
-        // Update exec/sec every 1000 iterations
         if (self.stats.iterations % 1000 == 0) {
             const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
             self.stats.total_time_ms = elapsed_ms;

@@ -15,6 +15,8 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 const testing = std.testing;
 
+const output = @import("output.zig");
+
 const LatencySampler = struct {
     samples: std.array_list.Managed(u64),
     allocator: std.mem.Allocator,
@@ -106,43 +108,38 @@ const E2EWorkloadBench = struct {
         defer allocator.free(relative_binary_path);
         const binary_path = try std.fs.cwd().realpathAlloc(allocator, relative_binary_path);
 
-        // Verify binary exists and is executable
         std.fs.cwd().access(binary_path, .{}) catch |err| {
-            std.debug.print("ERROR: KausalDB binary not found at {s}\n", .{binary_path});
-            std.debug.print("Error details: {}\n", .{err});
-            std.debug.print("Current working directory: {s}\n", .{std.fs.cwd().realpathAlloc(allocator, ".") catch "unknown"});
+            output.print_error(allocator, "ERROR: KausalDB binary not found at {s}\n", .{binary_path});
+            output.print_error(allocator, "Error details: {}\n", .{err});
+            output.print_error(allocator, "Current working directory: {s}\n", .{std.fs.cwd().realpathAlloc(allocator, ".") catch "unknown"});
 
-            // List contents of zig-out/bin if it exists
             if (std.fs.cwd().openDir("zig-out/bin", .{})) |bin_dir| {
-                var bin_dir_copy = bin_dir;
-                std.debug.print("Contents of zig-out/bin:\n", .{});
-                var iterator = bin_dir_copy.iterate();
+                output.print_error(allocator, "Contents of zig-out/bin:\n", .{});
+                var iterator = bin_dir.iterate();
                 while (iterator.next() catch null) |entry| {
-                    std.debug.print("  - {s} ({s})\n", .{ entry.name, @tagName(entry.kind) });
+                    output.print_error(allocator, "  - {s} ({s})\n", .{ entry.name, @tagName(entry.kind) });
                 }
-                bin_dir_copy.close();
             } else |_| {
-                std.debug.print("zig-out/bin directory does not exist\n", .{});
+                output.print_error(allocator, "zig-out/bin directory does not exist\n", .{});
             }
 
-            std.debug.print("Run './zig/zig build' first to build the binary\n", .{});
+            output.print_error(allocator, "Run './zig/zig build' first to build the binary\n", .{});
             return error.BinaryNotFound;
         };
 
-        // Test binary execution
         const version_result = std.process.Child.run(.{
             .allocator = allocator,
             .argv = &[_][]const u8{ binary_path, "--version" },
             .max_output_bytes = 1024,
         }) catch |err| {
-            std.debug.print("ERROR: Failed to execute binary at {s}: {}\n", .{ binary_path, err });
+            output.print_error(allocator, "ERROR: Failed to execute binary at {s}: {}\n", .{ binary_path, err });
             return error.BinaryNotExecutable;
         };
         allocator.free(version_result.stdout);
         allocator.free(version_result.stderr);
 
         if (version_result.term != .Exited or version_result.term.Exited != 0) {
-            std.debug.print("ERROR: Binary failed version check with exit code: {}\n", .{version_result.term});
+            output.print_error(allocator, "ERROR: Binary failed version check with exit code: {}\n", .{version_result.term});
             return error.BinaryNotWorking;
         }
 
@@ -161,20 +158,17 @@ const E2EWorkloadBench = struct {
         self.allocator.free(self.binary_path);
     }
 
-    /// Create realistic test project with interconnected dependencies
     fn create_test_project(self: *Self) ![]const u8 {
         const project_name = "kausal_bench_project";
         const project_path = try self.temp_dir.dir.realpathAlloc(self.allocator, ".");
 
-        // Create project subdirectory
         try self.temp_dir.dir.makeDir(project_name);
         const full_project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, project_name });
 
         if (self.config.verbose) {
-            std.debug.print("Creating test project at: {s}\n", .{full_project_path});
+            output.print_verbose(self.allocator, "Creating test project at: {s}\n", .{full_project_path});
         }
 
-        // Generate interconnected source files with realistic patterns
         var file_idx: u32 = 0;
         while (file_idx < self.config.codebase_size) : (file_idx += 1) {
             const filename = try std.fmt.allocPrint(self.allocator, "{s}/module_{d}.zig", .{ project_name, file_idx });
@@ -186,7 +180,6 @@ const E2EWorkloadBench = struct {
             try self.write_realistic_module(file, file_idx);
         }
 
-        // Create main.zig that imports and uses several modules
         const main_filename = try std.fmt.allocPrint(self.allocator, "{s}/main.zig", .{project_name});
         defer self.allocator.free(main_filename);
 
@@ -200,7 +193,6 @@ const E2EWorkloadBench = struct {
     }
 
     fn write_realistic_module(self: *Self, file: std.fs.File, module_idx: u32) !void {
-        // Standard imports to create realistic dependency patterns
         try file.writeAll("const std = @import(\"std\");\n");
 
         // Cross-module imports to create graph edges
@@ -285,11 +277,7 @@ const E2EWorkloadBench = struct {
         const start_time = std.time.nanoTimestamp();
 
         if (self.config.verbose) {
-            std.debug.print("Executing command: {s}", .{self.binary_path});
-            for (args) |arg| {
-                std.debug.print(" {s}", .{arg});
-            }
-            std.debug.print("\n", .{});
+            output.print_command_execution(self.allocator, self.binary_path, args);
         }
 
         const cwd_path = try self.temp_dir.dir.realpathAlloc(self.allocator, ".");
@@ -301,14 +289,14 @@ const E2EWorkloadBench = struct {
             .cwd = cwd_path,
             .max_output_bytes = 4 * 1024 * 1024, // 4MB
         }) catch |err| {
-            std.debug.print("ERROR: Failed to execute command: {}\n", .{err});
-            std.debug.print("Binary path: {s}\n", .{self.binary_path});
-            std.debug.print("Working directory: {s}\n", .{cwd_path});
-            std.debug.print("Arguments: ", .{});
+            output.print_error(self.allocator, "ERROR: Failed to execute command: {}\n", .{err});
+            output.print_error(self.allocator, "Binary path: {s}\n", .{self.binary_path});
+            output.print_error(self.allocator, "Working directory: {s}\n", .{cwd_path});
+            output.print_error(self.allocator, "Arguments: ", .{});
             for (argv_list.items) |arg| {
-                std.debug.print("'{s}' ", .{arg});
+                output.print_error(self.allocator, "'{s}' ", .{arg});
             }
-            std.debug.print("\n", .{});
+            output.print_error(self.allocator, "\n", .{});
             return err;
         };
         defer self.allocator.free(result.stdout);
@@ -319,44 +307,43 @@ const E2EWorkloadBench = struct {
 
         try sampler.add_sample(latency_ns);
 
-        // Verify command succeeded
         const exit_code: u8 = switch (result.term) {
             .Exited => |code| @intCast(code),
             else => 255,
         };
 
         if (exit_code != 0) {
-            std.debug.print("Command failed with exit code {}\n", .{exit_code});
-            std.debug.print("Command: {s}", .{self.binary_path});
-            for (args) |arg| {
-                std.debug.print(" {s}", .{arg});
-            }
-            std.debug.print("\n", .{});
-
-            if (result.stderr.len > 0) {
-                std.debug.print("STDERR:\n{s}\n", .{result.stderr});
-            }
-            if (result.stdout.len > 0) {
-                std.debug.print("STDOUT:\n{s}\n", .{result.stdout});
-            }
+            output.print_command_failure(self.allocator, exit_code, self.binary_path, args, result.stderr, result.stdout);
 
             return error.CommandFailed;
         }
 
         if (self.config.verbose and result.stdout.len > 0) {
-            std.debug.print("Command output: {s}\n", .{result.stdout});
+            output.print_verbose(self.allocator, "Command output: {s}\n", .{result.stdout});
         }
     }
 
     /// Run the complete mixed-workload benchmark
     pub fn run_benchmark(self: *Self) !BenchmarkResults {
-        std.debug.print("Starting E2E benchmark with configuration:\n", .{});
-        std.debug.print("  Operations per type: {}\n", .{self.config.operations_per_type});
-        std.debug.print("  Codebase size: {} files\n", .{self.config.codebase_size});
-        std.debug.print("  Functions per file: {}\n", .{self.config.functions_per_file});
-        std.debug.print("  Binary path: {s}\n", .{self.binary_path});
-        std.debug.print("  Verbose: {}\n", .{self.config.verbose});
-        std.debug.print("Creating test project with {d} files, {d} functions per file...\n", .{ self.config.codebase_size, self.config.functions_per_file });
+        output.print_benchmark_header(self.allocator, "E2E Workload");
+
+        const ops_per_type_str = try std.fmt.allocPrint(self.allocator, "{}", .{self.config.operations_per_type});
+        defer self.allocator.free(ops_per_type_str);
+        const codebase_size_str = try std.fmt.allocPrint(self.allocator, "{} files", .{self.config.codebase_size});
+        defer self.allocator.free(codebase_size_str);
+        const functions_per_file_str = try std.fmt.allocPrint(self.allocator, "{}", .{self.config.functions_per_file});
+        defer self.allocator.free(functions_per_file_str);
+
+        const config_items = [_]output.ConfigItem{
+            .{ .name = "Operations per type", .value = ops_per_type_str },
+            .{ .name = "Codebase size", .value = codebase_size_str },
+            .{ .name = "Functions per file", .value = functions_per_file_str },
+            .{ .name = "Binary path", .value = self.binary_path },
+            .{ .name = "Verbose", .value = if (self.config.verbose) "true" else "false" },
+        };
+        output.print_benchmark_config(self.allocator, &config_items);
+
+        output.print_status(self.allocator, "Creating test project with {d} files, {d} functions per file...\n", .{ self.config.codebase_size, self.config.functions_per_file });
 
         const project_path = try self.create_test_project();
         defer self.allocator.free(project_path);
@@ -374,15 +361,16 @@ const E2EWorkloadBench = struct {
         defer trace_sampler.deinit();
 
         // Phase 1: Ingestion benchmark (link + sync)
-        std.debug.print("Benchmarking ingestion pipeline...\n", .{});
+        output.print_phase_header(self.allocator, "ingestion pipeline");
 
         try self.execute_timed_command(&[_][]const u8{ "link", project_path }, &ingestion_sampler);
         try self.execute_timed_command(&[_][]const u8{"sync"}, &ingestion_sampler);
 
         // Phase 2: Mixed query benchmark
-        std.debug.print("Benchmarking mixed query workload ({d} operations per type)...\n", .{self.config.operations_per_type});
+        const phase_header = try std.fmt.allocPrint(self.allocator, "mixed query workload ({d} operations per type)", .{self.config.operations_per_type});
+        defer self.allocator.free(phase_header);
+        output.print_phase_header(self.allocator, phase_header);
 
-        // Realistic find operations
         var op_idx: u32 = 0;
         while (op_idx < self.config.operations_per_type) : (op_idx += 1) {
             const func_name = try std.fmt.allocPrint(self.allocator, "process_data_{d}", .{op_idx % self.config.functions_per_file});
@@ -391,7 +379,6 @@ const E2EWorkloadBench = struct {
             try self.execute_timed_command(&[_][]const u8{ "find", "function", func_name }, &find_sampler);
         }
 
-        // Show queries (what calls/uses functions)
         op_idx = 0;
         while (op_idx < self.config.operations_per_type) : (op_idx += 1) {
             const file_name = try std.fmt.allocPrint(self.allocator, "module_{d}.zig", .{op_idx % self.config.codebase_size});
@@ -400,7 +387,6 @@ const E2EWorkloadBench = struct {
             try self.execute_timed_command(&[_][]const u8{ "show", "file", file_name }, &show_sampler);
         }
 
-        // Trace queries (follow call chains)
         op_idx = 0;
         while (op_idx < self.config.operations_per_type) : (op_idx += 1) {
             const func_name = try std.fmt.allocPrint(self.allocator, "process_data_{d}", .{op_idx % 3}); // Focus on heavily used functions
@@ -424,35 +410,45 @@ const BenchmarkResults = struct {
     show_queries: PercentileStats,
     trace_queries: PercentileStats,
 
-    pub fn print_results(self: BenchmarkResults) void {
-        std.debug.print("\n=== KausalDB E2E Mixed-Workload Benchmark Results ===\n\n", .{});
-        std.debug.print("Ingestion (link + sync): {any}\n", .{self.ingestion});
-        std.debug.print("Find function queries:   {any}\n", .{self.find_queries});
-        std.debug.print("Show file queries:       {any}\n", .{self.show_queries});
-        std.debug.print("Trace call queries:      {any}\n", .{self.trace_queries});
-        std.debug.print("\n", .{});
+    pub fn print_results(self: BenchmarkResults, allocator: std.mem.Allocator) void {
+        output.print_results_header();
 
-        // Performance interpretation
+        const ingestion_p50_ms = @as(f64, @floatFromInt(self.ingestion.p50_ns)) / 1_000_000.0;
+        const ingestion_p95_ms = @as(f64, @floatFromInt(self.ingestion.p95_ns)) / 1_000_000.0;
+        output.print_benchmark_results(allocator, "Ingestion (link + sync): P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ ingestion_p50_ms, ingestion_p95_ms, self.ingestion.samples });
+
+        const find_p50_ms = @as(f64, @floatFromInt(self.find_queries.p50_ns)) / 1_000_000.0;
+        const find_p95_ms = @as(f64, @floatFromInt(self.find_queries.p95_ns)) / 1_000_000.0;
+        output.print_benchmark_results(allocator, "Find function queries:   P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ find_p50_ms, find_p95_ms, self.find_queries.samples });
+
+        const show_p50_ms = @as(f64, @floatFromInt(self.show_queries.p50_ns)) / 1_000_000.0;
+        const show_p95_ms = @as(f64, @floatFromInt(self.show_queries.p95_ns)) / 1_000_000.0;
+        output.print_benchmark_results(allocator, "Show file queries:       P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ show_p50_ms, show_p95_ms, self.show_queries.samples });
+
+        const trace_p50_ms = @as(f64, @floatFromInt(self.trace_queries.p50_ns)) / 1_000_000.0;
+        const trace_p95_ms = @as(f64, @floatFromInt(self.trace_queries.p95_ns)) / 1_000_000.0;
+        output.print_benchmark_results(allocator, "Trace call queries:      P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ trace_p50_ms, trace_p95_ms, self.trace_queries.samples });
+
+        output.write_benchmark_results("\n");
+
         if (self.find_queries.p95_ns > 0) {
             const p95_ms = @as(f64, @floatFromInt(self.find_queries.p95_ns)) / 1_000_000.0;
-            std.debug.print("Performance Summary:\n", .{});
-            std.debug.print("- P95 find query latency: {d:.2} ms\n", .{p95_ms});
+            output.write_benchmark_results("Performance Summary:\n");
+            output.print_benchmark_results(allocator, "- P95 find query latency: {d:.2} ms\n", .{p95_ms});
 
             if (p95_ms < 50.0) {
-                std.debug.print("- Performance level: EXCELLENT (< 50ms P95)\n", .{});
+                output.write_benchmark_results("- Performance level: EXCELLENT (< 50ms P95)\n");
             } else if (p95_ms < 200.0) {
-                std.debug.print("- Performance level: GOOD (< 200ms P95)\n", .{});
+                output.write_benchmark_results("- Performance level: GOOD (< 200ms P95)\n");
             } else if (p95_ms < 1000.0) {
-                std.debug.print("- Performance level: ACCEPTABLE (< 1s P95)\n", .{});
+                output.write_benchmark_results("- Performance level: ACCEPTABLE (< 1s P95)\n");
             } else {
-                std.debug.print("- Performance level: NEEDS OPTIMIZATION (>= 1s P95)\n", .{});
+                output.write_benchmark_results("- Performance level: NEEDS OPTIMIZATION (>= 1s P95)\n");
             }
         }
 
         // Include system information for reproducibility
-        std.debug.print("\nSystem Information:\n", .{});
-        std.debug.print("- Platform: {s}-{s}\n", .{ @tagName(builtin.os.tag), @tagName(builtin.cpu.arch) });
-        std.debug.print("- Build mode: {s}\n", .{@tagName(builtin.mode)});
+        output.print_system_info(allocator);
     }
 };
 
@@ -472,7 +468,7 @@ pub fn run_e2e_benchmark(allocator: std.mem.Allocator) !void {
     defer benchmark.deinit();
 
     const results = try benchmark.run_benchmark();
-    results.print_results();
+    results.print_results(allocator);
 }
 
 // Export harness-integrated benchmark function for regression detection
@@ -496,7 +492,6 @@ pub fn run_e2e_benchmark_with_harness(harness: anytype) !void {
     const main = @import("main.zig");
     const BenchmarkResult = main.BenchmarkResult;
 
-    // Add ingestion benchmark result
     try harness.add_result(BenchmarkResult{
         .name = "e2e_ingestion",
         .iterations = @intCast(results.ingestion.samples),
@@ -508,7 +503,6 @@ pub fn run_e2e_benchmark_with_harness(harness: anytype) !void {
         .ops_per_second = if (results.ingestion.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.ingestion.p50_ns)) else 0,
     });
 
-    // Add query benchmark results
     try harness.add_result(BenchmarkResult{
         .name = "e2e_find_queries",
         .iterations = @intCast(results.find_queries.samples),
@@ -542,11 +536,14 @@ pub fn run_e2e_benchmark_with_harness(harness: anytype) !void {
         .ops_per_second = if (results.trace_queries.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.trace_queries.p50_ns)) else 0,
     });
 
-    // Still print the detailed e2e results for context
-    results.print_results();
+    results.print_results(harness.allocator);
 }
 
 test "e2e benchmark framework validation" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     // Validate that benchmark framework compiles and basic functionality works
     const config = BenchmarkConfig{
         .operations_per_type = 1,
@@ -555,8 +552,7 @@ test "e2e benchmark framework validation" {
         .verbose = true,
     };
 
-    // Test sampler functionality
-    var sampler = LatencySampler.init(testing.allocator);
+    var sampler = LatencySampler.init(allocator);
     defer sampler.deinit();
 
     try sampler.add_sample(1000000); // 1ms
@@ -565,7 +561,5 @@ test "e2e benchmark framework validation" {
     const stats = sampler.calculate_percentiles();
     try testing.expect(stats.p50_ns == 1000000); // Median should be 1ms
 
-    // Don't run full benchmark in tests - that would require the binary
-    // and would be too slow for unit tests
     _ = config; // Avoid unused variable warning
 }

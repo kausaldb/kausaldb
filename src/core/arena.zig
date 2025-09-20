@@ -84,7 +84,11 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
             if (builtin.mode == .Debug) {
                 self.debug_allocation_count += 1;
                 self.debug_total_bytes += @sizeOf(T);
-                log.debug("{s} arena allocated {s} (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+
+                // Log only large allocations to avoid spam
+                if (@sizeOf(T) > 4096) {
+                    log.debug("{s} arena allocated large {s} (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+                }
             }
 
             return ptr;
@@ -101,7 +105,12 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
             if (builtin.mode == .Debug) {
                 self.debug_allocation_count += n;
                 self.debug_total_bytes += n * @sizeOf(T);
-                log.debug("{s} arena allocated {s}[{}] (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), n, n * @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+
+                // Log only large slice allocations to avoid spam
+                const slice_size = n * @sizeOf(T);
+                if (slice_size > 4096) {
+                    log.debug("{s} arena allocated large {s}[{}] (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), n, slice_size, self.debug_allocation_count, self.debug_total_bytes });
+                }
             }
 
             return slice;
@@ -141,7 +150,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         pub fn deinit(self: *Arena) void {
             if (builtin.mode == .Debug) {
                 if (self.debug_allocation_count > 0) {
-                    log.debug("{s} arena deinit with {} unfreed objects ({} bytes)", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
+                    log.warn("{s} arena deinit with {} unfreed objects ({} bytes) - potential leak", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
                 }
             }
             self.arena.deinit();
@@ -304,9 +313,6 @@ pub fn OwnedPtrType(comptime T: type) type {
         /// Transfer ownership to another subsystem.
         /// The original owner must not access this pointer after transfer.
         pub fn transfer_ownership(self: *Ptr, new_ownership: ArenaOwnership) void {
-            if (builtin.mode == .Debug) {
-                log.debug("Ownership transfer: {any} -> {any} for {s}", .{ self.ownership, new_ownership, @typeName(T) });
-            }
             self.ownership = new_ownership;
         }
     };

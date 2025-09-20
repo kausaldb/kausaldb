@@ -214,10 +214,10 @@ pub const ArenaCoordinator = struct {
     /// Track allocation patterns for debug analysis.
     /// Provides insight into arena usage patterns and potential optimizations.
     pub fn track_allocation_pattern(self: *const ArenaCoordinator, size: usize, type_name: []const u8) void {
-        _ = self; // Coordinator context available for future enhancements
+        _ = self;
         if (comptime builtin.mode == .Debug) {
-            // Log allocation patterns for performance analysis
-            if (size > 4096) {
+            // Log only large allocations to avoid spam
+            if (size > 1024 * 1024) { // 1MB threshold
                 log.debug("Large allocation via coordinator: {} bytes for {s}", .{ size, type_name });
             }
         }
@@ -335,10 +335,7 @@ pub const ArenaAllocationTracker = struct {
     /// Logs total allocations, peak memory usage, and detects potential leaks.
     pub fn report_statistics(self: *const ArenaAllocationTracker) void {
         if (comptime builtin.mode == .Debug) {
-            log.info("Arena Allocation Statistics:", .{});
-            log.info("  Total allocations: {}", .{self.total_allocations});
-            log.info("  Peak memory: {} bytes", .{self.peak_memory});
-            log.info("  Current memory: {} bytes", .{self.current_memory});
+            log.debug("Arena stats: {} allocations, peak {} bytes, current {} bytes", .{ self.total_allocations, self.peak_memory, self.current_memory });
 
             if (self.current_memory > 0) {
                 log.warn("Potential arena leaks: {} bytes still allocated", .{self.current_memory});

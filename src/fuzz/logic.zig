@@ -31,7 +31,6 @@ const log = std.log.scoped(.logic_fuzz);
 
 /// Configuration for logic fuzzing
 const LogicFuzzConfig = struct {
-    /// Total number of operations for the fuzzing campaign
     total_operations: u32 = 10000,
 
     /// Operation mix for realistic workloads
@@ -258,20 +257,20 @@ fn print_stats(stats: LogicFuzzStats) void {
     {
         std.debug.print("\n=== Violations Detected ===\n", .{});
         if (stats.data_loss_violations > 0) {
-            std.debug.print("Data loss violations: {}\n", .{stats.data_loss_violations});
+            std.debug.print("Data loss: {}\n", .{stats.data_loss_violations});
         }
         if (stats.consistency_violations > 0) {
-            std.debug.print("Consistency violations: {}\n", .{stats.consistency_violations});
+            std.debug.print("Consistency: {}\n", .{stats.consistency_violations});
         }
         if (stats.edge_violations > 0) {
-            std.debug.print("Edge violations: {}\n", .{stats.edge_violations});
+            std.debug.print("Edge integrity: {}\n", .{stats.edge_violations});
         }
         if (stats.memory_violations > 0) {
-            std.debug.print("Memory violations: {}\n", .{stats.memory_violations});
+            std.debug.print("Memory safety: {}\n", .{stats.memory_violations});
         }
-    } else {
-        std.debug.print("\nNo violations detected - system behaved correctly\n", .{});
     }
+
+    std.debug.print("\n", .{});
 }
 
 /// Test crash recovery behavior

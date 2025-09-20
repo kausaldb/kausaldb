@@ -10,6 +10,8 @@ const build_options = @import("build_options");
 const internal = @import("internal");
 const e2e_bench = @import("e2e_workload_bench.zig");
 
+const output = @import("output.zig");
+
 const Timer = std.time.Timer;
 const Allocator = std.mem.Allocator;
 
@@ -56,30 +58,30 @@ pub const BenchmarkResult = struct {
         return @as(f64, @floatFromInt(ns)) / 1000.0;
     }
 
-    fn print(self: BenchmarkResult, verbose: bool) void {
+    fn print(self: BenchmarkResult, verbose: bool, allocator: std.mem.Allocator) void {
         const mean_us = format_time_us(self.mean_ns);
         const min_us = format_time_us(self.min_ns);
         const max_us = format_time_us(self.max_ns);
 
-        std.debug.print("  {s}:\n", .{self.name});
-        std.debug.print("    Mean: {d:.2}μs  Min: {d:.2}μs  Max: {d:.2}μs\n", .{ mean_us, min_us, max_us });
-        std.debug.print("    Ops/sec: {d:.0}\n", .{self.ops_per_second});
+        output.print_benchmark_results(allocator, "  {s}:\n", .{self.name});
+        output.print_benchmark_results(allocator, "    Mean: {d:.2}μs  Min: {d:.2}μs  Max: {d:.2}μs\n", .{ mean_us, min_us, max_us });
+        output.print_benchmark_results(allocator, "    Ops/sec: {d:.0}\n", .{self.ops_per_second});
 
         if (self.regression_percent) |regression| {
             if (regression > 0) {
-                std.debug.print("    REGRESSION: {d:.1}% slower\n", .{regression});
+                output.print_benchmark_results(allocator, "    REGRESSION: {d:.1}% slower\n", .{regression});
             } else {
-                std.debug.print("    IMPROVEMENT: {d:.1}% faster\n", .{-regression});
+                output.print_benchmark_results(allocator, "    IMPROVEMENT: {d:.1}% faster\n", .{-regression});
             }
         }
 
         if (verbose) {
             const median_us = format_time_us(self.median_ns);
             const std_dev_us = format_time_us(self.std_dev_ns);
-            std.debug.print("    Median: {d:.2}μs  StdDev: {d:.2}μs\n", .{ median_us, std_dev_us });
+            output.print_benchmark_results(allocator, "    Median: {d:.2}μs  StdDev: {d:.2}μs\n", .{ median_us, std_dev_us });
         }
 
-        std.debug.print("\n", .{});
+        output.write_benchmark_results("\n");
     }
 };
 
@@ -102,12 +104,12 @@ pub const BenchmarkHarness = struct {
         if (config.baseline_file) |path| {
             harness.baseline = load_baseline(allocator, path) catch |err| switch (err) {
                 error.FileNotFound => blk: {
-                    std.debug.print("Baseline file not found: {s}\n", .{path});
+                    output.print_status(allocator, "Baseline file not found: {s}\n", .{path});
                     break :blk null;
                 },
                 else => blk: {
-                    std.debug.print("Warning: Failed to load baseline file {s}: {}\n", .{ path, err });
-                    std.debug.print("Continuing without baseline comparison...\n", .{});
+                    output.print_status(allocator, "Warning: Failed to load baseline file {s}: {}\n", .{ path, err });
+                    output.write_status("Continuing without baseline comparison...\n");
                     break :blk null;
                 },
             };
@@ -140,10 +142,10 @@ pub const BenchmarkHarness = struct {
 
     /// Print all results
     fn print_results(self: *BenchmarkHarness) void {
-        std.debug.print("\n=== Benchmark Results ===\n\n", .{});
+        output.print_results_header();
 
         for (self.results.items) |result| {
-            result.print(self.config.verbose);
+            result.print(self.config.verbose, self.allocator);
         }
 
         // Summary statistics
@@ -152,30 +154,22 @@ pub const BenchmarkHarness = struct {
 
         for (self.results.items) |result| {
             if (result.regression_percent) |regression| {
-                if (regression > 5.0) { // >5% regression threshold
+                if (regression > 0) {
                     total_regressions += 1;
-                } else if (regression < -5.0) { // >5% improvement
+                } else {
                     total_improvements += 1;
                 }
             }
         }
 
-        std.debug.print("Summary: {} benchmarks, {} regressions, {} improvements\n", .{
-            self.results.items.len,
-            total_regressions,
-            total_improvements,
-        });
-
-        if (total_regressions > 0) {
-            std.debug.print("Performance regressions detected!\n", .{});
-        }
+        output.print_summary(self.allocator, @intCast(self.results.items.len), total_regressions, total_improvements);
     }
 
     /// Save baseline results if requested
     fn save_results_as_baseline(self: *BenchmarkHarness) !void {
         if (self.config.output_baseline_file) |path| {
             try save_baseline(self.allocator, path, self.results.items);
-            std.debug.print("Baseline saved to: {s}\n", .{path});
+            output.print_status(self.allocator, "Baseline saved to: {s}\n", .{path});
         }
     }
 };
@@ -280,9 +274,18 @@ pub fn main() !void {
     var harness = try BenchmarkHarness.init(allocator, config);
     defer harness.deinit();
 
-    std.debug.print("KausalDB Performance Benchmarks\n", .{});
-    std.debug.print("Component: {s}\n", .{@tagName(component)});
-    std.debug.print("Iterations: {}, Warmup: {}\n\n", .{ config.iterations, config.warmup_iterations });
+    output.print_benchmark_header(allocator, "Performance Benchmarks");
+
+    const config_items = [_]output.ConfigItem{
+        .{ .name = "Component", .value = @tagName(component) },
+        .{ .name = "Iterations", .value = try std.fmt.allocPrint(allocator, "{}", .{config.iterations}) },
+        .{ .name = "Warmup", .value = try std.fmt.allocPrint(allocator, "{}", .{config.warmup_iterations}) },
+    };
+    defer {
+        allocator.free(config_items[1].value);
+        allocator.free(config_items[2].value);
+    }
+    output.print_benchmark_config(allocator, &config_items);
 
     // Component dispatch
     switch (component) {
@@ -291,15 +294,15 @@ pub fn main() !void {
             try storage.run_benchmarks(&harness);
         },
         .e2e => {
-            std.debug.print("Running realistic end-to-end workload benchmark...\n", .{});
+            output.write_status("Running realistic end-to-end workload benchmark...\n");
             try e2e_bench.run_e2e_benchmark(allocator);
             return; // E2E benchmark handles its own output
         },
         .query, .ingestion, .core => {
-            std.debug.print("Component not implemented yet\n", .{});
+            output.write_status("Component not implemented yet\n");
         },
         .all => {
-            std.debug.print("Running realistic end-to-end workload benchmark...\n", .{});
+            output.write_status("Running realistic end-to-end workload benchmark...\n");
             try e2e_bench.run_e2e_benchmark_with_harness(&harness);
         },
     }

@@ -126,10 +126,6 @@ pub const TypedFileHandle = struct {
         const available = if (self.position >= self.file_size) 0 else self.file_size - self.position;
         const to_read = @min(buffer.len, available);
 
-        if (builtin.mode == .Debug) {
-            log.debug("Reading {} bytes from {s} at position {} (available: {})", .{ to_read, self.path, self.position, available });
-        }
-
         self.position += to_read;
         return to_read;
     }
@@ -139,10 +135,6 @@ pub const TypedFileHandle = struct {
         if (!self.state.can_write()) return error.InvalidFileState;
         if (!self.access_mode.can_write()) return error.ReadOnlyFile;
         if (data.len == 0) return error.EmptyData;
-
-        if (builtin.mode == .Debug) {
-            log.debug("Writing {} bytes to {s} at position {}", .{ data.len, self.path, self.position });
-        }
 
         self.position += data.len;
         if (self.position > self.file_size) {
@@ -159,20 +151,12 @@ pub const TypedFileHandle = struct {
         }
 
         self.position = offset;
-
-        if (builtin.mode == .Debug) {
-            log.debug("Seeked to position {} in {s}", .{ offset, self.path });
-        }
     }
 
     /// Sync file data to storage with state validation.
     pub fn sync(self: *TypedFileHandle) !void {
         if (!self.state.is_open()) return error.FileClosed;
         if (!self.access_mode.can_write()) return error.ReadOnlyFile;
-
-        if (builtin.mode == .Debug) {
-            log.debug("Syncing file {s} (size: {})", .{ self.path, self.file_size });
-        }
     }
 
     /// Close file and transition to closed state.

@@ -20,7 +20,6 @@ const EdgeType = internal.EdgeType;
 const Config = internal.Config;
 const BlockOwnership = internal.ownership.BlockOwnership;
 
-/// Run storage fuzzing using the shared fuzzer infrastructure
 pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
     std.debug.print("Fuzzing storage engine...\n", .{});
 
@@ -28,7 +27,6 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
         const input = try fuzzer.generate_input();
         defer fuzzer.allocator.free(input);
 
-        // Select fuzzing strategy based on iteration
         const strategy = i % 7;
         switch (strategy) {
             0 => fuzz_storage_operations(fuzzer.allocator, input) catch |err| {
@@ -49,7 +47,7 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
             5 => fuzz_block_serialization(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            6 => { // Recovery test every 7th iteration (reduced frequency)
+            6 => {
                 fuzz_recovery_operations(fuzzer.allocator, input) catch |err| {
                     try fuzzer.handle_crash(input, err);
                 };
@@ -65,20 +63,18 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
     }
 }
 
-/// Core fuzzing logic for storage operations
 fn fuzz_storage_operations(allocator: std.mem.Allocator, input: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    // Use SimulationVFS with fault injection seed
     var sim_vfs = try SimulationVFS.init(alloc);
     defer sim_vfs.deinit();
     const vfs = sim_vfs.vfs();
 
-    // Configure storage for fuzzing with smaller memtable for faster flushes
+    // Smaller memtable triggers more flushes during fuzzing
     const config = Config{
-        .memtable_max_size = 4 * 1024 * 1024, // 4MB for faster flushes
+        .memtable_max_size = 4 * 1024 * 1024,
     };
 
     var storage = try StorageEngine.init(alloc, vfs, "fuzz_storage", config);
@@ -88,14 +84,12 @@ fn fuzz_storage_operations(allocator: std.mem.Allocator, input: []const u8) !voi
     // This was the state machine bug: .initialized -> .flushing is invalid
     try storage.startup();
     defer storage.shutdown() catch {};
-
-    // Parse input to determine operations
     var i: usize = 0;
     while (i + 4 < input.len) : (i += 1) {
-        const op_type = input[i] % 6; // 6 operation types
+        const op_type = input[i] % 6;
 
         switch (op_type) {
-            0 => { // put_block
+            0 => {
                 const block = fuzz_generate_block(alloc, input[i..]);
                 storage.put_block(block) catch {
                     // Handle assertion failures and validation errors gracefully
@@ -109,7 +103,7 @@ fn fuzz_storage_operations(allocator: std.mem.Allocator, input: []const u8) !voi
                 const id = fuzz_generate_block_id(input[i..]);
                 storage.delete_block(id) catch {};
             },
-            3 => { // put_edge
+            3 => {
                 const edge = fuzz_generate_edge(input[i..]);
                 storage.put_edge(edge) catch {};
             },
@@ -118,7 +112,7 @@ fn fuzz_storage_operations(allocator: std.mem.Allocator, input: []const u8) !voi
                     // Handle flush errors gracefully
                 };
             },
-            5 => { // find_edges
+            5 => {
                 const id = fuzz_generate_block_id(input[i..]);
                 _ = storage.find_outgoing_edges(id);
                 _ = storage.find_incoming_edges(id);
@@ -373,7 +367,6 @@ fn fuzz_generate_block(allocator: std.mem.Allocator, data: []const u8) ContextBl
     };
 }
 
-/// Generate a fuzzed BlockId from input data
 fn fuzz_generate_block_id(data: []const u8) BlockId {
     if (data.len >= 16) {
         var bytes: [16]u8 = undefined;
@@ -397,7 +390,6 @@ fn fuzz_generate_edge(data: []const u8) GraphEdge {
     };
 }
 
-/// Fuzz compaction operations
 fn fuzz_compaction(allocator: std.mem.Allocator, input: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
