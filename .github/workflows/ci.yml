@@ -202,12 +202,15 @@ jobs:
           ./zig/zig build fuzz-quick \
             -Dfuzz-corpus=fuzz-corpus
 
-      - name: Run Extended Fuzzing (main branch only)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        run: |
-          ./zig/zig build fuzz \
-            -Dfuzz-iterations=10000 \
-            -Dfuzz-corpus=fuzz-corpus
+      # Note: Let's skip this for now since it takes around 20 minutes to finish. This makes the feedback
+      # loop to slow and hurts DX. Rely on the quick fuzz on master and do more extensive fuzzing in nightly job.
+      #
+      # - name: Run Extended Fuzzing (main branch only)
+      #   if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      #   run: |
+      #     ./zig/zig build fuzz \
+      #       -Dfuzz-iterations=10000 \
+      #       -Dfuzz-corpus=fuzz-corpus
 
       - name: Save Corpus Statistics
         if: success() || failure()
