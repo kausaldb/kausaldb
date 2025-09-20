@@ -92,6 +92,7 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
         config.operation_mix,
         WorkloadConfig{}, // Use default workload configuration
     );
+    defer generator.deinit();
 
     // Main loop runs for thousands of operations on the SAME engine instance
     for (0..config.total_operations) |op_index| {
@@ -100,8 +101,9 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
 
         // Apply operation to the real system
         const success = apply_operation_to_system(&storage, op) catch |err| {
-            const err_msg = try std.fmt.allocPrint(fuzzer.allocator, "operation_failed_at_{}", .{op_index});
-            defer fuzzer.allocator.free(err_msg);
+            // Use stack buffer to avoid allocation for error messages
+            var err_buf: [64]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "op_fail_{}", .{op_index}) catch "op_fail";
             try fuzzer.handle_crash(err_msg, err);
             continue;
         };
@@ -118,8 +120,9 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
 
         // Verify properties after each operation
         verify_properties(&model, &storage) catch |err| {
-            const err_msg = try std.fmt.allocPrint(fuzzer.allocator, "property_violation_at_{}", .{op_index});
-            defer fuzzer.allocator.free(err_msg);
+            // Use stack buffer to avoid allocation for error messages
+            var err_buf: [64]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "prop_fail_{}", .{op_index}) catch "prop_fail";
             try fuzzer.handle_crash(err_msg, err);
 
             // Increment general violation counter
@@ -281,12 +284,9 @@ pub fn fuzz_crash_recovery(fuzzer: *main.Fuzzer) !void {
         const seed = fuzzer.config.seed ^ @as(u64, @intCast(iteration));
 
         fuzz_single_crash_recovery(fuzzer, seed) catch |err| {
-            const crash_data = try std.fmt.allocPrint(
-                fuzzer.allocator,
-                "crash_recovery_seed_{X}",
-                .{seed},
-            );
-            defer fuzzer.allocator.free(crash_data);
+            // Use stack buffer to avoid allocation for error messages
+            var crash_buf: [64]u8 = undefined;
+            const crash_data = std.fmt.bufPrint(&crash_buf, "crash_{X}", .{seed}) catch "crash_recovery";
             try fuzzer.handle_crash(crash_data, err);
         };
 
@@ -301,8 +301,9 @@ fn fuzz_single_crash_recovery(fuzzer: *main.Fuzzer, seed: u64) !void {
     defer sim_vfs.deinit();
 
     const vfs = sim_vfs.vfs();
-    const db_path = try std.fmt.allocPrint(fuzzer.allocator, "crash_test_{}", .{seed});
-    defer fuzzer.allocator.free(db_path);
+    // Use stack buffer for database path to avoid allocation
+    var db_buf: [64]u8 = undefined;
+    const db_path = std.fmt.bufPrint(&db_buf, "crash_test_{}", .{seed}) catch "crash_test";
 
     // Initialize model
     var model = try ModelState.init(fuzzer.allocator);
@@ -323,14 +324,15 @@ fn fuzz_single_crash_recovery(fuzzer: *main.Fuzzer, seed: u64) !void {
         try storage.startup();
 
         var generator = WorkloadGenerator.init(fuzzer.allocator, seed, .{});
+        defer generator.deinit();
 
         // Execute operations
         for (0..50) |_| {
             const op = try generator.generate_operation();
-            defer generator.cleanup_operation(op);
+            defer generator.cleanup_operation(&op);
 
             if (try apply_operation_to_system(&storage, op)) {
-                try model.apply_operation(op);
+                try model.apply_operation(&op);
             }
         }
 

@@ -1,13 +1,9 @@
-//! Natural language CLI command parsing for KausalDB.
+//! CLI command parsing for KausalDB.
 //!
-//! Supports action-verb commands with natural language syntax:
+//! Parses commands like:
 //! - kausal link . as myproject
 //! - kausal find function "init" in kausaldb
-//! - kausal show callers "main" in myproject
-//! - kausal trace callees "StorageEngine.put_block" --depth 5
-//!
-//! Design rationale: Natural language parsing enables intuitive developer
-//! experience while maintaining type safety and explicit error handling.
+//! - kausal show callers "main"
 
 const std = @import("std");
 
@@ -16,8 +12,8 @@ const error_context = @import("../core/error_context.zig");
 
 const assert = assert_mod.assert;
 
-/// Natural language command parsing errors
-pub const NaturalCommandError = error{
+/// Command parsing errors
+pub const CommandError = error{
     UnknownCommand,
     InvalidSyntax,
     MissingRequiredArgument,
@@ -40,8 +36,8 @@ pub const OutputFormat = enum {
     }
 };
 
-/// Natural language commands supported by the CLI
-pub const NaturalCommand = union(enum) {
+/// Commands supported by the CLI
+pub const Command = union(enum) {
     // Workspace management
     link: LinkCommand,
     unlink: UnlinkCommand,
@@ -114,7 +110,7 @@ pub const NaturalCommand = union(enum) {
 
 /// Result of parsing command line arguments
 pub const ParseResult = struct {
-    command: NaturalCommand,
+    command: Command,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *ParseResult) void {
@@ -147,8 +143,8 @@ pub const ParseResult = struct {
     }
 };
 
-/// Parse command line arguments into natural language commands
-pub fn parse_natural_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+/// Parse command line arguments
+pub fn parse_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     if (args.len < 2) {
         return ParseResult{ .command = .{ .help = .{} }, .allocator = allocator };
     }
@@ -205,13 +201,13 @@ pub fn parse_natural_command(allocator: std.mem.Allocator, args: []const [:0]con
         return parse_server_command(allocator, args[2..]);
     }
 
-    return NaturalCommandError.UnknownCommand;
+    return CommandError.UnknownCommand;
 }
 
 // === Individual Command Parsers ===
 
-fn parse_link_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
-    if (args.len == 0) return NaturalCommandError.MissingRequiredArgument;
+fn parse_link_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
+    if (args.len == 0) return CommandError.MissingRequiredArgument;
 
     const path = try allocator.dupe(u8, args[0]);
     var name: ?[]const u8 = null;
@@ -226,7 +222,7 @@ fn parse_link_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
             format = .json;
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -236,8 +232,8 @@ fn parse_link_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
     };
 }
 
-fn parse_unlink_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
-    if (args.len == 0) return NaturalCommandError.MissingRequiredArgument;
+fn parse_unlink_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
+    if (args.len == 0) return CommandError.MissingRequiredArgument;
 
     const name = try allocator.dupe(u8, args[0]);
     var format: OutputFormat = .human;
@@ -248,7 +244,7 @@ fn parse_unlink_command(allocator: std.mem.Allocator, args: []const [:0]const u8
             format = .json;
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -258,7 +254,7 @@ fn parse_unlink_command(allocator: std.mem.Allocator, args: []const [:0]const u8
     };
 }
 
-fn parse_sync_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_sync_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     var name: ?[]const u8 = null;
     var all = false;
     var format: OutputFormat = .human;
@@ -275,7 +271,7 @@ fn parse_sync_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
             name = try allocator.dupe(u8, args[i]);
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -285,14 +281,14 @@ fn parse_sync_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
     };
 }
 
-fn parse_status_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_status_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     var format: OutputFormat = .human;
 
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--json")) {
             format = .json;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -302,9 +298,9 @@ fn parse_status_command(allocator: std.mem.Allocator, args: []const [:0]const u8
     };
 }
 
-fn parse_find_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_find_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     // Expected: find <type> <name> [in <workspace>] [--json]
-    if (args.len < 2) return NaturalCommandError.MissingRequiredArgument;
+    if (args.len < 2) return CommandError.MissingRequiredArgument;
 
     const entity_type = try allocator.dupe(u8, args[0]);
     const name = try allocator.dupe(u8, args[1]);
@@ -320,7 +316,7 @@ fn parse_find_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
             format = .json;
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -330,9 +326,9 @@ fn parse_find_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
     };
 }
 
-fn parse_show_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_show_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     // Expected: show <relation> <target> [in <workspace>] [--json]
-    if (args.len < 2) return NaturalCommandError.MissingRequiredArgument;
+    if (args.len < 2) return CommandError.MissingRequiredArgument;
 
     const relation_type = try allocator.dupe(u8, args[0]);
     const target = try allocator.dupe(u8, args[1]);
@@ -348,7 +344,7 @@ fn parse_show_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
             format = .json;
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -358,9 +354,9 @@ fn parse_show_command(allocator: std.mem.Allocator, args: []const [:0]const u8) 
     };
 }
 
-fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     // Expected: trace <direction> <target> [in <workspace>] [--depth N] [--json]
-    if (args.len < 2) return NaturalCommandError.MissingRequiredArgument;
+    if (args.len < 2) return CommandError.MissingRequiredArgument;
 
     const direction = try allocator.dupe(u8, args[0]);
     const target = try allocator.dupe(u8, args[1]);
@@ -375,14 +371,14 @@ fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8)
             i += 2;
         } else if (std.mem.eql(u8, args[i], "--depth") and i + 1 < args.len) {
             depth = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                return NaturalCommandError.InvalidSyntax;
+                return CommandError.InvalidSyntax;
             };
             i += 2;
         } else if (std.mem.eql(u8, args[i], "--json")) {
             format = .json;
             i += 1;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -392,7 +388,7 @@ fn parse_trace_command(allocator: std.mem.Allocator, args: []const [:0]const u8)
     };
 }
 
-fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8) NaturalCommandError!ParseResult {
+fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8) CommandError!ParseResult {
     // Expected: server [--port N] [--host <host>] [--data-dir <path>]
     var port: ?u16 = null;
     var host: ?[]const u8 = null;
@@ -402,7 +398,7 @@ fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8
     while (i < args.len) {
         if (std.mem.eql(u8, args[i], "--port") and i + 1 < args.len) {
             port = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                return NaturalCommandError.InvalidSyntax;
+                return CommandError.InvalidSyntax;
             };
             i += 2;
         } else if (std.mem.eql(u8, args[i], "--host") and i + 1 < args.len) {
@@ -412,7 +408,7 @@ fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8
             data_dir = try allocator.dupe(u8, args[i + 1]);
             i += 2;
         } else {
-            return NaturalCommandError.InvalidSyntax;
+            return CommandError.InvalidSyntax;
         }
     }
 
@@ -426,7 +422,6 @@ fn parse_server_command(allocator: std.mem.Allocator, args: []const [:0]const u8
 
 /// Validates that the given entity type is supported by KausalDB.
 /// Entity types correspond to Zig language constructs that can be indexed.
-/// Returns true if the type is valid, false otherwise.
 pub fn validate_entity_type(entity_type: []const u8) bool {
     const valid_types = &[_][]const u8{ "function", "struct", "test", "method", "const", "var", "type", "import" };
 
@@ -438,7 +433,6 @@ pub fn validate_entity_type(entity_type: []const u8) bool {
 
 /// Validates that the given relation type is supported for graph traversal.
 /// Relation types define how code entities are connected in the knowledge graph.
-/// Returns true if the type is valid, false otherwise.
 pub fn validate_relation_type(relation_type: []const u8) bool {
     const valid_relations = &[_][]const u8{ "callers", "callees", "references" };
 
@@ -450,7 +444,6 @@ pub fn validate_relation_type(relation_type: []const u8) bool {
 
 /// Validates that the given direction is supported for trace operations.
 /// Directions determine traversal path in multi-hop graph operations.
-/// Returns true if the direction is valid, false otherwise.
 pub fn validate_direction(direction: []const u8) bool {
     const valid_directions = &[_][]const u8{ "callers", "callees", "both", "references" };
 
@@ -467,7 +460,7 @@ test "parse link command" {
     // Test basic link
     {
         const args = [_][:0]const u8{ "kausal", "link", "." };
-        var result = try parse_natural_command(allocator, &args);
+        var result = try parse_command(allocator, &args);
         defer result.deinit();
 
         const link_cmd = result.command.link;
@@ -479,7 +472,7 @@ test "parse link command" {
     // Test link with name
     {
         const args = [_][:0]const u8{ "kausal", "link", "/path/to/code", "as", "myproject" };
-        var result = try parse_natural_command(allocator, &args);
+        var result = try parse_command(allocator, &args);
         defer result.deinit();
 
         const link_cmd = result.command.link;
@@ -495,7 +488,7 @@ test "parse find command" {
     // Test basic find
     {
         const args = [_][:0]const u8{ "kausal", "find", "function", "init" };
-        var result = try parse_natural_command(allocator, &args);
+        var result = try parse_command(allocator, &args);
         defer result.deinit();
 
         const find_cmd = result.command.find;
@@ -507,7 +500,7 @@ test "parse find command" {
     // Test find with workspace
     {
         const args = [_][:0]const u8{ "kausal", "find", "function", "init", "in", "kausaldb" };
-        var result = try parse_natural_command(allocator, &args);
+        var result = try parse_command(allocator, &args);
         defer result.deinit();
 
         const find_cmd = result.command.find;

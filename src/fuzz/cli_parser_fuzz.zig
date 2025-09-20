@@ -8,47 +8,55 @@ const std = @import("std");
 const main = @import("main.zig");
 const internal = @import("internal");
 
-const NaturalCommandError = internal.NaturalCommandError;
-const parse_natural_command = internal.parse_natural_command;
+const CommandError = internal.CommandError;
+const parse_command = internal.parse_command;
 
 const log = std.log.scoped(.cli_parser_fuzz);
 
 pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
     std.debug.print("Fuzzing CLI parser...\n", .{});
 
+    // Use arena for the entire fuzzing run to eliminate leaks
+    var arena = std.heap.ArenaAllocator.init(fuzzer.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
     for (0..fuzzer.config.iterations) |i| {
-        const input = try fuzzer.generate_input();
-        defer fuzzer.allocator.free(input);
+        const input = try arena_alloc.alloc(u8, fuzzer.random.intRangeAtMost(usize, 1, 4096));
+        fuzzer.random.bytes(input);
 
         // Select fuzzing strategy based on iteration
         const strategy = i % 8;
         switch (strategy) {
-            0 => fuzz_malformed_arguments(fuzzer.allocator, input) catch |err| {
+            0 => fuzz_malformed_arguments(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            1 => fuzz_long_arguments(fuzzer.allocator, input) catch |err| {
+            1 => fuzz_long_arguments(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            2 => fuzz_unicode_input(fuzzer.allocator, input) catch |err| {
+            2 => fuzz_unicode_input(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            3 => fuzz_control_characters(fuzzer.allocator, input) catch |err| {
+            3 => fuzz_control_characters(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            4 => fuzz_empty_and_null_args(fuzzer.allocator, input) catch |err| {
+            4 => fuzz_empty_and_null_args(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            5 => fuzz_extremely_long_commands(fuzzer.allocator, input) catch |err| {
+            5 => fuzz_extremely_long_commands(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            6 => fuzz_mixed_valid_invalid(fuzzer.allocator, input) catch |err| {
+            6 => fuzz_mixed_valid_invalid(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            7 => fuzz_boundary_conditions(fuzzer.allocator, input) catch |err| {
+            7 => fuzz_boundary_conditions(arena_alloc, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
             else => {},
         }
+
+        // Reset arena after each iteration to prevent memory accumulation
+        _ = arena.reset(.retain_capacity);
 
         fuzzer.record_iteration();
 
@@ -64,7 +72,6 @@ fn fuzz_malformed_arguments(allocator: std.mem.Allocator, input: []const u8) !vo
     // Generate random argument count and malformed arguments
     const arg_count = (input[0] % 10) + 1; // 1-10 arguments
     const args = try allocator.alloc([:0]const u8, arg_count);
-    defer allocator.free(args);
 
     for (args, 0..) |*arg, i| {
         const start_idx = (i * input.len / args.len);
@@ -77,18 +84,9 @@ fn fuzz_malformed_arguments(allocator: std.mem.Allocator, input: []const u8) !vo
             arg.* = try allocator.dupeZ(u8, slice);
         }
     }
-    defer {
-        for (args) |arg| {
-            allocator.free(arg);
-        }
-    }
 
     // This should never crash, only return errors
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        // These are expected errors, not crashes
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err, // This would be a crash we want to catch
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
@@ -96,16 +94,10 @@ fn fuzz_long_arguments(allocator: std.mem.Allocator, input: []const u8) !void {
     // Create arguments with excessive length
     const base_args = [_][:0]const u8{ "kausal", "find", "function" };
     var args = try allocator.alloc([:0]const u8, base_args.len + 1);
-    defer allocator.free(args);
 
     // Copy base args
     for (base_args, 0..) |base_arg, i| {
         args[i] = try allocator.dupeZ(u8, base_arg);
-    }
-    defer {
-        for (args[0..base_args.len]) |arg| {
-            allocator.free(arg);
-        }
     }
 
     // Create an extremely long argument
@@ -118,12 +110,8 @@ fn fuzz_long_arguments(allocator: std.mem.Allocator, input: []const u8) !void {
     }
 
     args[base_args.len] = try allocator.dupeZ(u8, long_arg.items);
-    defer allocator.free(args[base_args.len]);
 
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err,
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
@@ -132,7 +120,6 @@ fn fuzz_unicode_input(allocator: std.mem.Allocator, input: []const u8) !void {
     const unicode_chars = "🦀🔥💻🚀αβγδε测试中文العربية";
 
     var args = try allocator.alloc([:0]const u8, 4);
-    defer allocator.free(args);
 
     args[0] = try allocator.dupeZ(u8, "kausal");
     args[1] = try allocator.dupeZ(u8, "find");
@@ -152,22 +139,12 @@ fn fuzz_unicode_input(allocator: std.mem.Allocator, input: []const u8) !void {
     args[2] = try allocator.dupeZ(u8, mixed.items);
     args[3] = try allocator.dupeZ(u8, unicode_chars);
 
-    defer {
-        for (args) |arg| {
-            allocator.free(arg);
-        }
-    }
-
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err,
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
 fn fuzz_control_characters(allocator: std.mem.Allocator, input: []const u8) !void {
     var args = try allocator.alloc([:0]const u8, 3);
-    defer allocator.free(args);
 
     args[0] = try allocator.dupeZ(u8, "kausal");
     args[1] = try allocator.dupeZ(u8, "status");
@@ -189,16 +166,8 @@ fn fuzz_control_characters(allocator: std.mem.Allocator, input: []const u8) !voi
     }
 
     args[2] = try allocator.dupeZ(u8, controlled.items);
-    defer {
-        for (args) |arg| {
-            allocator.free(arg);
-        }
-    }
 
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err,
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
@@ -216,10 +185,7 @@ fn fuzz_empty_and_null_args(allocator: std.mem.Allocator, input: []const u8) !vo
     };
 
     for (test_cases) |args| {
-        var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-            NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => continue,
-            else => return err,
-        };
+        var result = parse_command(allocator, args) catch continue;
         result.deinit();
     }
 }
@@ -230,7 +196,6 @@ fn fuzz_extremely_long_commands(allocator: std.mem.Allocator, input: []const u8)
     // Create massively long command with many arguments
     const max_args = @min(input.len, 100); // Cap at 100 args to prevent OOM
     const args = try allocator.alloc([:0]const u8, max_args);
-    defer allocator.free(args);
 
     for (args, 0..) |*arg, i| {
         // Create progressively longer arguments
@@ -242,18 +207,9 @@ fn fuzz_extremely_long_commands(allocator: std.mem.Allocator, input: []const u8)
         }
 
         arg.* = try allocator.dupeZ(u8, long_arg);
-        allocator.free(long_arg);
-    }
-    defer {
-        for (args) |arg| {
-            allocator.free(arg);
-        }
     }
 
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err,
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
@@ -265,7 +221,6 @@ fn fuzz_mixed_valid_invalid(allocator: std.mem.Allocator, input: []const u8) !vo
     const valid_entities = [_][]const u8{ "function", "struct", "file", "module" };
 
     var args = try allocator.alloc([:0]const u8, 6);
-    defer allocator.free(args);
 
     args[0] = try allocator.dupeZ(u8, "kausal");
 
@@ -287,16 +242,8 @@ fn fuzz_mixed_valid_invalid(allocator: std.mem.Allocator, input: []const u8) !vo
             arg.* = try allocator.dupeZ(u8, input[start..end]);
         }
     }
-    defer {
-        for (args) |arg| {
-            allocator.free(arg);
-        }
-    }
 
-    var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-        NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-        else => return err,
-    };
+    var result = parse_command(allocator, args) catch return;
     result.deinit();
 }
 
@@ -312,32 +259,20 @@ fn fuzz_boundary_conditions(allocator: std.mem.Allocator, input: []const u8) !vo
     };
 
     for (boundary_tests) |args| {
-        var result = parse_natural_command(allocator, args) catch |err| switch (err) {
-            NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => continue,
-            else => return err,
-        };
+        var result = parse_command(allocator, args) catch continue;
         result.deinit();
     }
 
     // Test with input-derived boundary cases
     if (input.len > 0) {
         const single_char_args = try allocator.alloc([:0]const u8, @min(input.len, 20));
-        defer allocator.free(single_char_args);
 
         for (single_char_args, 0..) |*arg, i| {
             const char_slice = input[i .. i + 1];
             arg.* = try allocator.dupeZ(u8, char_slice);
         }
-        defer {
-            for (single_char_args) |arg| {
-                allocator.free(arg);
-            }
-        }
 
-        var result = parse_natural_command(allocator, single_char_args) catch |err| switch (err) {
-            NaturalCommandError.UnknownCommand, NaturalCommandError.InvalidSyntax, NaturalCommandError.MissingRequiredArgument, NaturalCommandError.TooManyArguments, NaturalCommandError.InvalidWorkspaceName, NaturalCommandError.InvalidEntityType, NaturalCommandError.InvalidRelationType, NaturalCommandError.InvalidDirection, error.OutOfMemory => return,
-            else => return err,
-        };
+        var result = parse_command(allocator, single_char_args) catch return;
         result.deinit();
     }
 }

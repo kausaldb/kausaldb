@@ -15,8 +15,8 @@ pub const std_options = .{
 };
 
 comptime {
-    _ = @import("cli/natural_commands.zig");
-    _ = @import("cli/natural_executor.zig");
+    _ = @import("cli/commands.zig");
+    _ = @import("cli/executor.zig");
     _ = @import("core/arena.zig");
     _ = @import("core/assert.zig");
     _ = @import("core/bounded.zig");
