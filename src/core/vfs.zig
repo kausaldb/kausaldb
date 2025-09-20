@@ -318,6 +318,9 @@ pub const VFile = struct {
 
                 const data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
 
+                // Prevent integer underflow if position is beyond end of file
+                if (sim.position >= data.content.items.len) break :blk 0;
+
                 const available = @min(buffer.len, data.content.items.len - sim.position);
                 if (available == 0) break :blk 0;
 
