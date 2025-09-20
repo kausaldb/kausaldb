@@ -558,15 +558,13 @@ fn execute_find_command(context: *ExecutionContext, cmd: Command.FindCommand) !v
             output.write_stdout(".\n");
         } else {
             // Success message with checkmark
-            const workspace_part = if (cmd.workspace) |ws| 
+            const workspace_part = if (cmd.workspace) |ws|
                 try std.fmt.allocPrint(context.allocator, " in workspace '{s}'", .{ws})
-            else 
+            else
                 try context.allocator.dupe(u8, "");
             defer context.allocator.free(workspace_part);
-            
-            output.print_success(context.allocator, "Found {} {s} named '{s}'{s}", .{ 
-                search_result.total_matches, cmd.entity_type, cmd.name, workspace_part 
-            });
+
+            output.print_success(context.allocator, "Found {} {s} named '{s}'{s}", .{ search_result.total_matches, cmd.entity_type, cmd.name, workspace_part });
 
             // Format all results in one go
             for (search_result.results) |result| {
@@ -576,7 +574,7 @@ fn execute_find_command(context: *ExecutionContext, cmd: Command.FindCommand) !v
 
                 const formatted_id = output.format_block_id(context.allocator, block_id_hex) catch block_id_hex;
                 defer if (formatted_id.ptr != block_id_hex.ptr) context.allocator.free(formatted_id);
-                
+
                 const compact_id = output.format_block_id_compact(context.allocator, block_id_hex) catch block_id_hex;
                 defer if (compact_id.ptr != block_id_hex.ptr) context.allocator.free(compact_id);
 
@@ -595,8 +593,8 @@ fn execute_find_command(context: *ExecutionContext, cmd: Command.FindCommand) !v
                 defer context.allocator.free(indented_preview);
                 const formatted_preview = try std.mem.replaceOwned(u8, context.allocator, indented_preview, "\n", "\n│           ");
                 defer context.allocator.free(formatted_preview);
-                
-                // Card-like frame for each result with multiline preview  
+
+                // Card-like frame for each result with multiline preview
                 const result_card = try std.fmt.allocPrint(context.allocator,
                     \\
                     \\┌─ {s} [{s}]
@@ -608,7 +606,7 @@ fn execute_find_command(context: *ExecutionContext, cmd: Command.FindCommand) !v
                     \\
                 , .{ extract_entity_name(block), formatted_id, block.source_uri, compact_id, formatted_preview });
                 defer context.allocator.free(result_card);
-                
+
                 output.write_stdout(result_card);
             }
         }

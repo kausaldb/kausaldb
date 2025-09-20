@@ -26,6 +26,7 @@ comptime {
     _ = @import("e2e/harness.zig");
     _ = @import("e2e/ingestion_test.zig");
     _ = @import("e2e/query_commands.zig");
+    _ = @import("e2e/qualified_name_disambiguation.zig");
     _ = @import("e2e/relationship_commands_safety.zig");
     _ = @import("e2e/shell_scenarios.zig");
     _ = @import("e2e/storage_pressure_testing.zig");

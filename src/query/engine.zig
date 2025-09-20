@@ -739,7 +739,28 @@ pub const QueryEngine = struct {
             const colon_pos = std.mem.lastIndexOf(u8, unit_id, ":") orelse continue;
             const entity_name = unit_id[colon_pos + 1 ..];
 
-            if (std.mem.eql(u8, entity_name, name)) {
+            // Check for qualified name support (e.g., "StorageEngine.init")
+            var is_match: bool = false;
+            if (std.mem.indexOf(u8, name, ".")) |dot_pos| {
+                // Qualified name: extract struct and method parts
+                const requested_struct = name[0..dot_pos];
+                const requested_method = name[dot_pos + 1 ..];
+
+                // Find the struct name in unit_id (second-to-last component)
+                const remaining = unit_id[0..colon_pos];
+                if (std.mem.lastIndexOf(u8, remaining, ":")) |prev_colon| {
+                    const struct_name = remaining[prev_colon + 1 ..];
+
+                    // Match both struct and method names
+                    is_match = std.mem.eql(u8, struct_name, requested_struct) and
+                        std.mem.eql(u8, entity_name, requested_method);
+                }
+            } else {
+                // Simple name: match entity name directly (existing behavior)
+                is_match = std.mem.eql(u8, entity_name, name);
+            }
+
+            if (is_match) {
                 matches_found += 1;
 
                 try results.append(SemanticResult{

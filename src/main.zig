@@ -67,7 +67,7 @@ pub fn main() !void {
     const db_path = std.process.getEnvVarOwned(allocator, "KAUSAL_DB_PATH") catch ".kausal-data";
     defer if (!std.mem.eql(u8, db_path, ".kausal-data")) allocator.free(db_path);
 
-    // Parse and execute command  
+    // Parse and execute command
     var parse_result = commands.parse_command(allocator, args) catch |err| switch (err) {
         commands.CommandError.UnknownCommand => {
             if (args.len >= 2) {
