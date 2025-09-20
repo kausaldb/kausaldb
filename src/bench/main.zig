@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const internal = @import("internal");
 const e2e_bench = @import("e2e_workload_bench.zig");
 
@@ -186,9 +187,13 @@ fn parse_component_arg(args: [][:0]u8) Component {
     return .all;
 }
 
-/// Parse configuration from command line arguments
+/// Parse configuration from build options and command line arguments
 fn parse_config(args: [][:0]u8) BenchConfig {
-    var config = BenchConfig{};
+    var config = BenchConfig{
+        .iterations = build_options.bench_iterations,
+        .warmup_iterations = build_options.bench_warmup,
+        .baseline_file = build_options.bench_baseline,
+    };
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
