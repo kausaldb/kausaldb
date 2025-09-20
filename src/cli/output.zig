@@ -66,7 +66,7 @@ pub fn reset_config() void {
 /// Write raw string to stdout
 fn write_stdout_raw(msg: []const u8) void {
     if (output_config.quiet) return;
-    
+
     const stdout = std.fs.File{ .handle = 1 };
     _ = stdout.writeAll(msg) catch {};
 }
@@ -80,7 +80,7 @@ fn write_stderr_raw(msg: []const u8) void {
 /// Format and write to stdout
 fn write_stdout_fmt(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     if (output_config.quiet) return;
-    
+
     const formatted = std.fmt.allocPrint(allocator, fmt, args) catch return;
     defer allocator.free(formatted);
     write_stdout_raw(formatted);
@@ -96,7 +96,7 @@ fn write_stderr_fmt(allocator: std.mem.Allocator, comptime fmt: []const u8, args
 /// Apply color formatting if colors are enabled
 fn with_color(allocator: std.mem.Allocator, color: []const u8, text: []const u8) []const u8 {
     if (!output_config.color) return text;
-    
+
     return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ color, text, Colors.RESET }) catch text;
 }
 
@@ -106,7 +106,7 @@ fn with_color(allocator: std.mem.Allocator, color: []const u8, text: []const u8)
 pub fn print_success(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     const symbol = with_color(allocator, Colors.GREEN, Symbols.SUCCESS);
     defer if (output_config.color) allocator.free(symbol);
-    
+
     write_stdout_fmt(allocator, "{s} ", .{symbol});
     write_stdout_fmt(allocator, fmt, args);
     write_stdout_raw("\n");
@@ -116,7 +116,7 @@ pub fn print_success(allocator: std.mem.Allocator, comptime fmt: []const u8, arg
 pub fn print_error(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     const symbol = with_color(allocator, Colors.RED, Symbols.ERROR);
     defer if (output_config.color) allocator.free(symbol);
-    
+
     write_stderr_fmt(allocator, "{s} Error: ", .{symbol});
     write_stderr_fmt(allocator, fmt, args);
     write_stderr_raw("\n");
@@ -126,7 +126,7 @@ pub fn print_error(allocator: std.mem.Allocator, comptime fmt: []const u8, args:
 pub fn print_warning(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     const text = with_color(allocator, Colors.YELLOW, "Warning:");
     defer if (output_config.color) allocator.free(text);
-    
+
     write_stderr_fmt(allocator, "{s} ", .{text});
     write_stderr_fmt(allocator, fmt, args);
     write_stderr_raw("\n");
@@ -136,10 +136,10 @@ pub fn print_warning(allocator: std.mem.Allocator, comptime fmt: []const u8, arg
 pub fn print_header(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     const formatted = std.fmt.allocPrint(allocator, fmt, args) catch return;
     defer allocator.free(formatted);
-    
+
     const styled = with_color(allocator, Colors.BOLD, formatted);
     defer if (output_config.color) allocator.free(styled);
-    
+
     write_stdout_fmt(allocator, "{s}\n", .{styled});
 }
 
@@ -147,7 +147,7 @@ pub fn print_header(allocator: std.mem.Allocator, comptime fmt: []const u8, args
 pub fn print_workspace_header() void {
     const styled = with_color(std.heap.page_allocator, Colors.BOLD, "WORKSPACE");
     defer if (output_config.color) std.heap.page_allocator.free(styled);
-    
+
     write_stdout_fmt(std.heap.page_allocator, "{s}\n\n", .{styled});
 }
 
@@ -155,24 +155,24 @@ pub fn print_workspace_header() void {
 pub fn print_result_card(allocator: std.mem.Allocator, index: usize, name: []const u8, block_id: []const u8, source: []const u8, preview: ?[]const u8) void {
     // Card number and name
     write_stdout_fmt(allocator, "{}. {s}\n", .{ index, name });
-    
+
     // BlockId in cyan for visibility
     const id_label = with_color(allocator, Colors.CYAN, "ID:");
     defer if (output_config.color) allocator.free(id_label);
     write_stdout_fmt(allocator, "   {s}     {s}\n", .{ id_label, block_id });
-    
+
     // Source in gray
     const source_label = with_color(allocator, Colors.GRAY, "Source:");
     defer if (output_config.color) allocator.free(source_label);
     write_stdout_fmt(allocator, "   {s} {s}\n", .{ source_label, source });
-    
+
     // Preview if available
     if (preview) |p| {
         const preview_label = with_color(allocator, Colors.GRAY, "Preview:");
         defer if (output_config.color) allocator.free(preview_label);
         write_stdout_fmt(allocator, "   {s} {s}\n", .{ preview_label, p });
     }
-    
+
     write_stdout_raw("\n");
 }
 
@@ -180,7 +180,7 @@ pub fn print_result_card(allocator: std.mem.Allocator, index: usize, name: []con
 pub fn print_workspace_status(allocator: std.mem.Allocator, name: []const u8, path: []const u8, blocks: u64, edges: u64, last_sync: []const u8) void {
     const checkmark = with_color(allocator, Colors.GREEN, Symbols.SUCCESS);
     defer if (output_config.color) allocator.free(checkmark);
-    
+
     write_stdout_fmt(allocator, "- {s} {s} (linked from {s})\n", .{ checkmark, name, path });
     write_stdout_fmt(allocator, "    Blocks: {} | Edges: {} | Last synced: {s}\n\n", .{ blocks, edges, last_sync });
 }
@@ -188,10 +188,10 @@ pub fn print_workspace_status(allocator: std.mem.Allocator, name: []const u8, pa
 /// Print empty workspace message
 pub fn print_empty_workspace(allocator: std.mem.Allocator) void {
     write_stdout_raw("No codebases linked.\n\n");
-    
+
     const tip_label = with_color(allocator, Colors.BLUE, "Tip:");
     defer if (output_config.color) allocator.free(tip_label);
-    
+
     write_stdout_fmt(allocator, "{s} Link your first codebase by running:\n", .{tip_label});
     write_stdout_raw("kausaldb link . as my-project\n");
 }
@@ -201,7 +201,7 @@ pub fn print_tree_node(allocator: std.mem.Allocator, depth: u32, is_last: bool, 
     // Build indentation string
     var indent = std.ArrayList(u8).init(allocator);
     defer indent.deinit();
-    
+
     var d: u32 = 0;
     while (d < depth) : (d += 1) {
         if (d == depth - 1) {
@@ -211,17 +211,17 @@ pub fn print_tree_node(allocator: std.mem.Allocator, depth: u32, is_last: bool, 
             indent.appendSlice(Symbols.TREE_SPACE) catch return;
         }
     }
-    
+
     // Print the tree node with shortened BlockId
     const formatted_id = format_block_id(allocator, block_id) catch block_id;
     defer if (formatted_id.ptr != block_id.ptr) allocator.free(formatted_id);
-    
+
     write_stdout_fmt(allocator, "{s} (depth: {}) {s}: {s}\n", .{ indent.items, depth, formatted_id, name });
-    
+
     // Add source info with proper indentation
     var source_indent = std.ArrayList(u8).init(allocator);
     defer source_indent.deinit();
-    
+
     d = 0;
     while (d < depth) : (d += 1) {
         if (d == depth - 1) {
@@ -231,10 +231,10 @@ pub fn print_tree_node(allocator: std.mem.Allocator, depth: u32, is_last: bool, 
             source_indent.appendSlice(Symbols.TREE_SPACE) catch return;
         }
     }
-    
+
     const source_label = with_color(allocator, Colors.GRAY, "Source:");
     defer if (output_config.color) allocator.free(source_label);
-    
+
     write_stdout_fmt(allocator, "{s}{s} {s}\n", .{ source_indent.items, source_label, source });
 }
 
@@ -242,10 +242,10 @@ pub fn print_tree_node(allocator: std.mem.Allocator, depth: u32, is_last: bool, 
 pub fn print_disambiguation_error(allocator: std.mem.Allocator, target: []const u8, entity_type: []const u8, count: usize) void {
     print_error(allocator, "Ambiguous target '{s}'. Found {} matches.", .{ target, count });
     write_stdout_raw("\n");
-    
+
     const command = std.fmt.allocPrint(allocator, "kausaldb find {s} \"{s}\"", .{ entity_type, target }) catch return;
     defer allocator.free(command);
-    
+
     write_stdout_fmt(allocator, "Please use '{s}' to see all matches, then use a specific BlockId for your command.\n", .{command});
 }
 
@@ -285,7 +285,7 @@ pub fn print_version(version: []const u8) void {
     } else {
         const app_name = with_color(std.heap.page_allocator, Colors.BOLD, "KausalDB");
         defer if (output_config.color) std.heap.page_allocator.free(app_name);
-        
+
         write_stdout_fmt(std.heap.page_allocator, "{s} {s}\n", .{ app_name, version });
     }
 }
@@ -309,14 +309,14 @@ pub fn print_json_stdout(allocator: std.mem.Allocator, comptime fmt: []const u8,
 pub fn print_json_error(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) void {
     const error_msg = std.fmt.allocPrint(allocator, fmt, args) catch return;
     defer allocator.free(error_msg);
-    
+
     // Escape quotes in error message for JSON
     const escaped_msg = escape_json_string(allocator, error_msg) catch return;
     defer allocator.free(escaped_msg);
-    
+
     const json_error = std.fmt.allocPrint(allocator, "{{\"error\": \"{s}\"}}\n", .{escaped_msg}) catch return;
     defer allocator.free(json_error);
-    
+
     write_stdout_raw(json_error);
 }
 
@@ -331,7 +331,7 @@ pub fn print_json_formatted(allocator: std.mem.Allocator, comptime fmt: []const 
 fn escape_json_string(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var result = std.array_list.Managed(u8).init(allocator);
     defer result.deinit();
-    
+
     for (input) |char| {
         switch (char) {
             '"' => try result.appendSlice("\\\""),
@@ -342,7 +342,7 @@ fn escape_json_string(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
             else => try result.append(char),
         }
     }
-    
+
     return result.toOwnedSlice();
 }
 
@@ -406,7 +406,7 @@ pub fn format_block_id_compact(allocator: std.mem.Allocator, full_hex: []const u
 pub fn format_time_ago(timestamp: i64) []const u8 {
     const now = std.time.timestamp();
     const minutes_ago = @as(u64, @intCast(now - timestamp)) / 60;
-    
+
     if (minutes_ago == 0) {
         return "Just now";
     } else if (minutes_ago == 1) {
@@ -424,6 +424,6 @@ pub fn truncate_text(allocator: std.mem.Allocator, text: []const u8, max_length:
     if (text.len <= max_length) {
         return try allocator.dupe(u8, text);
     }
-    
+
     return try std.fmt.allocPrint(allocator, "{s}...", .{text[0..max_length]});
 }
