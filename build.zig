@@ -197,6 +197,18 @@ fn build_dev_tools(build_options: BuildOptions, options: DevOptions) void {
 }
 
 fn build_benchmarks(build_options: BuildOptions, _: DevOptions) void {
+    // Ensure main kausaldb binary is built first (required for E2E benchmarks)
+    const kausaldb_exe = build_options.b.addExecutable(.{
+        .name = "kausaldb",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/main.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+    kausaldb_exe.root_module.addImport("build_options", build_options.options.createModule());
+    add_internal_module(kausaldb_exe.root_module, build_options);
+
     const bench_exe = build_options.b.addExecutable(.{
         .name = "bench",
         .root_module = build_options.b.createModule(.{
@@ -210,6 +222,8 @@ fn build_benchmarks(build_options: BuildOptions, _: DevOptions) void {
     add_internal_module(bench_exe.root_module, build_options);
 
     const bench_run = build_options.b.addRunArtifact(bench_exe);
+    // Benchmarks require main binary to be available
+    bench_run.step.dependOn(&kausaldb_exe.step);
 
     // Allow component selection via command line args
     if (build_options.b.args) |args| {

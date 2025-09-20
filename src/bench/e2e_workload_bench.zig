@@ -106,12 +106,45 @@ const E2EWorkloadBench = struct {
         defer allocator.free(relative_binary_path);
         const binary_path = try std.fs.cwd().realpathAlloc(allocator, relative_binary_path);
 
-        // Verify binary exists
-        std.fs.cwd().access(binary_path, .{}) catch {
+        // Verify binary exists and is executable
+        std.fs.cwd().access(binary_path, .{}) catch |err| {
             std.debug.print("ERROR: KausalDB binary not found at {s}\n", .{binary_path});
+            std.debug.print("Error details: {}\n", .{err});
+            std.debug.print("Current working directory: {s}\n", .{std.fs.cwd().realpathAlloc(allocator, ".") catch "unknown"});
+
+            // List contents of zig-out/bin if it exists
+            if (std.fs.cwd().openDir("zig-out/bin", .{})) |bin_dir| {
+                var bin_dir_copy = bin_dir;
+                std.debug.print("Contents of zig-out/bin:\n", .{});
+                var iterator = bin_dir_copy.iterate();
+                while (iterator.next() catch null) |entry| {
+                    std.debug.print("  - {s} ({s})\n", .{ entry.name, @tagName(entry.kind) });
+                }
+                bin_dir_copy.close();
+            } else |_| {
+                std.debug.print("zig-out/bin directory does not exist\n", .{});
+            }
+
             std.debug.print("Run './zig/zig build' first to build the binary\n", .{});
             return error.BinaryNotFound;
         };
+
+        // Test binary execution
+        const version_result = std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ binary_path, "--version" },
+            .max_output_bytes = 1024,
+        }) catch |err| {
+            std.debug.print("ERROR: Failed to execute binary at {s}: {}\n", .{ binary_path, err });
+            return error.BinaryNotExecutable;
+        };
+        allocator.free(version_result.stdout);
+        allocator.free(version_result.stderr);
+
+        if (version_result.term != .Exited or version_result.term.Exited != 0) {
+            std.debug.print("ERROR: Binary failed version check with exit code: {}\n", .{version_result.term});
+            return error.BinaryNotWorking;
+        }
 
         const temp_dir = std.testing.tmpDir(.{});
 
@@ -136,6 +169,10 @@ const E2EWorkloadBench = struct {
         // Create project subdirectory
         try self.temp_dir.dir.makeDir(project_name);
         const full_project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, project_name });
+
+        if (self.config.verbose) {
+            std.debug.print("Creating test project at: {s}\n", .{full_project_path});
+        }
 
         // Generate interconnected source files with realistic patterns
         var file_idx: u32 = 0;
@@ -247,12 +284,33 @@ const E2EWorkloadBench = struct {
 
         const start_time = std.time.nanoTimestamp();
 
-        const result = try std.process.Child.run(.{
+        if (self.config.verbose) {
+            std.debug.print("Executing command: {s}", .{self.binary_path});
+            for (args) |arg| {
+                std.debug.print(" {s}", .{arg});
+            }
+            std.debug.print("\n", .{});
+        }
+
+        const cwd_path = try self.temp_dir.dir.realpathAlloc(self.allocator, ".");
+        defer self.allocator.free(cwd_path);
+
+        const result = std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = argv_list.items,
-            .cwd = try self.temp_dir.dir.realpathAlloc(self.allocator, "."),
+            .cwd = cwd_path,
             .max_output_bytes = 4 * 1024 * 1024, // 4MB
-        });
+        }) catch |err| {
+            std.debug.print("ERROR: Failed to execute command: {}\n", .{err});
+            std.debug.print("Binary path: {s}\n", .{self.binary_path});
+            std.debug.print("Working directory: {s}\n", .{cwd_path});
+            std.debug.print("Arguments: ", .{});
+            for (argv_list.items) |arg| {
+                std.debug.print("'{s}' ", .{arg});
+            }
+            std.debug.print("\n", .{});
+            return err;
+        };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
@@ -268,15 +326,36 @@ const E2EWorkloadBench = struct {
         };
 
         if (exit_code != 0) {
-            if (self.config.verbose) {
-                std.debug.print("Command failed with exit code {}: {s}\n", .{ exit_code, result.stderr });
+            std.debug.print("Command failed with exit code {}\n", .{exit_code});
+            std.debug.print("Command: {s}", .{self.binary_path});
+            for (args) |arg| {
+                std.debug.print(" {s}", .{arg});
             }
+            std.debug.print("\n", .{});
+
+            if (result.stderr.len > 0) {
+                std.debug.print("STDERR:\n{s}\n", .{result.stderr});
+            }
+            if (result.stdout.len > 0) {
+                std.debug.print("STDOUT:\n{s}\n", .{result.stdout});
+            }
+
             return error.CommandFailed;
+        }
+
+        if (self.config.verbose and result.stdout.len > 0) {
+            std.debug.print("Command output: {s}\n", .{result.stdout});
         }
     }
 
     /// Run the complete mixed-workload benchmark
     pub fn run_benchmark(self: *Self) !BenchmarkResults {
+        std.debug.print("Starting E2E benchmark with configuration:\n", .{});
+        std.debug.print("  Operations per type: {}\n", .{self.config.operations_per_type});
+        std.debug.print("  Codebase size: {} files\n", .{self.config.codebase_size});
+        std.debug.print("  Functions per file: {}\n", .{self.config.functions_per_file});
+        std.debug.print("  Binary path: {s}\n", .{self.binary_path});
+        std.debug.print("  Verbose: {}\n", .{self.config.verbose});
         std.debug.print("Creating test project with {d} files, {d} functions per file...\n", .{ self.config.codebase_size, self.config.functions_per_file });
 
         const project_path = try self.create_test_project();
