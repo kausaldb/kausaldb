@@ -154,7 +154,9 @@ fn fuzz_edge_cases(allocator: std.mem.Allocator, input: []const u8) !void {
     // Test extremely large content (within limits)
     if (input.len > 100) {
         const sample = input[0..@min(10, input.len)];
-        const large_content = std.fmt.allocPrint(alloc, "fuzz_large_content_{X}_repeated", .{std.hash.Wyhash.hash(0, sample)}) catch "fuzz_large_fallback";
+        var large_buf: [64]u8 = undefined;
+        const large_content_tmp = std.fmt.bufPrint(&large_buf, "fuzz_large_{X}", .{std.hash.Wyhash.hash(0, sample)}) catch "fuzz_large_fallback";
+        const large_content = alloc.dupe(u8, large_content_tmp) catch "fuzz_large_fallback";
         const large_block = ContextBlock{
             .id = BlockId.generate(),
             .sequence = 0, // Storage engine will assign the actual global sequence
@@ -242,7 +244,11 @@ fn fuzz_test_recovery(allocator: std.mem.Allocator, vfs: VFS, input: []const u8)
                 .sequence = 0, // Storage engine will assign the actual global sequence
                 .source_uri = "fuzz://recovery",
                 .metadata_json = "{}",
-                .content = std.fmt.allocPrint(arena_alloc, "recovery_test_{}", .{i}) catch "test",
+                .content = blk: {
+                    var content_buf: [32]u8 = undefined;
+                    const tmp = std.fmt.bufPrint(&content_buf, "recovery_test_{}", .{i}) catch "test";
+                    break :blk arena_alloc.dupe(u8, tmp) catch "test";
+                },
             };
             storage1.put_block(block) catch {
                 // Handle validation errors in recovery testing
@@ -343,13 +349,17 @@ fn fuzz_sstable_operations(allocator: std.mem.Allocator, input: []const u8) !voi
 
 /// Generate a fuzzed block from input data that complies with all validation rules
 fn fuzz_generate_block(allocator: std.mem.Allocator, data: []const u8) ContextBlock {
-    // Generate content that's guaranteed to be under size limits
+    // Generate content that's guaranteed to be under size limits using stack buffers
     const content_hash = if (data.len >= 8) std.hash.Wyhash.hash(0, data[0..@min(8, data.len)]) else 0;
-    const content = std.fmt.allocPrint(allocator, "fuzz_content_{X}", .{content_hash}) catch "fuzz_safe";
+    var content_buf: [64]u8 = undefined;
+    const content = std.fmt.bufPrint(&content_buf, "fuzz_content_{X}", .{content_hash}) catch "fuzz_safe";
+    const content_owned = allocator.dupe(u8, content) catch "fuzz_safe";
 
-    // Generate source_uri that's non-empty and under 2048 bytes
+    // Generate source_uri that's non-empty and under 2048 bytes using stack buffer
     const uri_suffix = if (data.len > 0) data[0] % 100 else 42;
-    const source_uri = std.fmt.allocPrint(allocator, "fuzz://test_{}", .{uri_suffix}) catch "fuzz://safe";
+    var uri_buf: [32]u8 = undefined;
+    const source_uri_tmp = std.fmt.bufPrint(&uri_buf, "fuzz://test_{}", .{uri_suffix}) catch "fuzz://safe";
+    const source_uri = allocator.dupe(u8, source_uri_tmp) catch "fuzz://safe";
 
     // Generate metadata_json under 1MB limit
     const use_extended_metadata = data.len > 16 and (data[16] % 4 == 0);
@@ -363,7 +373,7 @@ fn fuzz_generate_block(allocator: std.mem.Allocator, data: []const u8) ContextBl
         .sequence = if (data.len > 0) @max(data[0] % 255, 1) else 1, // Sequence 1-255, always > 0
         .source_uri = source_uri,
         .metadata_json = metadata_json,
-        .content = content,
+        .content = content_owned,
     };
 }
 

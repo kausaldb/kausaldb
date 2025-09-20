@@ -1,18 +1,14 @@
-//! Natural language command executor for KausalDB.
+//! Command executor for KausalDB CLI.
 //!
-//! Executes parsed natural language commands using workspace management
-//! and semantic query APIs. Provides JSON output support and structured
-//! error handling with helpful user guidance.
-//!
-//! Design rationale: Separates command parsing from execution to enable
-//! testing of command logic independently from argument parsing.
+//! Executes parsed commands using workspace management and query APIs.
+//! Separates command parsing from execution for better testability.
 
 const std = @import("std");
 
 const assert_mod = @import("../core/assert.zig");
 const error_context = @import("../core/error_context.zig");
 const memory = @import("../core/memory.zig");
-const natural_commands = @import("natural_commands.zig");
+const commands = @import("commands.zig");
 const output = @import("output.zig");
 const production_vfs = @import("../core/production_vfs.zig");
 const query_engine = @import("../query/engine.zig");
@@ -27,16 +23,16 @@ const fatal_assert = assert_mod.fatal_assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const types = @import("../core/types.zig");
 const ContextBlock = types.ContextBlock;
-const NaturalCommand = natural_commands.NaturalCommand;
-const OutputFormat = natural_commands.OutputFormat;
+const Command = commands.Command;
+const OutputFormat = commands.OutputFormat;
 const ProductionVFS = production_vfs.ProductionVFS;
 const QueryEngine = query_engine.QueryEngine;
 const StorageEngine = storage.StorageEngine;
 const VFS = vfs.VFS;
 const WorkspaceManager = workspace_manager.WorkspaceManager;
 
-/// Execution context for natural language commands
-pub const NaturalExecutionContext = struct {
+/// Execution context for CLI commands
+pub const ExecutionContext = struct {
     allocator: std.mem.Allocator,
     data_dir: []const u8,
     vfs: VFS,
@@ -47,7 +43,7 @@ pub const NaturalExecutionContext = struct {
     query_engine: ?*QueryEngine,
     workspace_manager: ?*WorkspaceManager,
 
-    pub fn init(allocator: std.mem.Allocator, data_dir: []const u8) !NaturalExecutionContext {
+    pub fn init(allocator: std.mem.Allocator, data_dir: []const u8) !ExecutionContext {
         var prod_vfs = try allocator.create(ProductionVFS);
         prod_vfs.* = ProductionVFS.init(allocator);
 
@@ -72,7 +68,7 @@ pub const NaturalExecutionContext = struct {
             break :blk try std.fs.cwd().realpathAlloc(allocator, data_dir);
         };
 
-        return NaturalExecutionContext{
+        return ExecutionContext{
             .allocator = allocator,
             .data_dir = absolute_data_dir,
             .vfs = prod_vfs.vfs(),
@@ -83,7 +79,7 @@ pub const NaturalExecutionContext = struct {
         };
     }
 
-    pub fn deinit(self: *NaturalExecutionContext) void {
+    pub fn deinit(self: *ExecutionContext) void {
         if (self.workspace_manager) |wm| {
             wm.shutdown();
             wm.deinit();
@@ -117,7 +113,7 @@ pub const NaturalExecutionContext = struct {
 
     /// Generate default workspace name based on current working directory.
     /// Always returns "default" to avoid memory management complexity.
-    fn infer_workspace_name(self: *NaturalExecutionContext) []const u8 {
+    fn infer_workspace_name(self: *ExecutionContext) []const u8 {
         // Only try to get workspace info if workspace manager is already initialized
         // to avoid expensive I/O operations during workspace name inference
         if (self.workspace_manager) |wm| {
@@ -137,7 +133,7 @@ pub const NaturalExecutionContext = struct {
         return "default";
     }
 
-    fn ensure_storage_initialized(self: *NaturalExecutionContext) !void {
+    fn ensure_storage_initialized(self: *ExecutionContext) !void {
         if (self.storage_engine != null) return;
 
         // Ensure data directory exists
@@ -152,7 +148,7 @@ pub const NaturalExecutionContext = struct {
         self.storage_engine = engine;
     }
 
-    fn ensure_query_initialized(self: *NaturalExecutionContext) !void {
+    fn ensure_query_initialized(self: *ExecutionContext) !void {
         try self.ensure_storage_initialized();
         if (self.query_engine != null) return;
 
@@ -162,7 +158,7 @@ pub const NaturalExecutionContext = struct {
         self.query_engine = engine;
     }
 
-    fn ensure_workspace_initialized(self: *NaturalExecutionContext) !void {
+    fn ensure_workspace_initialized(self: *ExecutionContext) !void {
         try self.ensure_storage_initialized();
         if (self.workspace_manager != null) return;
 
@@ -173,10 +169,10 @@ pub const NaturalExecutionContext = struct {
     }
 };
 
-/// Execute a natural language command
-pub fn execute_natural_command(
-    context: *NaturalExecutionContext,
-    command: NaturalCommand,
+/// Execute a CLI command
+pub fn execute_command(
+    context: *ExecutionContext,
+    command: Command,
 ) !void {
     switch (command) {
         .version => execute_version_command(),
@@ -220,7 +216,7 @@ fn execute_version_command() void {
     output.print_version("v0.1.0");
 }
 
-fn execute_help_command(cmd: NaturalCommand.HelpCommand) void {
+fn execute_help_command(cmd: Command.HelpCommand) void {
     if (cmd.topic) |topic| {
         show_command_help(topic);
     } else {
@@ -228,7 +224,7 @@ fn execute_help_command(cmd: NaturalCommand.HelpCommand) void {
     }
 }
 
-fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.LinkCommand) !void {
+fn execute_link_command(context: *ExecutionContext, cmd: Command.LinkCommand) !void {
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
 
@@ -239,7 +235,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Path '{s}' does not exist", .{cmd.path});
             } else {
-                output.print_error(context.allocator, "Path '{s}' does not exist\n", .{cmd.path});
+                output.print_error(context.allocator, "Path '{s}' does not exist", .{cmd.path});
             }
             return error.FileNotFound;
         },
@@ -254,8 +250,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Codebase is already linked. Use 'kausaldb unlink {s}' first if you want to re-link it.", .{std.fs.path.basename(resolved_path)});
             } else {
-                output.print_error(context.allocator, "Codebase is already linked\n", .{});
-                output.print_stderr(context.allocator, "Use 'kausaldb unlink {s}' first if you want to re-link it.\n", .{std.fs.path.basename(resolved_path)});
+                output.print_error(context.allocator, "Codebase is already linked. Use 'kausaldb unlink {s}' first if you want to re-link it.", .{std.fs.path.basename(resolved_path)});
             }
             return error.CodebaseAlreadyLinked;
         },
@@ -263,7 +258,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Invalid codebase path '{s}'", .{resolved_path});
             } else {
-                output.print_error(context.allocator, "Invalid codebase path '{s}'\n", .{resolved_path});
+                output.print_error(context.allocator, "Invalid codebase path '{s}'", .{resolved_path});
             }
             return error.InvalidCodebasePath;
         },
@@ -273,7 +268,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
                 if (cmd.format == .json) {
                     output.print_json_error(context.allocator, "Storage write blocked and L0 compaction failed", .{});
                 } else {
-                    output.print_error(context.allocator, "Storage write blocked and L0 compaction failed: {}\n", .{compact_err});
+                    output.print_error(context.allocator, "Storage write blocked and L0 compaction failed: {}", .{compact_err});
                 }
                 return compact_err;
             };
@@ -284,8 +279,7 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Failed to link codebase. Storage error occurred.", .{});
             } else {
-                output.print_error(context.allocator, "Failed to link codebase '{s}'\n", .{resolved_path});
-                output.print_stderr(context.allocator, "This may be due to a storage issue. Please try again.\n", .{});
+                output.print_error(context.allocator, "Failed to link codebase '{s}'. This may be due to a storage issue. Please try again.", .{resolved_path});
             }
             return err;
         },
@@ -294,16 +288,17 @@ fn execute_link_command(context: *NaturalExecutionContext, cmd: NaturalCommand.L
     const actual_name = cmd.name orelse std.fs.path.basename(resolved_path);
 
     if (cmd.format == .json) {
-        output.print_json_stdout(context.allocator,
+        output.print_json_formatted(context.allocator,
             \\{{"status": "linked", "name": "{s}", "path": "{s}"}}
         , .{ actual_name, resolved_path });
+        output.write_stdout("\n");
     } else {
-        output.print_stdout(context.allocator, "Linked codebase '{s}' from {s}\n", .{ actual_name, resolved_path });
-        output.write_stdout("Indexing in progress...\n");
+        output.print_success(context.allocator, "Linked codebase '{s}' from {s}", .{ actual_name, resolved_path });
+        // Note: "Indexing in progress..." removed as it's not actionable
     }
 }
 
-fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand.UnlinkCommand) !void {
+fn execute_unlink_command(context: *ExecutionContext, cmd: Command.UnlinkCommand) !void {
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
 
@@ -312,8 +307,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Codebase '{s}' not found", .{cmd.name});
             } else {
-                output.print_error(context.allocator, "Codebase '{s}' not found\n", .{cmd.name});
-                output.write_stdout("Use 'kausaldb workspace' to see linked codebases\n");
+                output.print_error(context.allocator, "Codebase '{s}' not found. Use 'kausaldb workspace' to see linked codebases.", .{cmd.name});
             }
             return error.CodebaseNotFound;
         },
@@ -323,7 +317,7 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
                 if (cmd.format == .json) {
                     output.print_json_error(context.allocator, "Storage write blocked and L0 compaction failed", .{});
                 } else {
-                    output.print_error(context.allocator, "Storage write blocked and L0 compaction failed: {}\n", .{compact_err});
+                    output.print_error(context.allocator, "Storage write blocked and L0 compaction failed: {}", .{compact_err});
                 }
                 return compact_err;
             };
@@ -334,23 +328,23 @@ fn execute_unlink_command(context: *NaturalExecutionContext, cmd: NaturalCommand
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Failed to unlink codebase '{s}'. Storage error occurred.", .{cmd.name});
             } else {
-                output.print_error(context.allocator, "Failed to unlink codebase '{s}'\n", .{cmd.name});
-                output.print_stderr(context.allocator, "This may be due to a storage issue. Please try again.\n", .{});
+                output.print_error(context.allocator, "Failed to unlink codebase '{s}'. This may be due to a storage issue. Please try again.", .{cmd.name});
             }
             return err;
         },
     };
 
     if (cmd.format == .json) {
-        output.print_json_stdout(context.allocator,
+        output.print_json_formatted(context.allocator,
             \\{{"status": "unlinked", "name": "{s}"}}
         , .{cmd.name});
+        output.write_stdout("\n");
     } else {
-        output.print_stdout(context.allocator, "Unlinked codebase '{s}'\n", .{cmd.name});
+        output.print_success(context.allocator, "Unlinked codebase '{s}'", .{cmd.name});
     }
 }
 
-fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.SyncCommand) !void {
+fn execute_sync_command(context: *ExecutionContext, cmd: Command.SyncCommand) !void {
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
 
@@ -377,7 +371,7 @@ fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
             output.print_stdout(context.allocator, "Syncing {} codebases...\n", .{codebases.len});
             for (codebases) |codebase_info| {
                 try workspace.sync_codebase(codebase_info.name);
-                output.print_stdout(context.allocator, "✓ Synced '{s}'\n", .{codebase_info.name});
+                output.print_success(context.allocator, "Synced '{s}'", .{codebase_info.name});
             }
         }
     } else if (cmd.name) |name| {
@@ -387,7 +381,7 @@ fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
                 if (cmd.format == .json) {
                     output.print_json_error(context.allocator, "Codebase '{s}' not found", .{name});
                 } else {
-                    output.print_error(context.allocator, "Codebase '{s}' not found\n", .{name});
+                    output.print_error(context.allocator, "Codebase '{s}' not found", .{name});
                 }
                 return;
             },
@@ -395,11 +389,12 @@ fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
         };
 
         if (cmd.format == .json) {
-            output.print_json_stdout(context.allocator,
+            output.print_json_formatted(context.allocator,
                 \\{{"status": "synced", "name": "{s}"}}
             , .{name});
+            output.write_stdout("\n");
         } else {
-            output.print_stdout(context.allocator, "Synced codebase '{s}'\n", .{name});
+            output.print_success(context.allocator, "Synced codebase '{s}'", .{name});
         }
     } else {
         // Sync current directory - detect codebase by path
@@ -421,24 +416,24 @@ fn execute_sync_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
         if (found_codebase) |name| {
             try workspace.sync_codebase(name);
             if (cmd.format == .json) {
-                output.print_json_stdout(context.allocator,
+                output.print_json_formatted(context.allocator,
                     \\{{"status": "synced", "name": "{s}"}}
                 , .{name});
+                output.write_stdout("\n");
             } else {
-                output.print_stdout(context.allocator, "Synced codebase '{s}'\n", .{name});
+                output.print_success(context.allocator, "Synced codebase '{s}'", .{name});
             }
         } else {
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "No linked codebase found for current directory", .{});
             } else {
-                output.write_stdout("No linked codebase found for current directory\n");
-                output.write_stdout("Use 'kausal link .' to link this directory\n");
+                output.write_stdout("No linked codebase found for current directory\nUse 'kausal link .' to link this directory\n");
             }
         }
     }
 }
 
-fn execute_status_command(context: *NaturalExecutionContext, cmd: NaturalCommand.StatusCommand) !void {
+fn execute_status_command(context: *ExecutionContext, cmd: Command.StatusCommand) !void {
     try context.ensure_workspace_initialized();
     const workspace = context.workspace_manager.?;
 
@@ -449,7 +444,7 @@ fn execute_status_command(context: *NaturalExecutionContext, cmd: NaturalCommand
         output.write_stdout("{\n");
         output.write_stdout("  \"workspace\": [\n");
         for (codebases, 0..) |codebase_info, i| {
-            output.print_json_stdout(context.allocator,
+            output.print_json_formatted(context.allocator,
                 \\    {{"name": "{s}", "path": "{s}", "blocks": {}, "edges": {}}}
             , .{ codebase_info.name, codebase_info.path, codebase_info.block_count, codebase_info.edge_count });
             if (i < codebases.len - 1) output.write_stdout(",");
@@ -457,26 +452,28 @@ fn execute_status_command(context: *NaturalExecutionContext, cmd: NaturalCommand
         }
         output.write_stdout("  ]\n}\n");
     } else {
-        output.write_stdout("WORKSPACE\n");
+        output.print_workspace_header();
         if (codebases.len == 0) {
-            output.write_stdout("No codebases linked\n\n");
-            output.write_stdout("Use 'kausal link <path>' to link a codebase\n");
+            output.print_empty_workspace(context.allocator);
         } else {
             for (codebases) |codebase_info| {
-                output.print_stdout(context.allocator, "- {s} (linked from {s})\n", .{ codebase_info.name, codebase_info.path });
                 const minutes_ago = @as(u64, @intCast(std.time.timestamp() - codebase_info.last_sync_timestamp)) / 60;
-                if (minutes_ago == 0) {
-                    output.write_stdout("  Last synced: Just now\n");
-                } else {
-                    output.print_stdout(context.allocator, "  Last synced: {} minutes ago\n", .{minutes_ago});
-                }
-                output.print_stdout(context.allocator, "  Blocks: {} | Edges: {}\n\n", .{ codebase_info.block_count, codebase_info.edge_count });
+                const last_sync = if (minutes_ago == 0)
+                    "Just now"
+                else if (minutes_ago == 1)
+                    "1 minute ago"
+                else
+                    try std.fmt.allocPrint(context.allocator, "{} minutes ago", .{minutes_ago});
+
+                defer if (minutes_ago > 1) context.allocator.free(last_sync);
+
+                output.print_workspace_status(context.allocator, codebase_info.name, codebase_info.path, codebase_info.block_count, codebase_info.edge_count, last_sync);
             }
         }
     }
 }
 
-fn execute_server_command(context: *NaturalExecutionContext, cmd: NaturalCommand.ServerCommand) !void {
+fn execute_server_command(context: *ExecutionContext, cmd: Command.ServerCommand) !void {
     // Server mode requires storage engine initialization
     try context.ensure_storage_initialized();
 
@@ -492,17 +489,16 @@ fn execute_server_command(context: *NaturalExecutionContext, cmd: NaturalCommand
     output.write_stdout("This is a placeholder for the upcoming network server functionality\n");
 }
 
-fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.FindCommand) !void {
+fn execute_find_command(context: *ExecutionContext, cmd: Command.FindCommand) !void {
     try context.ensure_query_initialized();
     const query_eng = context.query_engine.?;
 
     // Entity type validation prevents unsupported queries from reaching storage
-    if (!natural_commands.validate_entity_type(cmd.entity_type)) {
+    if (!commands.validate_entity_type(cmd.entity_type)) {
         if (cmd.format == .json) {
             output.print_json_error(context.allocator, "Invalid entity type '{s}'", .{cmd.entity_type});
         } else {
-            output.print_error(context.allocator, "Invalid entity type '{s}'\n", .{cmd.entity_type});
-            output.write_stdout("Valid types: function, struct, test, method, const, var, type, import\n");
+            output.print_error(context.allocator, "Invalid entity type '{s}'. Valid types: function, struct, test, method, const, var, type, import", .{cmd.entity_type});
         }
         return;
     }
@@ -529,8 +525,7 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
             if (cmd.format == .json) {
                 output.print_json_error(context.allocator, "Semantic search not available", .{});
             } else {
-                output.write_stdout("Semantic search is not available yet.\n");
-                output.write_stdout("Make sure codebases are linked and synced.\n");
+                output.write_stdout("Semantic search is not available yet.\nMake sure codebases are linked and synced.\n");
             }
             return;
         },
@@ -545,9 +540,11 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
         output.write_stdout("  \"results\": [\n");
         for (search_result.results, 0..) |result, i| {
             const block = result.block.block;
+            const block_id_hex = try block.id.to_hex(context.allocator);
+            defer context.allocator.free(block_id_hex);
             output.print_json_stdout(context.allocator,
-                \\    {{"name": "{s}", "source": "{s}", "similarity": {d:.3}}}
-            , .{ extract_entity_name(block), block.source_uri, result.similarity_score });
+                \\    {{"name": "{s}", "id": "{s}", "source": "{s}", "similarity": {d:.3}}}
+            , .{ extract_entity_name(block), block_id_hex, block.source_uri, result.similarity_score });
             if (i < search_result.results.len - 1) output.write_stdout(",");
             output.write_stdout("\n");
         }
@@ -560,99 +557,137 @@ fn execute_find_command(context: *NaturalExecutionContext, cmd: NaturalCommand.F
             }
             output.write_stdout(".\n");
         } else {
-            // Include the pattern that E2E tests expect to find
-            output.print_stdout(context.allocator, "{s} named '{s}' in workspace", .{ cmd.entity_type, cmd.name });
-            if (cmd.workspace) |ws| {
-                output.print_stdout(context.allocator, " '{s}'", .{ws});
-            }
-            output.write_stdout("\n");
+            // Success message with checkmark
+            const workspace_part = if (cmd.workspace) |ws| 
+                try std.fmt.allocPrint(context.allocator, " in workspace '{s}'", .{ws})
+            else 
+                try context.allocator.dupe(u8, "");
+            defer context.allocator.free(workspace_part);
+            
+            output.print_success(context.allocator, "Found {} {s} named '{s}'{s}", .{ 
+                search_result.total_matches, cmd.entity_type, cmd.name, workspace_part 
+            });
 
-            output.print_stdout(context.allocator, "Found {} {s} named '{s}'", .{ search_result.total_matches, cmd.entity_type, cmd.name });
-            if (cmd.workspace) |ws| {
-                output.print_stdout(context.allocator, " in workspace '{s}'", .{ws});
-            }
-            output.write_stdout(":\n\n");
-
-            for (search_result.results, 0..) |result, i| {
+            // Format all results in one go
+            for (search_result.results) |result| {
                 const block = result.block.block;
-                output.print_stdout(context.allocator, "{}. {s} (similarity: {d:.3})\n", .{ i + 1, extract_entity_name(block), result.similarity_score });
-                output.print_stdout(context.allocator, "   Source: {s}\n", .{block.source_uri});
+                const block_id_hex = try block.id.to_hex(context.allocator);
+                defer context.allocator.free(block_id_hex);
 
-                if (block.content.len > 0) {
-                    const preview = if (block.content.len > 100)
-                        try std.fmt.allocPrint(context.allocator, "{s}...", .{block.content[0..100]})
+                const formatted_id = output.format_block_id(context.allocator, block_id_hex) catch block_id_hex;
+                defer if (formatted_id.ptr != block_id_hex.ptr) context.allocator.free(formatted_id);
+                
+                const compact_id = output.format_block_id_compact(context.allocator, block_id_hex) catch block_id_hex;
+                defer if (compact_id.ptr != block_id_hex.ptr) context.allocator.free(compact_id);
+
+                const preview = if (block.content.len > 0) blk: {
+                    // Keep original formatting with newlines preserved
+                    const p = if (block.content.len > 200)
+                        try std.fmt.allocPrint(context.allocator, "{s}...", .{block.content[0..200]})
                     else
                         try context.allocator.dupe(u8, block.content);
-                    defer context.allocator.free(preview);
+                    break :blk p;
+                } else try context.allocator.dupe(u8, "");
+                defer context.allocator.free(preview);
 
-                    output.print_stdout(context.allocator, "   Preview: {s}\n", .{preview});
-                }
-                output.write_stdout("\n");
+                // Format multiline preview preserving original indentation exactly
+                const indented_preview = try std.fmt.allocPrint(context.allocator, "│           {s}", .{preview});
+                defer context.allocator.free(indented_preview);
+                const formatted_preview = try std.mem.replaceOwned(u8, context.allocator, indented_preview, "\n", "\n│           ");
+                defer context.allocator.free(formatted_preview);
+                
+                // Card-like frame for each result with multiline preview  
+                const result_card = try std.fmt.allocPrint(context.allocator,
+                    \\
+                    \\┌─ {s} [{s}]
+                    \\│  Source: {s}
+                    \\│  ID:     {s}
+                    \\│  Preview:
+                    \\{s}
+                    \\└─────────────────────────────────────────────────────────────────────────
+                    \\
+                , .{ extract_entity_name(block), formatted_id, block.source_uri, compact_id, formatted_preview });
+                defer context.allocator.free(result_card);
+                
+                output.write_stdout(result_card);
             }
         }
     }
 }
 
-fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.ShowCommand) !void {
+fn execute_show_command(context: *ExecutionContext, cmd: Command.ShowCommand) !void {
     try context.ensure_query_initialized();
     const query_eng = context.query_engine.?;
 
     // Relation validation ensures only supported graph traversal patterns
-    if (!natural_commands.validate_relation_type(cmd.relation_type)) {
+    if (!commands.validate_relation_type(cmd.relation_type)) {
         if (cmd.format == .json) {
             output.print_json_error(context.allocator, "Invalid relation type '{s}'", .{cmd.relation_type});
         } else {
-            output.print_error(context.allocator, "Invalid relation type '{s}'\n", .{cmd.relation_type});
-            output.write_stdout("Valid relations: callers, callees, references\n");
+            output.print_error(context.allocator, "Invalid relation type '{s}'. Valid relations: callers, callees, references", .{cmd.relation_type});
         }
         return;
     }
 
     const workspace = cmd.workspace orelse context.infer_workspace_name();
 
-    // First find the target entity to get its block ID
-    const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
-        query_engine.QueryError.SemanticSearchUnavailable => {
+    const target_id = if (is_block_id(cmd.target)) blk: {
+        const block_id = types.BlockId.from_hex(cmd.target) catch {
             if (cmd.format == .json) {
-                output.print_json_error(context.allocator, "Semantic search not available", .{});
+                output.print_json_error(context.allocator, "Invalid BlockId format: '{s}'", .{cmd.target});
             } else {
-                output.write_stdout("Semantic search is not available yet.\n");
-                output.write_stdout("Make sure codebases are linked and synced.\n");
+                output.print_error(context.allocator, "Invalid BlockId format: '{s}'", .{cmd.target});
             }
             return;
-        },
-        else => return err,
-    };
-    defer search_result.deinit();
+        };
+        break :blk block_id;
+    } else blk: {
+        const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
+            query_engine.QueryError.SemanticSearchUnavailable => {
+                if (cmd.format == .json) {
+                    output.print_json_error(context.allocator, "Semantic search not available", .{});
+                } else {
+                    output.write_stdout("Semantic search is not available yet.\n");
+                    output.write_stdout("Make sure codebases are linked and synced.\n");
+                }
+                return;
+            },
+            else => return err,
+        };
+        defer search_result.deinit();
 
-    if (search_result.total_matches == 0) {
-        if (cmd.format == .json) {
-            output.print_json_stdout(context.allocator,
-                \\{{"error": "Target '{s}' not found"}}
-            , .{cmd.target});
-        } else {
-            output.print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
-            if (cmd.workspace) |ws| {
-                output.print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+        if (search_result.total_matches == 0) {
+            if (cmd.format == .json) {
+                output.print_json_stdout(context.allocator,
+                    \\{{"error": "Target '{s}' not found"}}
+                , .{cmd.target});
+            } else {
+                output.print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
+                if (cmd.workspace) |ws| {
+                    output.print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+                }
+                output.write_stdout(".\n");
             }
-            output.write_stdout(".\n");
+            return;
         }
-        return;
-    }
 
-    // Use the first match as target
-    const target_block = search_result.results[0].block.block;
-    const target_id = target_block.id;
+        if (search_result.total_matches > 1) {
+            if (cmd.format == .json) {
+                output.print_json_error(context.allocator, "Multiple matches found for '{s}'. Use specific BlockId from 'find' command.", .{cmd.target});
+            } else {
+                output.print_disambiguation_error(context.allocator, cmd.target, "function", search_result.total_matches);
+            }
+            return;
+        }
 
-    // Execute the appropriate traversal query
+        break :blk search_result.results[0].block.block.id;
+    };
+
     const traversal_result = (if (std.mem.indexOf(u8, cmd.relation_type, "callers") != null) blk: {
-        // callers - incoming traversal
         break :blk query_eng.find_callers(workspace, target_id, 1);
     } else if (std.mem.indexOf(u8, cmd.relation_type, "callees") != null) blk: {
-        // callees - outgoing traversal
         break :blk query_eng.find_callees(workspace, target_id, 1);
     } else blk: {
-        // references - bidirectional traversal
         break :blk query_eng.find_references(workspace, target_id, 1);
     }) catch |err| {
         if (cmd.format == .json) {
@@ -660,7 +695,7 @@ fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
                 \\{{"error": "Failed to execute traversal query"}}
             , .{});
         } else {
-            output.print_stderr(context.allocator, "Error: Failed to execute traversal query\n", .{});
+            output.print_error(context.allocator, "Failed to execute traversal query", .{});
         }
         return err;
     };
@@ -715,12 +750,12 @@ fn execute_show_command(context: *NaturalExecutionContext, cmd: NaturalCommand.S
     }
 }
 
-fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.TraceCommand) !void {
+fn execute_trace_command(context: *ExecutionContext, cmd: Command.TraceCommand) !void {
     try context.ensure_query_initialized();
     const query_eng = context.query_engine.?;
 
     // Direction validation prevents invalid multi-hop traversal requests
-    if (!natural_commands.validate_direction(cmd.direction)) {
+    if (!commands.validate_direction(cmd.direction)) {
         if (cmd.format == .json) {
             output.print_json_stdout(context.allocator,
                 \\{{"error": "Invalid direction '{s}'"}}
@@ -735,46 +770,62 @@ fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.
     const depth = cmd.depth orelse 3;
     const workspace = cmd.workspace orelse context.infer_workspace_name();
 
-    // First find the target entity to get its block ID
-    const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
-        query_engine.QueryError.SemanticSearchUnavailable => {
+    const target_id = if (is_block_id(cmd.target)) blk: {
+        const block_id = types.BlockId.from_hex(cmd.target) catch {
             if (cmd.format == .json) {
-                output.write_stdout("{\"error\": \"Semantic search not available\"}\n");
+                output.print_json_error(context.allocator, "Invalid BlockId format: '{s}'", .{cmd.target});
             } else {
-                output.write_stdout("Semantic search is not available yet.\n");
-                output.write_stdout("Make sure codebases are linked and synced.\n");
+                output.print_error(context.allocator, "Invalid BlockId format: '{s}'", .{cmd.target});
             }
             return;
-        },
-        else => return err,
-    };
-    defer search_result.deinit();
+        };
+        break :blk block_id;
+    } else blk: {
+        const search_result = query_eng.find_by_name(workspace, "function", cmd.target) catch |err| switch (err) {
+            query_engine.QueryError.SemanticSearchUnavailable => {
+                if (cmd.format == .json) {
+                    output.write_stdout("{\"error\": \"Semantic search not available\"}\n");
+                } else {
+                    output.write_stdout("Semantic search is not available yet.\n");
+                    output.write_stdout("Make sure codebases are linked and synced.\n");
+                }
+                return;
+            },
+            else => return err,
+        };
+        defer search_result.deinit();
 
-    if (search_result.total_matches == 0) {
-        if (cmd.format == .json) {
-            output.print_json_stdout(context.allocator,
-                \\{{"error": "Target '{s}' not found"}}
-            , .{cmd.target});
-        } else {
-            output.print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
-            if (cmd.workspace) |ws| {
-                output.print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+        if (search_result.total_matches == 0) {
+            if (cmd.format == .json) {
+                output.print_json_stdout(context.allocator,
+                    \\{{"error": "Target '{s}' not found"}}
+                , .{cmd.target});
+            } else {
+                output.print_stdout(context.allocator, "Target '{s}' not found", .{cmd.target});
+                if (cmd.workspace) |ws| {
+                    output.print_stdout(context.allocator, " in workspace '{s}'", .{ws});
+                }
+                output.write_stdout(".\n");
             }
-            output.write_stdout(".\n");
+            return;
         }
-        return;
-    }
 
-    // Use the first match as target
-    const target_block = search_result.results[0].block.block;
-    const target_id = target_block.id;
+        if (search_result.total_matches > 1) {
+            if (cmd.format == .json) {
+                output.print_json_error(context.allocator, "Multiple matches found for '{s}'. Use specific BlockId from 'find' command.", .{cmd.target});
+            } else {
+                output.print_disambiguation_error(context.allocator, cmd.target, "function", search_result.total_matches);
+            }
+            return;
+        }
+
+        break :blk search_result.results[0].block.block.id;
+    };
 
     // Execute the appropriate traversal query based on direction
     const traversal_result = (if (std.mem.eql(u8, cmd.direction, "callers")) blk: {
-        // callers - incoming traversal
         break :blk query_eng.find_callers(workspace, target_id, depth);
     } else if (std.mem.eql(u8, cmd.direction, "callees")) blk: {
-        // callees - outgoing traversal
         break :blk query_eng.find_callees(workspace, target_id, depth);
     } else if (std.mem.eql(u8, cmd.direction, "references") or std.mem.eql(u8, cmd.direction, "both")) blk: {
         // references/both - bidirectional traversal
@@ -788,7 +839,7 @@ fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.
                 \\{{"error": "Failed to execute traversal query"}}
             , .{});
         } else {
-            output.print_stderr(context.allocator, "Error: Failed to execute traversal query\n", .{});
+            output.print_error(context.allocator, "Failed to execute traversal query", .{});
         }
         return err;
     };
@@ -855,6 +906,19 @@ fn execute_trace_command(context: *NaturalExecutionContext, cmd: NaturalCommand.
 }
 
 // === Helper Functions ===
+
+/// Check if a string looks like a BlockId (32 hex characters)
+fn is_block_id(target: []const u8) bool {
+    if (target.len != 32) return false;
+
+    for (target) |char| {
+        switch (char) {
+            '0'...'9', 'a'...'f', 'A'...'F' => {},
+            else => return false,
+        }
+    }
+    return true;
+}
 
 /// Extract entity name from block content or metadata
 fn extract_entity_name(block: ContextBlock) []const u8 {
@@ -972,3 +1036,71 @@ fn show_command_help(topic: []const u8) void {
 }
 
 // === Unit Tests ===
+
+test "command parsing validation" {
+    // Test that relation types validate correctly
+    try std.testing.expect(commands.validate_relation_type("callers"));
+    try std.testing.expect(commands.validate_relation_type("callees"));
+    try std.testing.expect(commands.validate_relation_type("references"));
+    try std.testing.expect(!commands.validate_relation_type("invalid"));
+
+    // Test that trace directions validate correctly
+    try std.testing.expect(commands.validate_direction("callers"));
+    try std.testing.expect(commands.validate_direction("callees"));
+    try std.testing.expect(commands.validate_direction("references"));
+    try std.testing.expect(commands.validate_direction("both"));
+    try std.testing.expect(!commands.validate_direction("invalid"));
+}
+
+test "execution context initialization" {
+    const allocator = std.testing.allocator;
+
+    // Create temporary directory for test
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const test_data_dir = try tmp_dir.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(test_data_dir);
+
+    var context = try ExecutionContext.init(allocator, test_data_dir);
+    defer context.deinit();
+
+    try std.testing.expect(context.storage_engine == null);
+    try std.testing.expect(context.query_engine == null);
+    try std.testing.expect(context.workspace_manager == null);
+
+    // Test lazy initialization
+    try context.ensure_storage_initialized();
+    try std.testing.expect(context.storage_engine != null);
+
+    try context.ensure_query_initialized();
+    try std.testing.expect(context.query_engine != null);
+
+    try context.ensure_workspace_initialized();
+    try std.testing.expect(context.workspace_manager != null);
+}
+
+test "extract entity name from block content" {
+    const test_block = ContextBlock{
+        .id = try types.BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0, // Storage engine will assign the actual global sequence
+        .source_uri = "test://example.zig#my_function",
+        .metadata_json = "{\"name\": \"my_function\", \"type\": \"function\"}",
+        .content = "fn my_function() {}",
+    };
+
+    const extracted = extract_entity_name(test_block);
+    try std.testing.expectEqualStrings("my_function", extracted);
+
+    // Test fallback to source URI
+    const uri_fallback_block = ContextBlock{
+        .id = try types.BlockId.from_hex("22222222222222222222222222222222"),
+        .sequence = 0, // Storage engine will assign the actual global sequence
+        .source_uri = "test://example.zig#fallback_name",
+        .metadata_json = "{}",
+        .content = "some content",
+    };
+
+    const uri_extracted = extract_entity_name(uri_fallback_block);
+    try std.testing.expectEqualStrings("fallback_name", uri_extracted);
+}
