@@ -21,6 +21,7 @@ const Target = enum {
     logic,
     query,
     ingestion,
+    cli_parser,
     all,
 
     fn from_string(str: []const u8) ?Target {
@@ -207,6 +208,7 @@ fn print_usage() void {
     std.debug.print("  logic       Fuzz system logic with valid operations\n", .{});
     std.debug.print("  query       Fuzz query engine (future)\n", .{});
     std.debug.print("  ingestion   Fuzz code ingestion (future)\n", .{});
+    std.debug.print("  cli_parser  Fuzz CLI command parser\n", .{});
     std.debug.print("  all         Fuzz all components (default)\n\n", .{});
     std.debug.print("Options:\n", .{});
     std.debug.print("  --iterations N   Number of fuzzing iterations (default: 10000)\n", .{});
@@ -274,6 +276,10 @@ pub fn main() !void {
             std.debug.print("Ingestion fuzzing not yet implemented\n", .{});
             return;
         },
+        .cli_parser => {
+            const cli_parser_fuzz = @import("cli_parser_fuzz.zig");
+            try cli_parser_fuzz.run_fuzzing(&fuzzer);
+        },
         .all => {
             std.debug.print("Running storage fuzzing...\n", .{});
             const storage_fuzz = @import("storage.zig");
@@ -282,6 +288,10 @@ pub fn main() !void {
             std.debug.print("\nRunning logic fuzzing...\n", .{});
             const logic_fuzz = @import("logic.zig");
             try logic_fuzz.run_fuzzing(&fuzzer);
+
+            std.debug.print("\nRunning CLI parser fuzzing...\n", .{});
+            const cli_parser_fuzz = @import("cli_parser_fuzz.zig");
+            try cli_parser_fuzz.run_fuzzing(&fuzzer);
 
             // Add other components as they're implemented
             std.debug.print("\nOther components not yet implemented\n", .{});

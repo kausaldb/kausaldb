@@ -49,6 +49,11 @@ pub const block_index = @import("storage/block_index.zig");
 // WAL (Write-Ahead Log) subsystem
 pub const wal = @import("storage/wal.zig");
 
+// CLI command parsing for fuzzing
+pub const natural_commands = @import("cli/natural_commands.zig");
+pub const NaturalCommandError = natural_commands.NaturalCommandError;
+pub const parse_natural_command = natural_commands.parse_natural_command;
+
 // Simulation testing infrastructure
 pub const simulation_vfs = @import("sim/simulation_vfs.zig");
 pub const simulation = @import("sim/simulation.zig");
