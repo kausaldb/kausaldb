@@ -102,10 +102,14 @@ pub const BenchmarkHarness = struct {
         if (config.baseline_file) |path| {
             harness.baseline = load_baseline(allocator, path) catch |err| switch (err) {
                 error.FileNotFound => blk: {
-                    std.debug.print("Baseline file not found: {s}", .{path});
+                    std.debug.print("Baseline file not found: {s}\n", .{path});
                     break :blk null;
                 },
-                else => return err,
+                else => blk: {
+                    std.debug.print("Warning: Failed to load baseline file {s}: {}\n", .{ path, err });
+                    std.debug.print("Continuing without baseline comparison...\n", .{});
+                    break :blk null;
+                },
             };
         }
 
@@ -211,6 +215,8 @@ fn parse_config(args: [][:0]u8) BenchConfig {
         } else if (std.mem.eql(u8, arg, "--save-baseline") and i + 1 < args.len) {
             config.output_baseline_file = args[i + 1];
             i += 1;
+        } else if (std.mem.startsWith(u8, arg, "--save-baseline=")) {
+            config.output_baseline_file = arg["--save-baseline=".len..];
         } else if (std.mem.eql(u8, arg, "--json")) {
             config.output_format = .json;
         } else if (std.mem.eql(u8, arg, "--verbose")) {
@@ -294,8 +300,7 @@ pub fn main() !void {
         },
         .all => {
             std.debug.print("Running realistic end-to-end workload benchmark...\n", .{});
-            try e2e_bench.run_e2e_benchmark(allocator);
-            return; // E2E benchmark handles its own output
+            try e2e_bench.run_e2e_benchmark_with_harness(&harness);
         },
     }
 

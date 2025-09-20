@@ -119,9 +119,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bench-baseline.json
-          key: benchmarks-${{ runner.os }}-${{ github.base_ref || 'main' }}
+          key: benchmarks-v2-${{ runner.os }}-${{ github.base_ref || 'main' }}
           restore-keys: |
-            benchmarks-${{ runner.os }}-
+            benchmarks-v2-${{ runner.os }}-
 
       - name: Run Benchmarks
         run: |
@@ -130,6 +130,7 @@ jobs:
             -Dbench-iterations=10000 \
             -Dbench-warmup=1000 \
             -Dbench-baseline=bench-baseline.json \
+            -- --save-baseline=bench-new-baseline.json \
             > bench-results.txt 2>&1
 
       - name: Check for Performance Regressions
@@ -144,8 +145,8 @@ jobs:
       - name: Save Benchmark Results
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
-          # Save benchmark results as baseline for comparison
-          cp bench-results.txt bench-baseline.json || true
+          # Save JSON baseline results for future comparison
+          cp bench-new-baseline.json bench-baseline.json || true
 
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@v4

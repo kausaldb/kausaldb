@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const testing = std.testing;
 
 const LatencySampler = struct {
@@ -378,8 +379,11 @@ const BenchmarkResults = struct {
 
 // Export main benchmark function for build system integration
 pub fn run_e2e_benchmark(allocator: std.mem.Allocator) !void {
+    // Scale operations based on benchmark iterations to respect CI constraints
+    const operations_per_type = @min(50, @max(5, build_options.bench_iterations / 20));
+
     const config = BenchmarkConfig{
-        .operations_per_type = 50, // Reasonable for CI
+        .operations_per_type = operations_per_type,
         .codebase_size = 25, // Medium-sized project
         .functions_per_file = 6, // Realistic complexity
         .verbose = false,
@@ -389,6 +393,77 @@ pub fn run_e2e_benchmark(allocator: std.mem.Allocator) !void {
     defer benchmark.deinit();
 
     const results = try benchmark.run_benchmark();
+    results.print_results();
+}
+
+// Export harness-integrated benchmark function for regression detection
+pub fn run_e2e_benchmark_with_harness(harness: anytype) !void {
+    // Scale operations based on benchmark iterations to respect CI constraints
+    const operations_per_type = @min(50, @max(5, build_options.bench_iterations / 20));
+
+    const config = BenchmarkConfig{
+        .operations_per_type = operations_per_type,
+        .codebase_size = 25, // Medium-sized project
+        .functions_per_file = 6, // Realistic complexity
+        .verbose = false,
+    };
+
+    var benchmark = try E2EWorkloadBench.init(harness.allocator, config);
+    defer benchmark.deinit();
+
+    const results = try benchmark.run_benchmark();
+
+    // Convert e2e results to harness format for regression detection
+    const main = @import("main.zig");
+    const BenchmarkResult = main.BenchmarkResult;
+
+    // Add ingestion benchmark result
+    try harness.add_result(BenchmarkResult{
+        .name = "e2e_ingestion",
+        .iterations = @intCast(results.ingestion.samples),
+        .mean_ns = results.ingestion.p50_ns, // Use median as mean for robust comparison
+        .median_ns = results.ingestion.p50_ns,
+        .min_ns = results.ingestion.min_ns,
+        .max_ns = results.ingestion.max_ns,
+        .std_dev_ns = 0, // Not calculated in e2e benchmark
+        .ops_per_second = if (results.ingestion.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.ingestion.p50_ns)) else 0,
+    });
+
+    // Add query benchmark results
+    try harness.add_result(BenchmarkResult{
+        .name = "e2e_find_queries",
+        .iterations = @intCast(results.find_queries.samples),
+        .mean_ns = results.find_queries.p50_ns,
+        .median_ns = results.find_queries.p50_ns,
+        .min_ns = results.find_queries.min_ns,
+        .max_ns = results.find_queries.max_ns,
+        .std_dev_ns = 0,
+        .ops_per_second = if (results.find_queries.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.find_queries.p50_ns)) else 0,
+    });
+
+    try harness.add_result(BenchmarkResult{
+        .name = "e2e_show_queries",
+        .iterations = @intCast(results.show_queries.samples),
+        .mean_ns = results.show_queries.p50_ns,
+        .median_ns = results.show_queries.p50_ns,
+        .min_ns = results.show_queries.min_ns,
+        .max_ns = results.show_queries.max_ns,
+        .std_dev_ns = 0,
+        .ops_per_second = if (results.show_queries.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.show_queries.p50_ns)) else 0,
+    });
+
+    try harness.add_result(BenchmarkResult{
+        .name = "e2e_trace_queries",
+        .iterations = @intCast(results.trace_queries.samples),
+        .mean_ns = results.trace_queries.p50_ns,
+        .median_ns = results.trace_queries.p50_ns,
+        .min_ns = results.trace_queries.min_ns,
+        .max_ns = results.trace_queries.max_ns,
+        .std_dev_ns = 0,
+        .ops_per_second = if (results.trace_queries.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.trace_queries.p50_ns)) else 0,
+    });
+
+    // Still print the detailed e2e results for context
     results.print_results();
 }
 
