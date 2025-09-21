@@ -1,4 +1,4 @@
-//! End-to-end tests for KausalDB query commands.
+//! End-to-end tests for query commands.
 //!
 //! Tests natural language query functionality (find, show, trace) through
 //! binary execution with functional validation of query results.
@@ -14,7 +14,7 @@ test "find function returns actual results" {
 
     // Create and link test project with known functions
     const project_path = try test_harness.create_test_project("find_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -22,26 +22,23 @@ test "find function returns actual results" {
     defer sync_result.deinit();
     try sync_result.expect_success();
 
-    // Test finding functions that exist in our test project
-    // create_test_project creates: main, helper_function, calculate_value, utility_function, add_numbers
-
     // Test 1: Find main function (should exist)
-    var find_main = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "find_test" });
+    var find_main = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "find_test" });
     defer find_main.deinit();
     try find_main.expect_success();
-    try testing.expect(find_main.contains_output("main") and !find_main.contains_output("not found"));
+    try testing.expect(find_main.contains_output("main") and !find_main.contains_output("No results found"));
 
     // Test 2: Find helper_function (should exist)
-    var find_helper = try test_harness.execute_command(&[_][]const u8{ "find", "function", "helper_function", "in", "find_test" });
+    var find_helper = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "helper_function", "--workspace", "find_test" });
     defer find_helper.deinit();
     try find_helper.expect_success();
-    try testing.expect(find_helper.contains_output("helper_function") and !find_helper.contains_output("not found"));
+    try testing.expect(find_helper.contains_output("helper_function") and !find_helper.contains_output("No results found"));
 
     // Test 3: Find nonexistent function (should return not found)
-    var find_missing = try test_harness.execute_command(&[_][]const u8{ "find", "function", "nonexistent_function", "in", "find_test" });
+    var find_missing = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "nonexistent_function", "--workspace", "find_test" });
     defer find_missing.deinit();
     try find_missing.expect_success();
-    try testing.expect(find_missing.contains_output("not found") or find_missing.contains_output("No function"));
+    try testing.expect(find_missing.contains_output("No results found"));
 }
 
 test "find function with workspace specification" {
@@ -49,7 +46,7 @@ test "find function with workspace specification" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("workspace_test");
-    var link_result = try test_harness.execute_workspace_command("link {s} as testws", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s} --name testws", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -58,12 +55,12 @@ test "find function with workspace specification" {
     try sync_result.expect_success();
 
     // Test workspace-specific find for function that exists in test project
-    var result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "calculate_value", "in", "testws" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "calculate_value", "--workspace", "testws" });
     defer result.deinit();
 
     try result.expect_success();
     // Should find calculate_value function from main.zig
-    try testing.expect(result.contains_output("calculate_value") and !result.contains_output("not found"));
+    try testing.expect(result.contains_output("calculate_value") and !result.contains_output("No results found"));
 }
 
 test "show callers command with real functionality" {
@@ -71,7 +68,7 @@ test "show callers command with real functionality" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("callers_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -81,12 +78,12 @@ test "show callers command with real functionality" {
     try sync_result.expect_success();
 
     // Test show callers for helper_function (called by main in test project)
-    var result = try test_harness.execute_command(&[_][]const u8{ "show", "callers", "helper_function", "in", "callers_test" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "helper_function", "--workspace", "callers_test" });
     defer result.deinit();
 
     try result.expect_success();
     // Should find that main() calls helper_function, or provide meaningful "not found" if relationship isn't detected
-    try testing.expect(result.contains_output("main") or result.contains_output("not found"));
+    try testing.expect(result.contains_output("main") or result.contains_output("No callers found"));
 }
 
 test "trace callees command shows actual call graph" {
@@ -94,7 +91,7 @@ test "trace callees command shows actual call graph" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("trace_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -105,14 +102,14 @@ test "trace callees command shows actual call graph" {
 
     // Test trace callees for main (should show functions called by main)
     // In test project: main -> helper_function -> calculate_value
-    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--depth", "2", "in", "trace_test" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--depth", "2", "--workspace", "trace_test" });
     defer result.deinit();
 
     try result.expect_success();
     // Should show call relationships or provide clear "not found" message
     try testing.expect(result.contains_output("helper_function") or
         result.contains_output("calculate_value") or
-        result.contains_output("not found"));
+        result.contains_output("No paths found"));
 }
 
 test "trace callers command shows upstream dependencies" {
@@ -120,7 +117,7 @@ test "trace callers command shows upstream dependencies" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("upstream_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -130,13 +127,13 @@ test "trace callers command shows upstream dependencies" {
     try sync_result.expect_success();
 
     // Test trace callers for calculate_value (called by helper_function)
-    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "callers", "calculate_value", "in", "upstream_test" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callers", "--target", "calculate_value", "--workspace", "upstream_test" });
     defer result.deinit();
 
     try result.expect_success();
     // Should provide meaningful output about callers or indicate none found
     try testing.expect(result.contains_output("helper_function") or
-        result.contains_output("not found") or
+        result.contains_output("No paths found") or
         result.contains_output("No") or
         result.contains_output("Found") or
         result.stdout.len > 5); // Should have some meaningful output
@@ -147,12 +144,12 @@ test "query commands with JSON output format" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("json_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     // Test find with JSON output
-    var find_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "--json" });
+    var find_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--json" });
     defer find_result.deinit();
 
     try find_result.expect_success();
@@ -168,7 +165,7 @@ test "query commands with JSON output format" {
     }
 
     // Test trace with JSON output
-    var trace_result = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--json" });
+    var trace_result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--json" });
     defer trace_result.deinit();
 
     try trace_result.expect_success();
@@ -192,9 +189,9 @@ test "query error handling: missing arguments" {
         &[_][]const u8{"find"}, // Missing type and name
         &[_][]const u8{ "find", "function" }, // Missing name
         &[_][]const u8{"show"}, // Missing relation and target
-        &[_][]const u8{ "show", "callers" }, // Missing target
+        &[_][]const u8{ "show", "--relation", "callers" }, // Missing target
         &[_][]const u8{"trace"}, // Missing direction and target
-        &[_][]const u8{ "trace", "callees" }, // Missing target
+        &[_][]const u8{ "trace", "--direction", "callees" }, // Missing target
     };
 
     for (error_cases) |cmd_args| {
@@ -203,9 +200,9 @@ test "query error handling: missing arguments" {
 
         try result.expect_failure();
         try testing.expect(result.stderr.len > 0);
-        try testing.expect(result.contains_error("Error:") or
-            result.contains_error("Missing") or
-            result.contains_error("required"));
+        try testing.expect(result.contains_error("Missing") or
+            result.contains_error("required") or
+            result.contains_error("Invalid"));
     }
 }
 
@@ -214,7 +211,7 @@ test "query error handling: invalid entity types" {
     defer test_harness.deinit();
 
     // Test invalid entity type for find
-    var result = try test_harness.execute_command(&[_][]const u8{ "find", "invalid_type", "something" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "invalid_type", "--name", "something" });
     defer result.deinit();
 
     // Should handle gracefully
@@ -228,16 +225,16 @@ test "query error handling: invalid trace directions" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("direction_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     // Test invalid direction
-    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "invalid_direction", "main" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "invalid_direction", "--target", "main" });
     defer result.deinit();
 
-    try result.expect_success(); // Command parses but execution should handle gracefully
-    try testing.expect(result.contains_output("direction") or result.contains_error("Unknown"));
+    try result.expect_failure(); // Command should fail with invalid direction
+    try testing.expect(result.contains_error("Invalid argument") or result.contains_error("direction"));
 }
 
 test "query commands handle unlinked workspace gracefully" {
@@ -245,7 +242,7 @@ test "query commands handle unlinked workspace gracefully" {
     defer test_harness.deinit();
 
     // Try to query without any linked codebases
-    var result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main" });
     defer result.deinit();
 
     try result.expect_success();
@@ -260,13 +257,13 @@ test "query performance is reasonable" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("perf_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     const start_time = std.time.nanoTimestamp();
 
-    var result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main" });
     defer result.deinit();
 
     const elapsed_ns = std.time.nanoTimestamp() - start_time;
@@ -285,29 +282,34 @@ test "cross-workspace query functionality" {
     const proj1_path = try test_harness.create_test_project("backend");
     const proj2_path = try test_harness.create_test_project("frontend");
 
-    var link1 = try test_harness.execute_workspace_command("link {s} as backend", .{proj1_path});
+    const backend_name = try test_harness.unique_name("backend");
+    defer testing.allocator.free(backend_name);
+    const frontend_name = try test_harness.unique_name("frontend");
+    defer testing.allocator.free(frontend_name);
+
+    var link1 = try test_harness.execute_workspace_command("link --path {s} --name {s}", .{ proj1_path, backend_name });
     defer link1.deinit();
     try link1.expect_success();
 
-    var link2 = try test_harness.execute_workspace_command("link {s} as frontend", .{proj2_path});
+    var link2 = try test_harness.execute_workspace_command("link --path {s} --name {s}", .{ proj2_path, frontend_name });
     defer link2.deinit();
     try link2.expect_success();
 
-    var sync1 = try test_harness.execute_workspace_command("sync backend", .{});
+    var sync1 = try test_harness.execute_workspace_command("sync {s}", .{backend_name});
     defer sync1.deinit();
     try sync1.expect_success();
 
-    var sync2 = try test_harness.execute_workspace_command("sync frontend", .{});
+    var sync2 = try test_harness.execute_workspace_command("sync {s}", .{frontend_name});
     defer sync2.deinit();
     try sync2.expect_success();
 
     // Query specific to backend workspace
-    var backend_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "backend" });
+    var backend_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", backend_name });
     defer backend_result.deinit();
     try backend_result.expect_success();
 
     // Query specific to frontend workspace
-    var frontend_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "frontend" });
+    var frontend_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", frontend_name });
     defer frontend_result.deinit();
     try frontend_result.expect_success();
 
@@ -316,7 +318,7 @@ test "cross-workspace query functionality" {
     try testing.expect(frontend_result.contains_output("main"));
 
     // Query without workspace should find main in both (or aggregate)
-    var all_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main" });
+    var all_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main" });
     defer all_result.deinit();
     try all_result.expect_success();
     try testing.expect(all_result.stdout.len > 0);
@@ -327,12 +329,12 @@ test "show callers JSON output format validation" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("json_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     // Test show callers with JSON output
-    var result = try test_harness.execute_command(&[_][]const u8{ "show", "callers", "nonexistent", "--json" });
+    var result = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "nonexistent", "--json" });
     defer result.deinit();
 
     try result.expect_success();
@@ -345,8 +347,8 @@ test "show callers JSON output format validation" {
         };
         defer parsed.deinit();
         try testing.expect(parsed.value == .object);
-        try testing.expect(result.contains_output("error"));
-        try testing.expect(result.contains_output("not found"));
+        try testing.expect(result.contains_output("results"));
+        try testing.expect(result.contains_output("[]"));
     }
 }
 
@@ -355,7 +357,7 @@ test "trace callees with various depths" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("depth_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -363,11 +365,11 @@ test "trace callees with various depths" {
     const depths = [_][]const u8{ "1", "3", "5", "10" };
 
     for (depths) |depth| {
-        var result = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "test_func", "--depth", depth });
+        var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "test_func", "--depth", depth });
         defer result.deinit();
 
         try result.expect_success();
-        try testing.expect(result.contains_output("Target") and result.contains_output("not found"));
+        try testing.expect(result.contains_output("No paths found") or result.contains_output("Target"));
     }
 }
 
@@ -376,15 +378,15 @@ test "show command relation type validation" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("validation_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     // Test valid relation types
-    const valid_relations = [_][]const u8{ "callers", "callees", "references" };
+    const valid_relations = [_][]const u8{ "callers", "callees", "imports", "exports" };
 
     for (valid_relations) |relation| {
-        var result = try test_harness.execute_command(&[_][]const u8{ "show", relation, "target" });
+        var result = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", relation, "--target", "some_target" });
         defer result.deinit();
 
         try result.expect_success();
@@ -398,15 +400,15 @@ test "trace command direction validation" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("direction_test");
-    var link_result = try test_harness.execute_workspace_command("link {s}", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
     // Test valid directions
-    const valid_directions = [_][]const u8{ "callers", "callees", "references", "both" };
+    const valid_directions = [_][]const u8{ "callers", "callees" };
 
     for (valid_directions) |direction| {
-        var result = try test_harness.execute_command(&[_][]const u8{ "trace", direction, "target" });
+        var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", direction, "--target", "some_target" });
         defer result.deinit();
 
         try result.expect_success();
@@ -462,54 +464,54 @@ test "complex query scenarios end-to-end" {
     }
 
     // Link both projects with aliases
-    var backend_link = try test_harness.execute_workspace_command("link {s} as backend", .{backend_path});
+    var backend_link = try test_harness.execute_workspace_command("link --path {s} --name complex_backend", .{backend_path});
     defer backend_link.deinit();
     try backend_link.expect_success();
 
-    var frontend_link = try test_harness.execute_workspace_command("link {s} as frontend", .{frontend_path});
+    var frontend_link = try test_harness.execute_workspace_command("link --path {s} --name complex_frontend", .{frontend_path});
     defer frontend_link.deinit();
     try frontend_link.expect_success();
 
     // Sync both projects - this is where hangs occurred previously
     // Test with reduced timeout expectations
-    var backend_sync = try test_harness.execute_workspace_command("sync backend", .{});
+    var backend_sync = try test_harness.execute_workspace_command("sync complex_backend", .{});
     defer backend_sync.deinit();
     try backend_sync.expect_success();
 
-    var frontend_sync = try test_harness.execute_workspace_command("sync frontend", .{});
+    var frontend_sync = try test_harness.execute_workspace_command("sync complex_frontend", .{});
     defer frontend_sync.deinit();
     try frontend_sync.expect_success();
 
     // Test 1: Cross-workspace function search
-    var find_main_backend = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "backend" });
+    var find_main_backend = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "complex_backend" });
     defer find_main_backend.deinit();
     try find_main_backend.expect_success();
 
-    var find_main_frontend = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "frontend" });
+    var find_main_frontend = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "complex_frontend" });
     defer find_main_frontend.deinit();
     try find_main_frontend.expect_success();
 
     // Test 2: Find functions that exist in our created files
-    var find_calculate = try test_harness.execute_command(&[_][]const u8{ "find", "function", "calculate_value", "in", "backend" });
+    var find_calculate = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "calculate_value", "--workspace", "complex_backend" });
     defer find_calculate.deinit();
     try find_calculate.expect_success();
 
-    var find_add_numbers = try test_harness.execute_command(&[_][]const u8{ "find", "function", "add_numbers", "in", "backend" });
+    var find_add_numbers = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "add_numbers", "--workspace", "complex_backend" });
     defer find_add_numbers.deinit();
     try find_add_numbers.expect_success();
 
     // Test 3: Show callers relationships (should handle gracefully if target not found)
-    var show_callers = try test_harness.execute_command(&[_][]const u8{ "show", "callers", "helper_function" });
+    var show_callers = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "helper_function" });
     defer show_callers.deinit();
     try show_callers.expect_success();
 
     // Test 4: Trace callees with depth
-    var trace_callees = try test_harness.execute_command(&[_][]const u8{ "trace", "callees", "main", "--depth", "2" });
+    var trace_callees = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--depth", "2" });
     defer trace_callees.deinit();
     try trace_callees.expect_success();
 
     // Test 5: JSON output for complex queries
-    var json_find = try test_harness.execute_command(&[_][]const u8{ "find", "function", "create_server", "in", "backend", "--json" });
+    var json_find = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "create_server", "--workspace", "backend", "--json" });
     defer json_find.deinit();
     try json_find.expect_success();
 
@@ -523,21 +525,21 @@ test "complex query scenarios end-to-end" {
     }
 
     // Test 6: Query all workspaces without specification (should aggregate results)
-    var find_all = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main" });
+    var find_all = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main" });
     defer find_all.deinit();
     try find_all.expect_success();
     try testing.expect(find_all.stdout.len > 0);
 
     // Test 7: Error handling - invalid workspace
-    var invalid_workspace = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "nonexistent" });
+    var invalid_workspace = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "nonexistent" });
     defer invalid_workspace.deinit();
     // Should complete without crashing (either succeed with no results or graceful error)
     try testing.expect(invalid_workspace.exit_code == 0 or invalid_workspace.stderr.len > 0);
 
     // Test 8: Complex trace scenarios
-    var trace_both = try test_harness.execute_command(&[_][]const u8{ "trace", "both", "utils", "--depth", "1" });
-    defer trace_both.deinit();
-    try trace_both.expect_success();
+    var trace_utils = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "utils", "--depth", "1" });
+    defer trace_utils.deinit();
+    try trace_utils.expect_success();
 
     // Verify that the test completed all scenarios without hanging
     // Success is measured by reaching this point without timeout
@@ -549,7 +551,7 @@ test "cross-file relationship validation" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_test_project("cross_file_test");
-    var link_result = try test_harness.execute_workspace_command("link {s} as crossfile", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s} --name crossfile", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -562,25 +564,25 @@ test "cross-file relationship validation" {
     // utils.zig contains utility_function() and add_numbers()
 
     // Find functions from main.zig
-    var find_main = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "crossfile" });
+    var find_main = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "crossfile" });
     defer find_main.deinit();
     try find_main.expect_success();
-    try testing.expect(find_main.contains_output("main") and !find_main.contains_output("not found"));
+    try testing.expect(find_main.contains_output("main") and !find_main.contains_output("No results found"));
 
     // Find functions from utils.zig
-    var find_utils = try test_harness.execute_command(&[_][]const u8{ "find", "function", "add_numbers", "in", "crossfile" });
+    var find_utils = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "add_numbers", "--workspace", "crossfile" });
     defer find_utils.deinit();
     try find_utils.expect_success();
-    try testing.expect(find_utils.contains_output("add_numbers") or find_utils.contains_output("not found"));
+    try testing.expect(find_utils.contains_output("add_numbers") or find_utils.contains_output("No results found"));
 
     // Test cross-file call relationships
     // main() calls utility_function() which is in utils.zig
-    var show_utility_callers = try test_harness.execute_command(&[_][]const u8{ "show", "callers", "utility_function", "in", "crossfile" });
+    var show_utility_callers = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "utility_function", "--workspace", "crossfile" });
     defer show_utility_callers.deinit();
     try show_utility_callers.expect_success();
     // Should provide meaningful output about callers or indicate none found
     try testing.expect(show_utility_callers.contains_output("main") or
-        show_utility_callers.contains_output("not found") or
+        show_utility_callers.contains_output("No callers found") or
         show_utility_callers.contains_output("No") or
         show_utility_callers.contains_output("Found") or
         show_utility_callers.stdout.len > 5); // Should have some meaningful output
@@ -591,7 +593,7 @@ test "query result accuracy and consistency" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_enhanced_test_project("accuracy_test");
-    var link_result = try test_harness.execute_workspace_command("link {s} as accuracy", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s} --name accuracy", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -603,26 +605,26 @@ test "query result accuracy and consistency" {
     const expected_functions = [_][]const u8{ "main", "helper_function", "calculate_value", "utility_function", "add_numbers" };
 
     for (expected_functions) |func_name| {
-        var result = try test_harness.execute_command(&[_][]const u8{ "find", "function", func_name, "in", "accuracy" });
+        var result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", func_name, "--workspace", "accuracy" });
         defer result.deinit();
         try result.expect_success();
 
         // Each function should be found (not return "not found")
-        try testing.expect(result.contains_output(func_name) or result.contains_output("not found"));
+        try testing.expect(result.contains_output(func_name) or result.contains_output("No results found"));
     }
 
     // Test that non-existent functions return proper not found
-    var missing_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "definitely_does_not_exist", "in", "accuracy" });
+    var missing_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "definitely_does_not_exist", "--workspace", "accuracy" });
     defer missing_result.deinit();
     try missing_result.expect_success();
-    try testing.expect(missing_result.contains_output("not found") or missing_result.contains_output("No function"));
+    try testing.expect(missing_result.contains_output("No results found") or missing_result.contains_output("No function"));
 
     // Test partial name matching is rejected (exact matching only)
-    var partial_result = try test_harness.execute_command(&[_][]const u8{ "find", "function", "mai", "in", "accuracy" });
+    var partial_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "mai", "--workspace", "accuracy" });
     defer partial_result.deinit();
     try partial_result.expect_success();
     // Should NOT find main when searching for "mai"
-    try testing.expect(partial_result.contains_output("not found") or partial_result.contains_output("No function"));
+    try testing.expect(partial_result.contains_output("No results found") or partial_result.contains_output("No function"));
 }
 
 test "ingestion to query pipeline validation" {
@@ -630,7 +632,7 @@ test "ingestion to query pipeline validation" {
     defer test_harness.deinit();
 
     const project_path = try test_harness.create_enhanced_test_project("pipeline_test");
-    var link_result = try test_harness.execute_workspace_command("link {s} as pipeline", .{project_path});
+    var link_result = try test_harness.execute_workspace_command("link --path {s} --name pipeline", .{project_path});
     defer link_result.deinit();
     try link_result.expect_success();
 
@@ -652,23 +654,175 @@ test "ingestion to query pipeline validation" {
     try testing.expect(post_sync_status.contains_output("pipeline"));
 
     // Verify queryability immediately after ingestion
-    var immediate_query = try test_harness.execute_command(&[_][]const u8{ "find", "function", "main", "in", "pipeline" });
+    var immediate_query = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "main", "--workspace", "pipeline" });
     defer immediate_query.deinit();
     try immediate_query.expect_success();
     // Function should be queryable right after sync completes
-    try testing.expect(immediate_query.contains_output("main") or immediate_query.contains_output("not found"));
+    try testing.expect(immediate_query.contains_output("main") or immediate_query.contains_output("No results found"));
 
     // Test multiple queries return consistent results
-    var query1 = try test_harness.execute_command(&[_][]const u8{ "find", "function", "helper_function", "in", "pipeline" });
+    var query1 = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "helper_function", "--workspace", "pipeline" });
     defer query1.deinit();
     try query1.expect_success();
 
-    var query2 = try test_harness.execute_command(&[_][]const u8{ "find", "function", "helper_function", "in", "pipeline" });
+    var query2 = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "helper_function", "--workspace", "pipeline" });
     defer query2.deinit();
     try query2.expect_success();
 
     // Both queries should return consistent results
-    const query1_found = query1.contains_output("helper_function") and !query1.contains_output("not found");
-    const query2_found = query2.contains_output("helper_function") and !query2.contains_output("not found");
+    const query1_found = query1.contains_output("helper_function") and !query1.contains_output("No results found");
+    const query2_found = query2.contains_output("helper_function") and !query2.contains_output("No results found");
     try testing.expect(query1_found == query2_found);
+}
+
+test "find function accuracy and duplicate prevention" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "accuracy_test");
+    defer test_harness.deinit();
+
+    // Create test project with multiple functions containing similar names
+    const project_path = try test_harness.create_test_file_with_content("accuracy",
+        \\pub fn init() void {
+        \\    // Public initialization function
+        \\}
+        \\
+        \\fn private_init() void {
+        \\    // Private initialization
+        \\}
+        \\
+        \\pub fn initialize_complex_system() void {
+        \\    // Contains "init" but different function name
+        \\}
+        \\
+        \\pub const Config = struct {
+        \\    pub fn init() Config {
+        \\        return Config{};
+        \\    }
+        \\};
+        \\
+        \\pub fn main() void {
+        \\    init();
+        \\    private_init();
+        \\}
+    );
+
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
+
+    var sync_result = try test_harness.execute_workspace_command("sync accuracy", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
+
+    // Test 1: Exact function name search should find exact matches
+    var exact_search = try test_harness.execute_command(
+        &[_][]const u8{ "find", "--type", "function", "--name", "init", "--workspace", "accuracy", "--json" },
+    );
+    defer exact_search.deinit();
+    try exact_search.expect_success();
+
+    // 2. Parse the JSON instead of counting lines
+    var parsed = try test_harness.validate_json_output(exact_search.stdout);
+    defer parsed.deinit();
+
+    // 3. Assert on the structure of the JSON
+    try testing.expect(parsed.value == .object);
+    const results_array = parsed.value.object.get("results") orelse return error.TestUnexpectedResult;
+    try testing.expect(results_array.array.items.len <= 10);
+    try testing.expect(results_array.array.items.len > 0); // Should find at least one
+}
+
+test "qualified name disambiguation for struct methods" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "qualified_test");
+    defer test_harness.deinit();
+
+    // Create test project with multiple structs having same method names
+    const project_path = try test_harness.create_test_file_with_content("qualified",
+        \\pub const StorageEngine = struct {
+        \\    pub fn init(allocator: std.mem.Allocator) StorageEngine {
+        \\        return StorageEngine{};
+        \\    }
+        \\
+        \\    pub fn startup(self: *StorageEngine) !void {
+        \\        // Storage engine startup logic
+        \\    }
+        \\};
+        \\
+        \\pub const QueryEngine = struct {
+        \\    pub fn init() QueryEngine {
+        \\        return QueryEngine{};
+        \\    }
+        \\
+        \\    pub fn startup(self: *QueryEngine) !void {
+        \\        // Query engine startup logic
+        \\    }
+        \\};
+        \\
+        \\pub fn main() void {
+        \\    var storage = StorageEngine.init(allocator);
+        \\    var query = QueryEngine.init();
+        \\}
+    );
+
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
+
+    var sync_result = try test_harness.execute_workspace_command("sync qualified", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
+
+    // Test qualified name search: "StorageEngine.init" should be more specific than just "init"
+    var qualified_search = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "StorageEngine.init", "--workspace", "qualified" });
+    defer qualified_search.deinit();
+    try qualified_search.expect_success();
+
+    // Test generic search returns multiple results
+    var generic_search = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "init", "--workspace", "qualified" });
+    defer generic_search.deinit();
+    try generic_search.expect_success();
+
+    // Both should succeed but qualified should be more specific
+    try testing.expect(qualified_search.contains_output("StorageEngine") or qualified_search.contains_output("No results found"));
+    try testing.expect(generic_search.contains_output("init") or generic_search.contains_output("No results found"));
+}
+
+test "show and trace commands handle edge cases safely without crashes" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "safety_test");
+    defer test_harness.deinit();
+
+    // Create test project for safety testing
+    const project_path = try test_harness.create_test_project("safety_project");
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
+
+    var sync_result = try test_harness.execute_workspace_command("sync safety_project", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
+
+    // Test 1: show callers should not segfault
+    var show_result = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "helper_function", "--workspace", "safety_project" });
+    defer show_result.deinit();
+
+    // Should not crash with segfault (exit codes 139 or 11)
+    try testing.expect(show_result.exit_code != 139 and show_result.exit_code != 11);
+
+    // Test 2: trace callees should not segfault
+    var trace_result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--workspace", "safety_project" });
+    defer trace_result.deinit();
+
+    // Should not crash with segfault
+    try testing.expect(trace_result.exit_code != 139 and trace_result.exit_code != 11);
+
+    // Test 3: Commands with nonexistent targets should fail gracefully
+    var missing_result = try test_harness.execute_command(&[_][]const u8{ "show", "--relation", "callers", "--target", "nonexistent_function", "--workspace", "safety_project" });
+    defer missing_result.deinit();
+
+    // Should not crash, may succeed or fail but should be handled gracefully
+    try testing.expect(missing_result.exit_code != 139 and missing_result.exit_code != 11);
+
+    // If it fails, should have proper error output
+    if (missing_result.exit_code != 0) {
+        try testing.expect(missing_result.stderr.len > 0 or missing_result.stdout.len > 0);
+    }
 }

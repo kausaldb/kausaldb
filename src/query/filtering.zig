@@ -263,7 +263,7 @@ pub const FilteredQueryIterator = struct {
                 // Clone block to ensure iterator owns the memory
                 const cloned_block = try clone_block(self.allocator, block.*);
                 self.results_returned += 1;
-                return OwnedBlock.take_ownership(cloned_block, .query_engine);
+                return OwnedBlock.take_ownership(&cloned_block, .query_engine);
             }
         }
 

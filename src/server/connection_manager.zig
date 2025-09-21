@@ -19,7 +19,7 @@ const error_context = @import("../core/error_context.zig");
 const log = std.log.scoped(.connection_manager);
 const testing = std.testing;
 
-const ClientConnection = conn.ClientConnection;
+pub const ClientConnection = conn.ClientConnection;
 const ConnectionState = conn.ConnectionState;
 
 /// Configuration parameters for connection management behavior
@@ -117,17 +117,27 @@ pub const ConnectionManager = struct {
     /// Returns number of connections accepted this call.
     pub fn accept_connections(self: *ConnectionManager, listener: *std.net.Server) !u32 {
         var accepted_count: u32 = 0;
+        log.debug("Starting accept_connections loop", .{});
 
         while (true) {
+            log.debug("Accept loop iteration, accepted so far: {}", .{accepted_count});
             const tcp_connection = listener.accept() catch |err| switch (err) {
-                error.WouldBlock => break, // No more connections available
-                error.ConnectionAborted => continue, // Client canceled, try next
+                error.WouldBlock => {
+                    log.debug("No more connections available (WouldBlock), breaking loop", .{});
+                    break;
+                },
+                error.ConnectionAborted => {
+                    log.debug("Connection aborted, continuing to next", .{});
+                    continue;
+                },
                 else => {
+                    log.err("Error accepting connection: {}", .{err});
                     const ctx = error_context.ServerContext{ .operation = "accept_connection" };
                     error_context.log_server_error(err, ctx);
                     return err;
                 },
             };
+            log.debug("Successfully accepted TCP connection", .{});
 
             // Enforce connection limit to maintain system stability
             if (self.connections.items.len >= self.config.max_connections) {
@@ -154,8 +164,10 @@ pub const ConnectionManager = struct {
             self.stats.connections_active += 1;
 
             log.info("Connection {} accepted from {any}", .{ connection.connection_id, tcp_connection.address });
+            log.debug("Connection {} fully initialized and added to list", .{connection.connection_id});
         }
 
+        log.debug("Accept_connections completed, total accepted: {}", .{accepted_count});
         return accepted_count;
     }
 
@@ -187,12 +199,15 @@ pub const ConnectionManager = struct {
             }
 
             if (events != 0) {
+                log.debug("Adding connection {} to poll (state: {}, events: 0x{X})", .{ connection.connection_id, connection.state, events });
                 self.poll_fds[poll_count] = std.posix.pollfd{
                     .fd = connection.stream.handle,
                     .events = events,
                     .revents = 0,
                 };
                 poll_count += 1;
+            } else {
+                log.debug("Connection {} not monitored (state: {})", .{ connection.connection_id, connection.state });
             }
         }
 
@@ -204,28 +219,51 @@ pub const ConnectionManager = struct {
     /// Handles timeouts and error conditions internally.
     pub fn poll_for_ready_connections(self: *ConnectionManager, listener: *std.net.Server) ![]const *ClientConnection {
         const poll_count = self.build_poll_fds(listener);
+        log.debug("Poll setup: {} fds to monitor ({} connections)", .{ poll_count, self.connections.items.len });
 
+        log.debug("About to poll {} file descriptors with timeout {}ms", .{ poll_count, self.config.poll_timeout_ms });
         const ready_count = std.posix.poll(self.poll_fds[0..poll_count], self.config.poll_timeout_ms) catch |err| switch (err) {
-            error.Unexpected => return &[_]*ClientConnection{}, // Signal interruption
-            else => return err,
+            error.Unexpected => {
+                log.debug("Poll interrupted by signal", .{});
+                return &[_]*ClientConnection{}; // Signal interruption
+            },
+            else => {
+                log.err("Poll failed with error: {}", .{err});
+                return err;
+            },
         };
 
         self.stats.poll_cycles_completed += 1;
+        log.debug("Poll result: {} fds ready out of {} (timeout: {}ms)", .{ ready_count, poll_count, self.config.poll_timeout_ms });
+
+        if (ready_count == 0) {
+            log.debug("Poll timeout - no file descriptors ready", .{});
+        }
 
         if (ready_count == 0) {
             // Timeout occurred, perform maintenance operations
+            log.debug("Poll timeout, performing maintenance", .{});
             try self.cleanup_timed_out_connections();
             return &[_]*ClientConnection{};
         }
 
         // Process listener socket first for new connections
+        var newly_accepted_count: u32 = 0;
         if (self.poll_fds[0].revents & std.posix.POLL.IN != 0) {
-            _ = try self.accept_connections(listener);
+            log.debug("New connections available, accepting", .{});
+            newly_accepted_count = self.accept_connections(listener) catch |err| blk: {
+                log.err("Failed to accept connections: {}", .{err});
+                break :blk 0;
+            };
+            log.debug("Accepted {} new connections", .{newly_accepted_count});
         }
 
-        // Collect connections with ready I/O events
+        // Collect connections with ready I/O events and connections to close
         var ready_connections = try self.arena.allocator().alloc(*ClientConnection, ready_count);
         var ready_index: usize = 0;
+        var connections_to_close: [64]usize = undefined;
+        var close_count: usize = 0;
+        log.debug("Collecting ready connections from {} existing connections", .{self.connections.items.len});
 
         var poll_index: usize = 1; // Skip listener at index 0
         var conn_index: usize = 0;
@@ -241,29 +279,92 @@ pub const ConnectionManager = struct {
             }
 
             // Handle connection errors and disconnections
-            if (poll_fd.revents & (std.posix.POLL.ERR | std.posix.POLL.HUP | std.posix.POLL.NVAL) != 0) {
-                log.info("Connection {}: socket error detected, closing", .{connection.connection_id});
-                self.close_connection(conn_index);
+            // Log detailed poll event information for debugging
+            log.debug("Connection {}: poll events - requested: 0x{X}, returned: 0x{X}", .{ connection.connection_id, poll_fd.events, poll_fd.revents });
+
+            // Handle critical errors that require immediate closure
+            if (poll_fd.revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) {
+                var error_msg: [64]u8 = undefined;
+                var error_len: usize = 0;
+
+                if (poll_fd.revents & std.posix.POLL.ERR != 0) {
+                    @memcpy(error_msg[error_len .. error_len + 8], " POLLERR");
+                    error_len += 8;
+                }
+                if (poll_fd.revents & std.posix.POLL.NVAL != 0) {
+                    @memcpy(error_msg[error_len .. error_len + 9], " POLLNVAL");
+                    error_len += 9;
+                }
+
+                log.info("Connection {}: critical socket error detected ({s}), closing", .{ connection.connection_id, error_msg[0..error_len] });
+                if (close_count < connections_to_close.len) {
+                    connections_to_close[close_count] = conn_index;
+                    close_count += 1;
+                }
                 poll_index += 1;
+                conn_index += 1;
                 continue;
             }
 
+            // Handle POLLHUP: client closed connection, but check for data first
+            const has_hangup = (poll_fd.revents & std.posix.POLL.HUP) != 0;
+            const has_data = (poll_fd.revents & std.posix.POLL.IN) != 0;
+
+            if (has_hangup and !has_data) {
+                // Client closed and no data available - close connection
+                log.debug("Connection {}: Client closed connection (POLLHUP), no data available", .{connection.connection_id});
+                if (close_count < connections_to_close.len) {
+                    connections_to_close[close_count] = conn_index;
+                    close_count += 1;
+                }
+                poll_index += 1;
+                conn_index += 1;
+                continue;
+            }
+
+            if (has_hangup and has_data) {
+                // Client closed but data is available - process data first, mark for closure after
+                log.debug("Connection {}: Client closed connection but data available - will read data first", .{connection.connection_id});
+            }
+
             if (poll_fd.revents & (std.posix.POLL.IN | std.posix.POLL.OUT) != 0) {
+                // Check if data is available for reading
+                if (poll_fd.revents & std.posix.POLL.IN != 0) {
+                    log.debug("Connection {}: Data available for reading (POLLIN)", .{connection.connection_id});
+                }
+                if (poll_fd.revents & std.posix.POLL.OUT != 0) {
+                    log.debug("Connection {}: Ready for writing (POLLOUT)", .{connection.connection_id});
+                }
                 if (ready_index < ready_connections.len) {
+                    log.debug("Connection {} ready for I/O (state: {}, events: 0x{X})", .{ connection.connection_id, connection.state, poll_fd.revents });
                     ready_connections[ready_index] = connection;
                     ready_index += 1;
                 }
+                conn_index += 1;
+            } else {
                 conn_index += 1;
             }
 
             poll_index += 1;
         }
 
+        // Close connections marked for closure (in reverse order to maintain indices)
+        var close_idx: usize = close_count;
+        while (close_idx > 0) {
+            close_idx -= 1;
+            const conn_idx = connections_to_close[close_idx];
+            if (conn_idx < self.connections.items.len) {
+                self.close_connection(conn_idx);
+            }
+        }
+
+        log.debug("Returning {} ready connections", .{ready_index});
         return ready_connections[0..ready_index];
     }
 
     /// Close connection at specified index and update statistics.
     /// Connection memory is arena-allocated so no explicit deallocation needed.
+    /// TODO: Investigate this and close_connection_by_pointer usage, this seems fishy
     pub fn close_connection(self: *ConnectionManager, index: usize) void {
         assert_mod.assert_fmt(index < self.connections.items.len, "Connection index out of bounds: {} >= {}", .{ index, self.connections.items.len });
 
@@ -276,6 +377,18 @@ pub const ConnectionManager = struct {
         _ = self.connections.swapRemove(index);
         self.stats.connections_active -= 1;
         self.stats.connections_closed += 1;
+    }
+
+    /// Close connection by pointer reference.
+    /// Finds the connection index and delegates to close_connection(index).
+    pub fn close_connection_by_pointer(self: *ConnectionManager, connection_ptr: *const ClientConnection) !void {
+        for (self.connections.items, 0..) |connection, index| {
+            if (connection == connection_ptr) {
+                self.close_connection(index);
+                return;
+            }
+        }
+        return error.ConnectionNotFound;
     }
 
     /// Remove connections that exceed configured timeout.
@@ -337,6 +450,7 @@ pub const ConnectionManager = struct {
         };
 
         if (!keep_alive) {
+            log.debug("Connection {} marked for closure, finding index for removal", .{connection.connection_id});
             // Find connection index for removal
             for (self.connections.items, 0..) |existing_conn, index| {
                 if (existing_conn == connection) {
@@ -344,6 +458,7 @@ pub const ConnectionManager = struct {
                     break;
                 }
             }
+            return false; // Ensure caller knows connection is closed
         }
 
         return keep_alive;

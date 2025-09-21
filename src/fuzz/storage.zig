@@ -295,7 +295,7 @@ fn fuzz_block_serialization(allocator: std.mem.Allocator, input: []const u8) !vo
         return;
     };
 
-    _ = block.serialize(buffer) catch {
+    _ = (&block).serialize(buffer) catch {
         // Serialization errors are expected for malformed input
         return;
     };

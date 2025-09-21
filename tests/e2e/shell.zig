@@ -1,4 +1,4 @@
-//! Shell integration tests for KausalDB pure e2e scenarios.
+//! End-to-end tests for shell integration.
 //!
 //! Tests KausalDB through actual shell execution to validate real-world
 //! usage patterns, scripting scenarios, and shell pipeline integration.
@@ -21,11 +21,16 @@ const ShellHarness = struct {
         // Get absolute path to binary for shell execution
         var cwd_buffer: [4096]u8 = undefined;
         const cwd = try std.process.getCwd(&cwd_buffer);
-        const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "zig-out", "bin", "kausaldb" });
+        const binary_path = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "zig-out", "bin", "kausal" });
         const test_workspace = try create_shell_workspace(allocator, test_name);
 
         var env = try std.process.getEnvMap(allocator);
         try env.put("KAUSAL_TEST_MODE", "1");
+
+        // Use E2E test port if available, otherwise use default
+        const e2e_port = std.process.getEnvVarOwned(allocator, "KAUSAL_E2E_TEST_PORT") catch "3838";
+        defer allocator.free(e2e_port);
+        try env.put("KAUSAL_SERVER_PORT", e2e_port);
 
         return Self{
             .allocator = allocator,
@@ -139,8 +144,8 @@ test "shell basic command chaining" {
     const project_dir = try shell_harness.create_shell_project("chain_test");
     defer testing.allocator.free(project_dir);
 
-    // Chain multiple KausalDB commands using shell
-    const chain_cmd = try std.fmt.allocPrint(testing.allocator, "{s} link {s} && {s} sync chain_test && {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path, shell_harness.binary_path });
+    // Chain multiple kausal commands using shell
+    const chain_cmd = try std.fmt.allocPrint(testing.allocator, "{s} link --path {s} --name chain_test && {s} sync chain_test && {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path, shell_harness.binary_path });
     defer testing.allocator.free(chain_cmd);
 
     const result = try shell_harness.execute_shell_command(chain_cmd);
@@ -148,7 +153,7 @@ test "shell basic command chaining" {
     defer testing.allocator.free(result.stderr);
 
     try testing.expectEqual(@as(u8, 0), harness.safe_exit_code(result.term));
-    try testing.expect(std.mem.indexOf(u8, result.stdout, "Linked") != null);
+    try testing.expect(std.mem.indexOf(u8, result.stdout, "Successfully linked") != null);
     try testing.expect(std.mem.indexOf(u8, result.stdout, "chain_test") != null);
 }
 
@@ -173,12 +178,14 @@ test "shell script automation scenario" {
         \\echo 'const std = @import("std"); pub fn cleanup() void {{}}' > proj3/main.zig
         \\
         \\# Link all projects
-        \\$KAUSAL link proj1 as backend
-        \\$KAUSAL link proj2 as frontend
-        \\$KAUSAL link proj3 as utils
+        \\$KAUSAL link --path proj1 --name backend
+        \\$KAUSAL link --path proj2 --name frontend
+        \\$KAUSAL link --path proj3 --name utils
         \\
-        \\# Sync all
-        \\$KAUSAL sync --all
+        \\# Sync all projects
+        \\$KAUSAL sync backend
+        \\$KAUSAL sync frontend
+        \\$KAUSAL sync utils
         \\
         \\# Show final status
         \\$KAUSAL status --json
@@ -213,7 +220,7 @@ test "shell environment variable integration" {
     defer testing.allocator.free(project_dir);
 
     // Test with environment variables
-    const env_cmd = try std.fmt.allocPrint(testing.allocator, "KAUSAL_WORKSPACE=test_env {s} link {s} && KAUSAL_WORKSPACE=test_env {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
+    const env_cmd = try std.fmt.allocPrint(testing.allocator, "KAUSAL_WORKSPACE=test_env {s} link --path {s} --name test_env && KAUSAL_WORKSPACE=test_env {s} status", .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
     defer testing.allocator.free(env_cmd);
 
     const result = try shell_harness.execute_shell_command(env_cmd);
@@ -233,9 +240,9 @@ test "shell output redirection and processing" {
 
     // Test output redirection to files
     const redirect_cmd = try std.fmt.allocPrint(testing.allocator,
-        \\{s} link {s} > link_output.txt 2>&1 &&
+        \\{s} link --path {s} --name redirect_test > link_output.txt 2>&1 &&
         \\{s} status --json > status.json &&
-        \\cat status.json | grep -q "env_test\\|redirect_test\\|No codebases" &&
+        \\cat status.json | grep -q "block_count\\|redirect_test\\|uptime" &&
         \\wc -l < link_output.txt
     , .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
     defer testing.allocator.free(redirect_cmd);
@@ -256,9 +263,9 @@ test "shell pipe operations with kausal commands" {
     const project_dir = try shell_harness.create_shell_project("pipe_test");
     defer testing.allocator.free(project_dir);
 
-    // Test piping KausalDB output through shell utilities
+    // Test piping kausal output through shell utilities
     const pipe_cmd = try std.fmt.allocPrint(testing.allocator,
-        \\{s} link {s} | grep -i "linked" | wc -l &&
+        \\{s} link --path {s} --name pipe_test | grep -i "linked" | wc -l &&
         \\{s} status | head -5 | tail -1
     , .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
     defer testing.allocator.free(pipe_cmd);
@@ -277,9 +284,9 @@ test "shell error handling and recovery" {
 
     // Test shell error handling with failing commands
     const error_cmd = try std.fmt.allocPrint(testing.allocator,
-        \\{s} link /nonexistent/path || echo "Link failed as expected" &&
-        \\{s} unlink nonexistent_project || echo "Unlink failed as expected" &&
-        \\{s} version | grep -q "KausalDB" && echo "Version check passed"
+        \\{s} link --path /nonexistent/path --name nonexistent || echo "Link failed as expected" &&
+        \\{s} unlink --name nonexistent_project || echo "Unlink failed as expected" &&
+        \\{s} version | grep -q "v0.1.0" && echo "Version check passed"
     , .{ shell_harness.binary_path, shell_harness.binary_path, shell_harness.binary_path });
     defer testing.allocator.free(error_cmd);
 
@@ -302,7 +309,7 @@ test "shell bulk operations through loops" {
         \\for i in 1 2 3; do
         \\    mkdir -p "bulk_$i"
         \\    echo 'const std = @import("std"); pub fn main() void {{}}' > "bulk_$i/main.zig"
-        \\    {s} link "bulk_$i" as "project_$i" || echo "Failed to link project_$i"
+        \\    {s} link --path "bulk_$i" --name "project_$i" || echo "Failed to link project_$i"
         \\done &&
         \\
         \\# Verify all were linked
@@ -326,11 +333,11 @@ test "shell conditional execution based on kausal output" {
     const project_dir = try shell_harness.create_shell_project("cond_test");
     defer testing.allocator.free(project_dir);
 
-    // Test conditional execution based on KausalDB command results
+    // Test conditional execution based on kausal command results
     const cond_cmd = try std.fmt.allocPrint(testing.allocator,
         \\if {s} status | grep -q "No codebases"; then
         \\    echo "Workspace is empty - linking project"
-        \\    {s} link {s} as conditional_project
+        \\    {s} link --path {s} --name conditional_project
         \\else
         \\    echo "Workspace has existing codebases"
         \\fi &&
@@ -360,10 +367,10 @@ test "shell command substitution with kausal output" {
     const project_dir = try shell_harness.create_shell_project("subst_test");
     defer testing.allocator.free(project_dir);
 
-    // Test command substitution using KausalDB output
+    // Test command substitution using kausal output
     const subst_cmd = try std.fmt.allocPrint(testing.allocator,
-        \\{s} link {s} &&
-        \\PROJECT_COUNT=$({s} status | grep -c "linked from" || echo "0") &&
+        \\{s} link --path {s} --name subst_test &&
+        \\PROJECT_COUNT=$({s} status | grep -c "linked" || echo "0") &&
         \\echo "Found $PROJECT_COUNT linked projects" &&
         \\test "$PROJECT_COUNT" -ge "0"
     , .{ shell_harness.binary_path, project_dir, shell_harness.binary_path });
@@ -409,7 +416,7 @@ test "shell integration with json processing tools" {
 
     // Test JSON output integration with shell tools (using basic tools available everywhere)
     const json_cmd = try std.fmt.allocPrint(testing.allocator,
-        \\{s} link {s} &&
+        \\{s} link --path {s} --name json_test &&
         \\{s} status --json > workspace.json &&
         \\# Basic JSON validation - check for braces and common fields
         \\grep -q "{{" workspace.json &&

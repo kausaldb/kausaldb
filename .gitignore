@@ -14,11 +14,8 @@ fuzz-corpus/
 .fuzzing_monitoring
 
 # Data directories (runtime generated)
+.kausaldb-data
 .kausal-data/
-.kausal_data/
-kausal-data/
-kausal_data/
-kausaldb_data/
 
 # Test artifacts and simulation data
 test_*/
@@ -30,6 +27,7 @@ rapid_cycle_*/
 wal_*/
 *_corruption_test/
 *_stress*/
+.test-kausaldb*
 
 # Where does this damn file come from?
 .DS_Store

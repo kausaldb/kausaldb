@@ -15,8 +15,6 @@ pub const std_options = .{
 };
 
 comptime {
-    _ = @import("cli/commands.zig");
-    _ = @import("cli/executor.zig");
     _ = @import("core/arena.zig");
     _ = @import("core/assert.zig");
     _ = @import("core/bounded.zig");
@@ -29,7 +27,6 @@ comptime {
     _ = @import("core/production_vfs.zig");
     _ = @import("core/signals.zig");
     _ = @import("core/state_machines.zig");
-    _ = @import("core/types.zig");
     _ = @import("core/vfs.zig");
     _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/tidy.zig");
@@ -66,4 +63,5 @@ comptime {
     _ = @import("storage/wal/recovery.zig");
     _ = @import("storage/wal/stream.zig");
     _ = @import("storage/wal/types.zig");
+    _ = @import("cli/tests.zig");
 }

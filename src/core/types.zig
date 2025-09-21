@@ -283,7 +283,7 @@ pub const ContextBlock = struct {
     }
 
     /// Serialize this ContextBlock to a buffer.
-    pub fn serialize(self: ContextBlock, buffer: []u8) !usize {
+    pub fn serialize(self: *const ContextBlock, buffer: []u8) !usize {
         const required_size = self.serialized_size();
         if (buffer.len < required_size) return error.BufferTooSmall;
 
@@ -381,7 +381,7 @@ pub const ContextBlock = struct {
     /// Free memory allocated for this ContextBlock.
     /// NOTE: Only call this for blocks created via deserialize() or other individual allocation.
     /// Arena-allocated blocks should be freed via arena.deinit(), not individual deinit().
-    pub fn deinit(self: ContextBlock, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const ContextBlock, allocator: std.mem.Allocator) void {
         allocator.free(self.source_uri);
         allocator.free(self.metadata_json);
         allocator.free(self.content);
@@ -389,7 +389,7 @@ pub const ContextBlock = struct {
 
     /// Validate ContextBlock structural integrity and field constraints.
     /// Checks memory pointers, size limits, and UTF-8 encoding compliance.
-    pub fn validate(self: ContextBlock, allocator: std.mem.Allocator) !void {
+    pub fn validate(self: *const ContextBlock, allocator: std.mem.Allocator) !void {
         // Safety: Converting allocator pointer to integer for null check validation
         assert_fmt(@intFromPtr(allocator.ptr) != 0, "Allocator cannot be null", .{});
 
@@ -441,7 +441,7 @@ pub const ContextBlock = struct {
 
     /// Validate ContextBlock for ingestion pipeline with business rules.
     /// Performs structural validation plus ingestion-specific requirements.
-    pub fn validate_for_ingestion(self: ContextBlock, allocator: std.mem.Allocator) !void {
+    pub fn validate_for_ingestion(self: *const ContextBlock, allocator: std.mem.Allocator) !void {
         // First perform basic structural validation
         try self.validate(allocator);
 
@@ -702,7 +702,7 @@ test "ContextBlock validation" {
         .content = "test content",
     };
 
-    try valid_block.validate(allocator);
+    try (&valid_block).validate(allocator);
 
     const invalid_json_block = ContextBlock{
         .id = try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
@@ -712,7 +712,7 @@ test "ContextBlock validation" {
         .content = "test content",
     };
 
-    try std.testing.expectError(error.InvalidMetadataJson, invalid_json_block.validate(allocator));
+    try std.testing.expectError(error.InvalidMetadataJson, (&invalid_json_block).validate(allocator));
 }
 
 test "BlockHeader versioned format" {
@@ -825,7 +825,7 @@ test "ContextBlock checksum validation" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    _ = try block.serialize(buffer);
+    _ = try (&block).serialize(buffer);
 
     // Corrupt the last byte of content
     buffer[buffer.len - 1] ^= 0xFF;
@@ -849,7 +849,7 @@ test "ContextBlock size computation from buffer" {
     const buffer = try allocator.alloc(u8, expected_size);
     defer allocator.free(buffer);
 
-    _ = try block.serialize(buffer);
+    _ = try (&block).serialize(buffer);
 
     const computed_size = try ContextBlock.compute_serialized_size_from_buffer(buffer);
     try std.testing.expectEqual(expected_size, computed_size);

@@ -310,7 +310,7 @@ test "recover_from_segment - single valid entry" {
     const test_block = create_test_block();
     const serialized_block = try allocator.alloc(u8, test_block.serialized_size());
     defer allocator.free(serialized_block);
-    _ = try test_block.serialize(serialized_block);
+    _ = try (&test_block).serialize(serialized_block);
 
     var file = try sim_vfs.vfs().create("single.wal");
     const entry_data = try create_test_wal_entry(allocator, 0x01, serialized_block);

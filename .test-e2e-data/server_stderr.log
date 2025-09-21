@@ -1,0 +1,212 @@
+info(kausaldb_server): Starting KausalDB server on 127.0.0.1:3838
+debug(wal_recovery): No entries found in segment: /Users/mitander/c/p/kausaldb/.test-e2e-data/wal/wal_0000.log
+debug(state_machines): Storage state transition: .initialized -> .running
+debug(state_machines): Query state transition: .initialized -> .running
+info(connection_manager): ConnectionManager started: max_connections=100, timeout=300s
+debug(kausaldb_server): Parsing server address: host=127.0.0.1, port=3838
+debug(kausaldb_server): Address parsed successfully: .{ .any = .{ .len = 16, .family = 2, .data = { 14, 254, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 } }, .in = .{ .sa = .{ .len = 16, .family = 2, .port = 65038, .addr = 16777343, .zero = { ... } } }, .in6 = .{ .sa = .{ .len = 16, .family = 2, .port = 65038, .flowinfo = 16777343, .addr = { ... }, .scope_id = 1841876224 } }, .un = .{ .len = 16, .family = 2, .path = { 14, 254, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 144, 53, 74, 2, 1, 0, 0, 0, 0, 205, 200, 109, 1, 0, 0, 0, 68, 232, 29, 2, 1, 0, 0, 0, 143, 173, 13, 19, 0, 0, 0, 0, 128, 234, 200, 109, 1, 0, 0, 0, 143, 173, 13, 19, 0, 0, 0, 0, 136, 53, 74, 2, 1, 0, 0, 0, 136, 53, 74, 2, 1, 0, 0, 0, 136, 53, 74, 2, 1, 0, 0, 0, 136, 53, 74, 2, 1, 0, 0, 0, 136, 53, 74, 2, 1, 0, 0, 0, 128, 234 } } }
+debug(kausaldb_server): Attempting to listen on parsed address...
+debug(kausaldb_server): Socket bound successfully
+info(kausaldb_server): Server listening on 127.0.0.1:3838 (actual socket: .{ .any = .{ .len = 16, .family = 2, .data = { 14, 254, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 } }, .in = .{ .sa = .{ .len = 16, .family = 2, .port = 65038, .addr = 16777343, .zero = { ... } } }, .in6 = .{ .sa = .{ .len = 16, .family = 2, .port = 65038, .flowinfo = 16777343, .addr = { ... }, .scope_id = 2863311530 } }, .un = .{ .len = 16, .family = 2, .path = { 14, 254, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170 } } })
+info(kausaldb_server): Server ready to accept connections
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 1 (timeout: 1000ms)
+debug(connection_manager): New connections available, accepting
+debug(connection_manager): Starting accept_connections loop
+debug(connection_manager): Accept loop iteration, accepted so far: 0
+debug(connection_manager): Successfully accepted TCP connection
+info(connection_manager): Connection 1 accepted from .{ .any = .{ .len = 16, .family = 2, .data = { 245, 213, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 } }, .in = .{ .sa = .{ .len = 16, .family = 2, .port = 54773, .addr = 16777343, .zero = { ... } } }, .in6 = .{ .sa = .{ .len = 16, .family = 2, .port = 54773, .flowinfo = 16777343, .addr = { ... }, .scope_id = 2863311530 } }, .un = .{ .len = 16, .family = 2, .path = { 245, 213, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170 } } }
+debug(connection_manager): Connection 1 fully initialized and added to list
+debug(connection_manager): Accept loop iteration, accepted so far: 1
+debug(connection_manager): No more connections available (WouldBlock), breaking loop
+debug(connection_manager): Accept_connections completed, total accepted: 1
+debug(connection_manager): Accepted 1 new connections
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Returning 0 ready connections
+debug(connection_manager): Adding connection 1 to poll (state: .reading_header, events: 0x1)
+debug(connection_manager): Poll setup: 2 fds to monitor (1 connections)
+debug(connection_manager): About to poll 2 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 2 (timeout: 1000ms)
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Connection 1: poll events - requested: 0x1, returned: 0x11
+debug(connection_manager): Connection 1: Client closed connection but data available - will read data first
+debug(connection_manager): Connection 1: Data available for reading (POLLIN)
+debug(connection_manager): Connection 1 ready for I/O (state: .reading_header, events: 0x11)
+debug(connection_manager): Returning 1 ready connections
+debug(kausaldb_server): === ENTERING handle_connection_request for connection 1 ===
+debug(kausaldb_server): Handler context retrieved successfully
+debug(kausaldb_server): Attempting to read message header (16 bytes) from connection 1
+debug(kausaldb_server): Client 1 disconnected during header read (read 0/16 bytes)
+debug(kausaldb_server): Connection 1 closed by client, cleaning up
+info(connection_manager): Connection 1 closed
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 0 fds ready out of 1 (timeout: 1000ms)
+debug(connection_manager): Poll timeout - no file descriptors ready
+debug(connection_manager): Poll timeout, performing maintenance
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 0 fds ready out of 1 (timeout: 1000ms)
+debug(connection_manager): Poll timeout - no file descriptors ready
+debug(connection_manager): Poll timeout, performing maintenance
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 1 (timeout: 1000ms)
+debug(connection_manager): New connections available, accepting
+debug(connection_manager): Starting accept_connections loop
+debug(connection_manager): Accept loop iteration, accepted so far: 0
+debug(connection_manager): Successfully accepted TCP connection
+info(connection_manager): Connection 2 accepted from .{ .any = .{ .len = 16, .family = 2, .data = { 245, 214, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 } }, .in = .{ .sa = .{ .len = 16, .family = 2, .port = 55029, .addr = 16777343, .zero = { ... } } }, .in6 = .{ .sa = .{ .len = 16, .family = 2, .port = 55029, .flowinfo = 16777343, .addr = { ... }, .scope_id = 2863311530 } }, .un = .{ .len = 16, .family = 2, .path = { 245, 214, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170 } } }
+debug(connection_manager): Connection 2 fully initialized and added to list
+debug(connection_manager): Accept loop iteration, accepted so far: 1
+debug(connection_manager): No more connections available (WouldBlock), breaking loop
+debug(connection_manager): Accept_connections completed, total accepted: 1
+debug(connection_manager): Accepted 1 new connections
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Returning 0 ready connections
+debug(connection_manager): Adding connection 2 to poll (state: .reading_header, events: 0x1)
+debug(connection_manager): Poll setup: 2 fds to monitor (1 connections)
+debug(connection_manager): About to poll 2 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 2 (timeout: 1000ms)
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Connection 2: poll events - requested: 0x1, returned: 0x1
+debug(connection_manager): Connection 2: Data available for reading (POLLIN)
+debug(connection_manager): Connection 2 ready for I/O (state: .reading_header, events: 0x1)
+debug(connection_manager): Returning 1 ready connections
+debug(kausaldb_server): === ENTERING handle_connection_request for connection 2 ===
+debug(kausaldb_server): Handler context retrieved successfully
+debug(kausaldb_server): Attempting to read message header (16 bytes) from connection 2
+debug(kausaldb_server): Connection 2: read 16 bytes, total 16/16
+debug(kausaldb_server): Connection 2: Header read complete, validating (magic: 0x4B41554C, version: 1, type: .link_request, payload_size: 4232)
+debug(kausaldb_server): Connection 2: Header validation successful
+debug(kausaldb_server): Connection 2: Reading payload (4232 bytes)
+debug(kausaldb_server): Connection 2: Payload read complete
+debug(kausaldb_server): Connection 2: Processing message through CLI handler (type: .link_request)
+debug(ownership): Ownership transfer: block .{ .bytes = { 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=343)
+debug(ownership): Ownership transfer: block .{ .bytes = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=290)
+debug(ownership): Ownership transfer: block .{ .bytes = { 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=298)
+debug(ownership): Ownership transfer: block .{ .bytes = { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=416)
+debug(ownership): Ownership transfer: block .{ .bytes = { 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=437)
+debug(ownership): Ownership transfer: block .{ .bytes = { 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=376)
+debug(ownership): Ownership transfer: block .{ .bytes = { 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=293)
+debug(ownership): Ownership transfer: block .{ .bytes = { 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=488)
+debug(ownership): Ownership transfer: block .{ .bytes = { 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=293)
+debug(ownership): Ownership transfer: block .{ .bytes = { 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=433)
+debug(ownership): Ownership transfer: block .{ .bytes = { 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=373)
+debug(ownership): Ownership transfer: block .{ .bytes = { 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=370)
+info(manager): Ingested codebase 'json_test': 3 files processed, 11 blocks generated
+debug(ownership): Ownership transfer: block .{ .bytes = { 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17 } } from StorageEngine to MemtableManager (source invalidated)
+debug(wal): WAL: Write verification enabled (disable_write_verification=false)
+debug(wal): WAL entry written successfully (type=.put_block, size=345)
+debug(kausaldb_server): Connection 2: CLI handler completed, response size: 280 bytes
+debug(kausaldb_server): Connection 2: Sending response (280 bytes)
+debug(kausaldb_server): Connection 2: Response sent successfully
+debug(kausaldb_server): === EXITING handle_connection_request for connection 2 ===
+debug(connection_manager): Adding connection 2 to poll (state: .reading_header, events: 0x1)
+debug(connection_manager): Poll setup: 2 fds to monitor (1 connections)
+debug(connection_manager): About to poll 2 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 2 (timeout: 1000ms)
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Connection 2: poll events - requested: 0x1, returned: 0x11
+debug(connection_manager): Connection 2: Client closed connection but data available - will read data first
+debug(connection_manager): Connection 2: Data available for reading (POLLIN)
+debug(connection_manager): Connection 2 ready for I/O (state: .reading_header, events: 0x11)
+debug(connection_manager): Returning 1 ready connections
+debug(kausaldb_server): === ENTERING handle_connection_request for connection 2 ===
+debug(kausaldb_server): Handler context retrieved successfully
+debug(kausaldb_server): Attempting to read message header (16 bytes) from connection 2
+debug(kausaldb_server): Client 2 disconnected during header read (read 0/16 bytes)
+debug(kausaldb_server): Connection 2 closed by client, cleaning up
+info(connection_manager): Connection 2 closed
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 1 (timeout: 1000ms)
+debug(connection_manager): New connections available, accepting
+debug(connection_manager): Starting accept_connections loop
+debug(connection_manager): Accept loop iteration, accepted so far: 0
+debug(connection_manager): Successfully accepted TCP connection
+info(connection_manager): Connection 3 accepted from .{ .any = .{ .len = 16, .family = 2, .data = { 245, 215, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 } }, .in = .{ .sa = .{ .len = 16, .family = 2, .port = 55285, .addr = 16777343, .zero = { ... } } }, .in6 = .{ .sa = .{ .len = 16, .family = 2, .port = 55285, .flowinfo = 16777343, .addr = { ... }, .scope_id = 2863311530 } }, .un = .{ .len = 16, .family = 2, .path = { 245, 215, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170 } } }
+debug(connection_manager): Connection 3 fully initialized and added to list
+debug(connection_manager): Accept loop iteration, accepted so far: 1
+debug(connection_manager): No more connections available (WouldBlock), breaking loop
+debug(connection_manager): Accept_connections completed, total accepted: 1
+debug(connection_manager): Accepted 1 new connections
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Returning 0 ready connections
+debug(connection_manager): Adding connection 3 to poll (state: .reading_header, events: 0x1)
+debug(connection_manager): Poll setup: 2 fds to monitor (1 connections)
+debug(connection_manager): About to poll 2 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 2 (timeout: 1000ms)
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Connection 3: poll events - requested: 0x1, returned: 0x1
+debug(connection_manager): Connection 3: Data available for reading (POLLIN)
+debug(connection_manager): Connection 3 ready for I/O (state: .reading_header, events: 0x1)
+debug(connection_manager): Returning 1 ready connections
+debug(kausaldb_server): === ENTERING handle_connection_request for connection 3 ===
+debug(kausaldb_server): Handler context retrieved successfully
+debug(kausaldb_server): Attempting to read message header (16 bytes) from connection 3
+debug(kausaldb_server): Connection 3: read 16 bytes, total 16/16
+debug(kausaldb_server): Connection 3: Header read complete, validating (magic: 0x4B41554C, version: 1, type: .show_callers_request, payload_size: 264)
+debug(kausaldb_server): Connection 3: Header validation successful
+debug(kausaldb_server): Connection 3: Reading payload (264 bytes)
+debug(kausaldb_server): Connection 3: Payload read complete
+debug(kausaldb_server): Connection 3: Processing message through CLI handler (type: .show_callers_request)
+debug(ownership): Cloned block .{ .bytes = { 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(ownership): Cloned block .{ .bytes = { 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } from MemtableManager to StorageEngine
+debug(kausaldb_server): Connection 3: CLI handler completed, response size: 876024 bytes
+debug(kausaldb_server): Connection 3: Sending response (876024 bytes)
+debug(kausaldb_server): Connection 3: Response sent successfully
+debug(kausaldb_server): === EXITING handle_connection_request for connection 3 ===
+debug(connection_manager): Adding connection 3 to poll (state: .reading_header, events: 0x1)
+debug(connection_manager): Poll setup: 2 fds to monitor (1 connections)
+debug(connection_manager): About to poll 2 file descriptors with timeout 1000ms
+debug(connection_manager): Poll result: 1 fds ready out of 2 (timeout: 1000ms)
+debug(connection_manager): Collecting ready connections from 1 existing connections
+debug(connection_manager): Connection 3: poll events - requested: 0x1, returned: 0x11
+debug(connection_manager): Connection 3: Client closed connection but data available - will read data first
+debug(connection_manager): Connection 3: Data available for reading (POLLIN)
+debug(connection_manager): Connection 3 ready for I/O (state: .reading_header, events: 0x11)
+debug(connection_manager): Returning 1 ready connections
+debug(kausaldb_server): === ENTERING handle_connection_request for connection 3 ===
+debug(kausaldb_server): Handler context retrieved successfully
+debug(kausaldb_server): Attempting to read message header (16 bytes) from connection 3
+debug(kausaldb_server): Client 3 disconnected during header read (read 0/16 bytes)
+debug(kausaldb_server): Connection 3 closed by client, cleaning up
+info(connection_manager): Connection 3 closed
+debug(connection_manager): Poll setup: 1 fds to monitor (0 connections)
+debug(connection_manager): About to poll 1 file descriptors with timeout 1000ms

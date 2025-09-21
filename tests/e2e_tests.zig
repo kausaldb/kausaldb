@@ -1,4 +1,4 @@
-//! End-to-end test registry for KausalDB binary interface.
+//! End-to-end test registry for `kausal` and `kausal-server` binary interface.
 //!
 //! This file imports all e2e test modules to run comprehensive binary
 //! interface validation through subprocess execution. Tests validate
@@ -17,21 +17,12 @@ pub const std_options = .{
 };
 
 comptime {
-    _ = @import("e2e/cli_flag_validation.zig");
-    _ = @import("e2e/core_commands.zig");
-    _ = @import("e2e/debug_test.zig");
-    _ = @import("e2e/entity_type_validation.zig");
-    _ = @import("e2e/error_handling_scenarios.zig");
-    _ = @import("e2e/find_function_accuracy_test.zig");
+    // Core consolidated test modules
+    _ = @import("e2e/core_cli.zig");
+    _ = @import("e2e/workspace.zig");
+    _ = @import("e2e/query.zig");
+    _ = @import("e2e/errors.zig");
+    _ = @import("e2e/shell.zig");
+    _ = @import("e2e/storage.zig");
     _ = @import("e2e/harness.zig");
-    _ = @import("e2e/ingestion_test.zig");
-    _ = @import("e2e/query_commands.zig");
-    _ = @import("e2e/qualified_name_disambiguation.zig");
-    _ = @import("e2e/relationship_commands_safety.zig");
-    _ = @import("e2e/shell_scenarios.zig");
-    _ = @import("e2e/storage_pressure_testing.zig");
-    _ = @import("e2e/workspace_operations.zig");
-    _ = @import("e2e/workspace_statistics_test.zig");
-    _ = @import("e2e/query_correctness_validation.zig");
-    _ = @import("e2e/server_protocol_test.zig");
 }

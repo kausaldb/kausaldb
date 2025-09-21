@@ -191,7 +191,7 @@ pub const SSTableManager = struct {
                 };
                 // Note: OwnedBlock.init still expects arena pointer for debug tracking
                 // In hierarchical model, this is now coordinator's arena
-                const owned_block = OwnedBlock.take_ownership(cloned_block, accessor);
+                const owned_block = OwnedBlock.take_ownership(&cloned_block, accessor);
                 return owned_block;
             }
         }
@@ -965,7 +965,7 @@ test "SSTableManager creates new SSTable from owned blocks" {
         .content = "test content 1",
     };
 
-    const owned_block1 = OwnedBlock.take_ownership(block1, .simulation_test);
+    const owned_block1 = OwnedBlock.take_ownership(&block1, .simulation_test);
     const owned_blocks = [_]OwnedBlock{owned_block1};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
@@ -997,7 +997,7 @@ test "SSTableManager finds owned blocks in SSTables" {
         .content = "test content",
     };
 
-    const owned_block = OwnedBlock.take_ownership(block, .simulation_test);
+    const owned_block = OwnedBlock.take_ownership(&block, .simulation_test);
     const owned_blocks = [_]OwnedBlock{owned_block};
     try manager.create_new_sstable(&owned_blocks, .simulation_test);
 
@@ -1046,8 +1046,8 @@ test "SSTableManager total_block_count aggregates across SSTables" {
         .content = "test content 2",
     };
 
-    const owned_block1 = OwnedBlock.take_ownership(block1, .simulation_test);
-    const owned_block2 = OwnedBlock.take_ownership(block2, .simulation_test);
+    const owned_block1 = OwnedBlock.take_ownership(&block1, .simulation_test);
+    const owned_block2 = OwnedBlock.take_ownership(&block2, .simulation_test);
     const first_sstable_blocks = [_]OwnedBlock{ owned_block1, owned_block2 };
     try manager.create_new_sstable(&first_sstable_blocks, .simulation_test);
 
@@ -1063,7 +1063,7 @@ test "SSTableManager total_block_count aggregates across SSTables" {
         .content = "test content 3",
     };
 
-    const owned_block3 = OwnedBlock.take_ownership(block3, .simulation_test);
+    const owned_block3 = OwnedBlock.take_ownership(&block3, .simulation_test);
     const second_sstable_blocks = [_]OwnedBlock{owned_block3};
     try manager.create_new_sstable(&second_sstable_blocks, .simulation_test);
 

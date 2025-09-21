@@ -302,8 +302,8 @@ pub fn main() !void {
             output.write_status("Component not implemented yet\n");
         },
         .all => {
-            output.write_status("Running realistic end-to-end workload benchmark...\n");
-            try e2e_bench.run_e2e_benchmark_with_harness(&harness);
+            const storage = @import("storage.zig");
+            try storage.run_benchmarks(&harness);
         },
     }
 

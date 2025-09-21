@@ -706,7 +706,7 @@ test "ownership violation injection" {
         .metadata_json = "{}",
         .content = "Test content for ownership violation injection",
     };
-    const owned_block = ownership.OwnedBlock.take_ownership(test_block, .storage_engine);
+    const owned_block = ownership.OwnedBlock.take_ownership(&test_block, .storage_engine);
 
     // Initially, no violations should be enabled
     var stats = sim.ownership_violation_stats();

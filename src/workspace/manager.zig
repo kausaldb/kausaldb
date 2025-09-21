@@ -219,6 +219,18 @@ pub const WorkspaceManager = struct {
         return self.linked_codebases.contains(name);
     }
 
+    /// Clear all linked codebases from workspace (for testing).
+    /// This removes all workspace state and persists the empty state.
+    pub fn clear_all_linked_codebases(self: *WorkspaceManager) !void {
+        assert(self.initialized);
+
+        // Clear the HashMap - arena allocation means no individual frees needed
+        self.linked_codebases.clearAndFree();
+
+        // Persist the empty workspace state
+        try self.persist_workspace_metadata();
+    }
+
     /// Get information about a specific linked codebase.
     pub fn find_codebase_info(self: *WorkspaceManager, name: []const u8) ?CodebaseInfo {
         assert(self.initialized);

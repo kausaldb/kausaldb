@@ -253,7 +253,6 @@ pub const ZigParser = struct {
         function_name: []const u8,
         full_content: []const u8,
     ) !std.array_list.Managed(ParsedEdge) {
-        _ = self;
         var edges = std.array_list.Managed(ParsedEdge).init(allocator);
 
         // Look for function calls in the function body using a more comprehensive approach
@@ -282,54 +281,78 @@ pub const ZigParser = struct {
                 // If we've exited the function, stop looking
                 if (brace_count < 0) break;
 
-                // Look for function calls in this line
-                if (std.mem.indexOf(u8, trimmed_call_line, "setup_logging(") != null) {
-                    const edge = ParsedEdge{
-                        .edge_type = .calls,
-                        .target_id = try allocator.dupe(u8, "setup_logging"),
-                        .metadata = std.StringHashMap([]const u8).init(allocator),
-                    };
-                    try edges.append(edge);
-                }
-                if (std.mem.indexOf(u8, trimmed_call_line, "validate()") != null) {
-                    const edge = ParsedEdge{
-                        .edge_type = .calls,
-                        .target_id = try allocator.dupe(u8, "validate"),
-                        .metadata = std.StringHashMap([]const u8).init(allocator),
-                    };
-                    try edges.append(edge);
-                }
-                // Detect cross-file function calls like utils.utility_function()
-                if (std.mem.indexOf(u8, trimmed_call_line, "utils.utility_function()") != null) {
-                    const edge = ParsedEdge{
-                        .edge_type = .calls,
-                        .target_id = try allocator.dupe(u8, "utility_function"),
-                        .metadata = std.StringHashMap([]const u8).init(allocator),
-                    };
-                    try edges.append(edge);
-                }
-                // Detect helper_function() calls
-                if (std.mem.indexOf(u8, trimmed_call_line, "helper_function()") != null) {
-                    const edge = ParsedEdge{
-                        .edge_type = .calls,
-                        .target_id = try allocator.dupe(u8, "helper_function"),
-                        .metadata = std.StringHashMap([]const u8).init(allocator),
-                    };
-                    try edges.append(edge);
-                }
-                // Detect calculate_value() calls
-                if (std.mem.indexOf(u8, trimmed_call_line, "calculate_value(") != null) {
-                    const edge = ParsedEdge{
-                        .edge_type = .calls,
-                        .target_id = try allocator.dupe(u8, "calculate_value"),
-                        .metadata = std.StringHashMap([]const u8).init(allocator),
-                    };
-                    try edges.append(edge);
-                }
+                // Parse function calls using comprehensive pattern matching
+                try self.parse_function_calls(allocator, &edges, trimmed_call_line);
             }
         }
 
         return edges;
+    }
+
+    /// Parse function calls from a line of code, supporting various patterns including qualified names
+    fn parse_function_calls(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        edges: *std.array_list.Managed(ParsedEdge),
+        line: []const u8,
+    ) !void {
+        _ = self;
+
+        // Skip comments and string literals
+        if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return;
+
+        var i: usize = 0;
+        while (i < line.len) {
+            // Look for potential function call patterns: identifier followed by (
+            if (line[i] == '(' and i > 0) {
+                // Find the start of the function identifier
+                const func_end = i;
+                var func_start = i;
+
+                // Go backwards to find the start of the function name
+                while (func_start > 0) {
+                    const c = line[func_start - 1];
+                    if (std.ascii.isAlphabetic(c) or std.ascii.isDigit(c) or c == '_' or c == '.') {
+                        func_start -= 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if (func_start < func_end) {
+                    const full_call = line[func_start..func_end];
+
+                    // Skip if this looks like a keyword or control structure
+                    if (std.mem.eql(u8, full_call, "if") or
+                        std.mem.eql(u8, full_call, "while") or
+                        std.mem.eql(u8, full_call, "for") or
+                        std.mem.eql(u8, full_call, "switch") or
+                        std.mem.eql(u8, full_call, "catch") or
+                        std.mem.eql(u8, full_call, "orelse"))
+                    {
+                        i += 1;
+                        continue;
+                    }
+
+                    // Extract the target function name (handle qualified names)
+                    const target_name = if (std.mem.lastIndexOf(u8, full_call, ".")) |dot_idx|
+                        full_call[dot_idx + 1 ..] // Use method name for qualified calls
+                    else
+                        full_call; // Use full name for simple calls
+
+                    // Only create edges for non-empty, valid identifiers
+                    if (target_name.len > 0 and std.ascii.isAlphabetic(target_name[0])) {
+                        const edge = ParsedEdge{
+                            .edge_type = .calls,
+                            .target_id = try allocator.dupe(u8, target_name),
+                            .metadata = std.StringHashMap([]const u8).init(allocator),
+                        };
+                        try edges.append(edge);
+                    }
+                }
+            }
+            i += 1;
+        }
     }
 
     fn add_type_unit(

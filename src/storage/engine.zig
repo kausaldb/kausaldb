@@ -727,7 +727,7 @@ pub const StorageEngine = struct {
         const start_time = std.time.nanoTimestamp();
         assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
 
-        sequenced_block.validate(self.backing_allocator) catch |err| {
+        (&sequenced_block).validate(self.backing_allocator) catch |err| {
             error_context.log_storage_error(
                 err,
                 error_context.block_context("block_validation", sequenced_block.id),
@@ -765,7 +765,7 @@ pub const StorageEngine = struct {
         );
 
         // Create new owned block with sequence number for storage
-        const sequenced_owned_block = OwnedBlock.take_ownership(sequenced_block, .storage_engine);
+        const sequenced_owned_block = OwnedBlock.take_ownership(&sequenced_block, .storage_engine);
         var mutable_owned_block = sequenced_owned_block;
         const transferred_block = mutable_owned_block.transfer(.memtable_manager, undefined);
 
@@ -812,7 +812,7 @@ pub const StorageEngine = struct {
     /// Write a block to storage - primary public API.
     /// Accepts ContextBlock from external callers and manages internal ownership transfer.
     pub fn put_block(self: *StorageEngine, block: ContextBlock) !void {
-        const owned_block = OwnedBlock.take_ownership(block, .storage_engine);
+        const owned_block = OwnedBlock.take_ownership(&block, .storage_engine);
         return self.put_block_owned(owned_block);
     }
 
@@ -867,7 +867,7 @@ pub const StorageEngine = struct {
             self.storage_metrics.blocks_read.incr();
             self.storage_metrics.total_read_time_ns.add(read_duration);
             self.storage_metrics.total_bytes_read.add(block.content.len);
-            return OwnedBlock.take_ownership(block, block_ownership);
+            return OwnedBlock.take_ownership(&block, block_ownership);
         }
 
         return null;
@@ -982,7 +982,7 @@ pub const StorageEngine = struct {
             return null; // Block is deleted
         }
         if (result.block) |block| {
-            return OwnedBlock.take_ownership(block, owner);
+            return OwnedBlock.take_ownership(&block, owner);
         }
         return null; // Block not found
     }
@@ -1024,7 +1024,7 @@ pub const StorageEngine = struct {
             return null; // Block is deleted
         }
         if (result.block) |block| {
-            return OwnedBlock.take_ownership(block, .query_engine);
+            return OwnedBlock.take_ownership(&block, .query_engine);
         }
         return null; // Block not found
     }
@@ -1331,6 +1331,31 @@ pub const StorageEngine = struct {
         return &self.storage_metrics;
     }
 
+    /// Statistics structure for CLI status reporting
+    pub const StorageStatistics = struct {
+        total_blocks: u64,
+        total_edges: u64,
+        sstable_count: u64,
+        memtable_bytes: u64,
+        total_disk_bytes: u64,
+    };
+
+    /// Query current storage statistics for status reporting
+    pub fn query_statistics(self: *const StorageEngine) StorageStatistics {
+        const blocks_written = self.storage_metrics.blocks_written.load();
+        const edges_added = self.storage_metrics.edges_added.load();
+        const sstable_count = @as(u64, @intCast(self.sstable_manager.sstable_paths.items.len));
+        const memtable_bytes = self.memtable_manager.block_index.memory_used;
+
+        return StorageStatistics{
+            .total_blocks = blocks_written,
+            .total_edges = edges_added,
+            .sstable_count = sstable_count,
+            .memtable_bytes = memtable_bytes,
+            .total_disk_bytes = 0, // Would need disk usage calculation implementation
+        };
+    }
+
     /// Calculate current memory pressure level for backpressure control.
     /// Updates metrics with current memtable and compaction state before calculation.
     /// Used by ingestion pipeline to adapt batch sizes based on storage load.
@@ -1415,7 +1440,7 @@ pub const StorageEngine = struct {
 
                 if (try self.current_sstable_iterator.?.next()) |sstable_block| {
                     // Create owned block with storage_engine ownership for iterator return
-                    const storage_block = OwnedBlock.take_ownership(sstable_block, .storage_engine);
+                    const storage_block = OwnedBlock.take_ownership(&sstable_block, .storage_engine);
 
                     // Skip if we've already seen this block (deduplication)
                     const gop = self.seen_blocks.getOrPut(sstable_block.id) catch {

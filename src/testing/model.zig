@@ -585,42 +585,6 @@ pub const ModelState = struct {
             // Mathematical invariant: non-deleted blocks must be findable with correct content
             const system_block = try storage.find_block(model_block.id, .temporary);
 
-            // FORENSIC ANALYSIS: Capture comprehensive state before potential violation
-            if (system_block == null and builtin.mode == .Debug) {
-                log.warn("FORENSIC: Block existence check failed for model block", .{});
-                log.warn("  Block ID: {}", .{model_block.id});
-                log.warn("  Model sequence: {}", .{model_block.model_sequence});
-                log.warn("  Model global sequence: {}", .{self.global_sequence});
-                log.warn("  Operation count: {}", .{self.operation_count});
-                log.warn("  Content hash: 0x{x}", .{model_block.content_hash});
-                log.warn("  Creation timestamp: {}", .{model_block.creation_timestamp});
-                log.warn("  Sequence: {}", .{model_block.sequence});
-
-                // Check if this is a sequence divergence issue
-                // Compare operation_count (successful ops) with global_sequence (model state updates)
-                // These should always be equal - any divergence indicates a sequence tracking bug
-                const sequence_gap = @as(i64, @intCast(self.operation_count)) - @as(i64, @intCast(self.global_sequence));
-                log.warn("  Sequence gap (op_count - global_seq): {}", .{sequence_gap});
-
-                // Compare model_sequence (from workload) with actual block sequence
-                const workload_gap = @as(i64, @intCast(model_block.model_sequence)) - @as(i64, @intCast(model_block.sequence));
-                log.warn("  Workload gap (workload_seq - block_seq): {}", .{workload_gap});
-
-                // Try to identify sequence tracking issues
-                if (sequence_gap != 0) {
-                    log.warn(
-                        "  CRITICAL: operation_count ({}) != global_sequence ({}) - sequence tracking bug",
-                        .{ self.operation_count, self.global_sequence },
-                    );
-                }
-                if (workload_gap > 0) {
-                    log.warn(
-                        "  EXPECTED: {} operations may have been generated but not successfully applied",
-                        .{workload_gap},
-                    );
-                }
-            }
-
             if (system_block == null) {
                 fatal_assert(
                     false,

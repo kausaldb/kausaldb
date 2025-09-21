@@ -414,7 +414,7 @@ pub const QueryEngine = struct {
 
         // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
-            return OwnedBlock.take_ownership(block, .query_engine);
+            return OwnedBlock.take_ownership(&block, .query_engine);
         }
 
         // For SSTables, we need to load into cache first, then return reference
@@ -426,7 +426,7 @@ pub const QueryEngine = struct {
 
         // Store in query cache and return reference
         const cached_block = try self.cache_block_for_access(owned_block);
-        return OwnedBlock.take_ownership(cached_block.*, .query_engine);
+        return OwnedBlock.take_ownership(cached_block, .query_engine);
     }
 
     /// Check if a block exists without loading its content
@@ -764,7 +764,7 @@ pub const QueryEngine = struct {
                 matches_found += 1;
 
                 try results.append(SemanticResult{
-                    .block = OwnedBlock.take_ownership(block, .query_engine),
+                    .block = OwnedBlock.take_ownership(&block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
             }
@@ -808,7 +808,7 @@ pub const QueryEngine = struct {
                 matches_found += 1;
 
                 try results.append(SemanticResult{
-                    .block = OwnedBlock.take_ownership(block, .query_engine),
+                    .block = OwnedBlock.take_ownership(&block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
             }

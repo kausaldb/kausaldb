@@ -378,7 +378,6 @@ pub const SSTable = struct {
 
     /// Write blocks, tombstones, and edges to SSTable file in sorted order
     pub fn write_blocks(self: *SSTable, blocks: anytype, tombstones: []const TombstoneRecord, edges: []const GraphEdge) !void {
-        log.warn("SSTable write_blocks: Writing {} blocks, {} tombstones, {} edges to {s}", .{ blocks.len, tombstones.len, edges.len, self.file_path });
         const BlocksType = @TypeOf(blocks);
         const supported_block_write = switch (BlocksType) {
             []const ContextBlock => true,
@@ -480,7 +479,7 @@ pub const SSTable = struct {
             const buffer = try self.backing_allocator.alloc(u8, block_size);
             defer self.backing_allocator.free(buffer);
 
-            const written = try block.serialize(buffer);
+            const written = try (&block).serialize(buffer);
             assert_mod.assert_equal(written, block_size, "Block serialization size mismatch: {} != {}", .{ written, block_size });
 
             _ = try file.write(buffer);
@@ -517,7 +516,6 @@ pub const SSTable = struct {
 
         // Store edge offset before writing edges
         const edge_offset = current_offset;
-        log.warn("SSTable write_blocks: About to write {} edges at offset {}", .{ sorted_edges.len, edge_offset });
 
         // Write edges
         for (sorted_edges) |edge| {

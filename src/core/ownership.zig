@@ -90,22 +90,22 @@ pub const OwnedBlock = struct {
 
     /// Create owned block with explicit ownership and optional arena tracking.
     /// Debug tracking handled separately for consistent HashMap alignment.
-    pub fn init(block: ContextBlock, ownership: BlockOwnership, arena_ptr: anytype) OwnedBlock {
+    pub fn init(block: *const ContextBlock, ownership: BlockOwnership, arena_ptr: anytype) OwnedBlock {
         _ = arena_ptr; // Debug tracking handled separately
         return OwnedBlock{
-            .block = block,
+            .block = block.*,
             .ownership = ownership,
             .state = .valid,
         };
     }
 
     /// Create owned block from existing block with ownership transfer.
-    pub fn take_ownership(block: ContextBlock, new_ownership: BlockOwnership) OwnedBlock {
+    pub fn take_ownership(block: *const ContextBlock, new_ownership: BlockOwnership) OwnedBlock {
         if (builtin.mode == .Debug) {
             // log.debug("Taking ownership of block {any} as {s}", .{ block.id, new_ownership.name() });
         }
         return OwnedBlock{
-            .block = block,
+            .block = block.*,
             .ownership = new_ownership,
             .state = .valid,
         };
@@ -663,7 +663,7 @@ test "OwnedBlock basic operations" {
         std.testing.allocator.free(block.metadata_json);
         std.testing.allocator.free(block.content);
     }
-    var owned = OwnedBlock.take_ownership(block, .memtable_manager);
+    var owned = OwnedBlock.take_ownership(&block, .memtable_manager);
 
     // Owner can read and write
     const read_ptr = owned.read(.memtable_manager);
@@ -692,7 +692,7 @@ test "OwnedBlock ownership transfer" {
         std.testing.allocator.free(block.metadata_json);
         std.testing.allocator.free(block.content);
     }
-    var owned = OwnedBlock.take_ownership(block, .memtable_manager);
+    var owned = OwnedBlock.take_ownership(&block, .memtable_manager);
 
     // Transfer ownership using new safe method
     var transferred = owned.transfer(.query_engine, null);
@@ -721,7 +721,7 @@ test "OwnedBlock cloning with ownership" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const original = OwnedBlock.init(block, .memtable_manager, null);
+    const original = OwnedBlock.init(&block, .memtable_manager, null);
     const cloned = try original.clone_with_ownership(arena.allocator(), .query_engine, &arena);
 
     // Both blocks have same content but different ownership
@@ -766,8 +766,8 @@ test "OwnedBlockCollection management" {
         std.testing.allocator.free(block2.content);
     }
 
-    var owned1 = OwnedBlock.init(block1, .temporary, null);
-    var owned2 = OwnedBlock.init(block2, .temporary, null);
+    var owned1 = OwnedBlock.init(&block1, .temporary, null);
+    var owned2 = OwnedBlock.init(&block2, .temporary, null);
 
     try collection.add_block(&owned1);
     try collection.add_block(&owned2);
@@ -856,8 +856,8 @@ test "zero-cost compile-time ownership system" {
     }
 
     // Test compile-time owned block creation with zero runtime overhead
-    var storage_block = OwnedBlock.take_ownership(test_block, .storage_engine);
-    var memtable_block = OwnedBlock.take_ownership(test_block, .memtable_manager);
+    var storage_block = OwnedBlock.take_ownership(&test_block, .storage_engine);
+    var memtable_block = OwnedBlock.take_ownership(&test_block, .memtable_manager);
 
     // Test valid access patterns - these should compile and have zero runtime cost
     const storage_read = storage_block.read(.storage_engine);
@@ -879,11 +879,11 @@ test "zero-cost compile-time ownership system" {
     try std.testing.expect(storage_block.ownership == .storage_engine);
 
     // Test direct block creation
-    var helper_block = OwnedBlock.take_ownership(test_block, .storage_engine);
+    var helper_block = OwnedBlock.take_ownership(&test_block, .storage_engine);
     const helper_read = helper_block.read(.storage_engine);
     try std.testing.expect(helper_read.content.len > 0);
 
-    var temp_block = OwnedBlock.take_ownership(test_block, .temporary);
+    var temp_block = OwnedBlock.take_ownership(&test_block, .temporary);
     const temp_access = temp_block.read(.temporary);
     try std.testing.expect(temp_access.id.eql(block_id));
 
@@ -907,7 +907,7 @@ test "moved-from state prevents use-after-transfer" {
         std.testing.allocator.free(block.content);
     }
 
-    var original = OwnedBlock.init(block, .memtable_manager, null);
+    var original = OwnedBlock.init(&block, .memtable_manager, null);
 
     // Original block should work before transfer
     _ = original.read(.memtable_manager);

@@ -277,8 +277,9 @@ pub const SemanticQueryResult = struct {
     ) QueryError!SemanticQueryResult {
         const owned_results = try allocator.alloc(SemanticResult, results.len);
         for (results, 0..) |result, i| {
+            const cloned_block = try clone_block(allocator, result.block.block);
             owned_results[i] = SemanticResult{
-                .block = OwnedBlock.take_ownership(try clone_block(allocator, result.block.block), .query_engine),
+                .block = OwnedBlock.take_ownership(&cloned_block, .query_engine),
                 .similarity_score = result.similarity_score,
             };
         }
@@ -331,7 +332,7 @@ pub const SemanticQueryResult = struct {
 
         for (sorted_results, 0..) |search_result, i| {
             const cloned_block = try clone_block(allocator, search_result.block.read(.query_engine));
-            blocks[i] = OwnedBlock.take_ownership(cloned_block, .query_engine);
+            blocks[i] = OwnedBlock.take_ownership(&cloned_block, .query_engine);
         }
 
         return blocks;
