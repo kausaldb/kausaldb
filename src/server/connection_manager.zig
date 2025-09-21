@@ -19,7 +19,7 @@ const error_context = @import("../core/error_context.zig");
 const log = std.log.scoped(.connection_manager);
 const testing = std.testing;
 
-const ClientConnection = conn.ClientConnection;
+pub const ClientConnection = conn.ClientConnection;
 const ConnectionState = conn.ConnectionState;
 
 /// Configuration parameters for connection management behavior

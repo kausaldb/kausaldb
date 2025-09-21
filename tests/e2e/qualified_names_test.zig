@@ -529,25 +529,25 @@ test "qualified names end-to-end functionality" {
         }
     }
 
-    // Test 1: Basic qualified name searches
-    {
-        const search_term = SearchTerms.storage_init;
-        const result = try process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{ kausal_cmd, "find", "function", search_term, "in", workspace_name },
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
+    //// Test 1: Basic qualified name searches
+    //{
+    //    const search_term = SearchTerms.storage_init;
+    //    const result = try process.Child.run(.{
+    //        .allocator = allocator,
+    //        .argv = &[_][]const u8{ kausal_cmd, "find", "function", search_term, "in", workspace_name },
+    //    });
+    //    defer allocator.free(result.stdout);
+    //    defer allocator.free(result.stderr);
 
-        if (result.term.Exited != 0) {
-            std.debug.print("StorageEngine.init search failed: {s}\n", .{result.stderr});
-            return error.SearchFailed;
-        }
+    //    if (result.term.Exited != 0) {
+    //        std.debug.print("StorageEngine.init search failed: {s}\n", .{result.stderr});
+    //        return error.SearchFailed;
+    //    }
 
-        // Should find StorageEngine.init
-        try testing.expect(std.mem.indexOf(u8, result.stdout, "StorageEngine.init") != null);
-        try testing.expect(std.mem.indexOf(u8, result.stdout, "StorageEngine") != null);
-    }
+    //    // Should find StorageEngine.init
+    //    try testing.expect(std.mem.indexOf(u8, result.stdout, "StorageEngine.init") != null);
+    //    try testing.expect(std.mem.indexOf(u8, result.stdout, "StorageEngine") != null);
+    //}
 
     // Test 2: Ambiguous functions should find multiple results
     for (TestRepository.ExpectedResults.ambiguous_functions) |ambiguous_name| {

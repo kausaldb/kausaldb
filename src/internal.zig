@@ -26,6 +26,10 @@ pub const StorageEngine = storage.StorageEngine;
 pub const query_engine = @import("query/engine.zig");
 pub const QueryEngine = query_engine.QueryEngine;
 
+// Workspace manager
+pub const workspace_manager = @import("workspace/manager.zig");
+pub const WorkspaceManager = workspace_manager.WorkspaceManager;
+
 // Core utilities
 pub const concurrency = @import("core/concurrency.zig");
 pub const ownership = @import("core/ownership.zig");
@@ -41,6 +45,12 @@ pub const ProductionVFS = production_vfs.ProductionVFS;
 pub const assert_mod = @import("core/assert.zig");
 pub const memory = @import("core/memory.zig");
 pub const error_context = @import("core/error_context.zig");
+pub const arena_mod = @import("core/arena.zig");
+pub const bounded_mod = @import("core/bounded.zig");
+pub const file_handle = @import("core/file_handle.zig");
+pub const pools = @import("core/pools.zig");
+pub const signals = @import("core/signals.zig");
+pub const state_machines = @import("core/state_machines.zig");
 
 // Storage subsystem modules
 pub const sstable = @import("storage/sstable.zig");
@@ -49,10 +59,10 @@ pub const block_index = @import("storage/block_index.zig");
 // WAL (Write-Ahead Log) subsystem
 pub const wal = @import("storage/wal.zig");
 
-// CLI command parsing for fuzzing
-pub const commands = @import("cli/commands.zig");
-pub const CommandError = commands.CommandError;
-pub const parse_command = commands.parse_command;
+// CLI v2 protocol and client
+pub const cli_v2_protocol = @import("cli/protocol.zig");
+pub const cli_v2_parser = @import("cli/parser.zig");
+pub const cli_v2_client = @import("cli/client.zig");
 
 // Simulation testing infrastructure
 pub const simulation_vfs = @import("sim/simulation_vfs.zig");

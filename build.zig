@@ -125,8 +125,9 @@ fn resolve_target(b: *std.Build) std.Build.ResolvedTarget {
 }
 
 fn build_executable(build_options: BuildOptions) void {
-    const exe = build_options.b.addExecutable(.{
-        .name = "kausaldb",
+    // CLI v2 Client Binary
+    const client_exe = build_options.b.addExecutable(.{
+        .name = "kausal",
         .root_module = build_options.b.createModule(.{
             .root_source_file = build_options.b.path("src/main.zig"),
             .target = build_options.target,
@@ -134,10 +135,21 @@ fn build_executable(build_options: BuildOptions) void {
         }),
     });
 
-    exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(exe.root_module, build_options);
+    client_exe.root_module.addImport("build_options", build_options.options.createModule());
+    build_options.b.installArtifact(client_exe);
 
-    build_options.b.installArtifact(exe);
+    // CLI v2 Server Binary
+    const server_exe = build_options.b.addExecutable(.{
+        .name = "kausaldb-server",
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path("src/server_main.zig"),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+    });
+
+    server_exe.root_module.addImport("build_options", build_options.options.createModule());
+    build_options.b.installArtifact(server_exe);
 
     // Build integration test binary for valgrind analysis
     const test_exe = build_options.b.addTest(.{
@@ -153,7 +165,7 @@ fn build_executable(build_options: BuildOptions) void {
     add_internal_module(test_exe.root_module, build_options);
     build_options.b.installArtifact(test_exe);
 
-    const run_cmd = build_options.b.addRunArtifact(exe);
+    const run_cmd = build_options.b.addRunArtifact(server_exe);
     run_cmd.step.dependOn(build_options.b.getInstallStep());
     if (build_options.b.args) |args| {
         run_cmd.addArgs(args);
@@ -164,7 +176,7 @@ fn build_executable(build_options: BuildOptions) void {
 }
 
 fn build_tests(build_options: BuildOptions, test_options: TestOptions) void {
-    const unit_tests = build_test_artifact(build_options, "src/unit_tests.zig", "unit-tests", test_options);
+    const unit_tests = build_unit_test_artifact(build_options, "src/unit_tests.zig", "unit-tests", test_options);
     const unit_run = build_options.b.addRunArtifact(unit_tests);
     const unit_step = build_options.b.step("test-unit", "Run unit tests");
     unit_step.dependOn(&unit_run.step);
@@ -428,6 +440,28 @@ fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, nam
 
     test_exe.root_module.addImport("build_options", build_options.options.createModule());
     add_internal_module(test_exe.root_module, build_options);
+
+    return test_exe;
+}
+
+fn build_unit_test_artifact(build_options: BuildOptions, source_path: []const u8, name: []const u8, test_options: TestOptions) *std.Build.Step.Compile {
+    const filters = if (test_options.filter) |filter|
+        build_options.b.allocator.dupe([]const u8, &[_][]const u8{filter}) catch @panic("OOM")
+    else
+        &[_][]const u8{};
+
+    const test_exe = build_options.b.addTest(.{
+        .name = name,
+        .root_module = build_options.b.createModule(.{
+            .root_source_file = build_options.b.path(source_path),
+            .target = build_options.target,
+            .optimize = build_options.optimize,
+        }),
+        .filters = filters,
+    });
+
+    // Unit tests only get build_options, not the internal module to avoid conflicts
+    test_exe.root_module.addImport("build_options", build_options.options.createModule());
 
     return test_exe;
 }

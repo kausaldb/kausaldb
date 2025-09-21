@@ -18,6 +18,7 @@ pub const std_options = .{
 
 comptime {
     _ = @import("e2e/cli_flag_validation.zig");
+    _ = @import("e2e/cli_v2_e2e.zig");
     _ = @import("e2e/core_commands.zig");
     _ = @import("e2e/debug_test.zig");
     _ = @import("e2e/entity_type_validation.zig");
