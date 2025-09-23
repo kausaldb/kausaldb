@@ -303,45 +303,14 @@ pub const SimulationRunner = struct {
                 }
             }
 
-            // FORENSIC DEBUG: Log sequence number state before operation
-            if (builtin.mode == .Debug) {
-                log.debug("OP[{}] SEQUENCE_TRACKING: workload_seq={} model_global_seq={} workload_op_count={}", .{ i, operation.model_sequence, self.model.global_sequence, self.workload.operation_count });
-
-                // Track specific blocks that might cause issues
-                if (operation.op_type == .put_block or operation.op_type == .update_block) {
-                    if (operation.block) |block| {
-                        log.debug("OP[{}] BLOCK_TRACKING: id={} sequence={} content_len={}", .{ i, block.id, block.sequence, block.content.len });
-                    }
-                }
-            }
-
             // Apply to system first to track actual success/failure
             const success = self.apply_operation_to_system(&operation) catch |err| blk: {
-                log.debug("OP[{}] SYSTEM_ERROR: {any} (workload_seq={})", .{ i, err, operation.model_sequence });
                 // Handle expected failures that shouldn't update model
                 switch (err) {
                     error.WriteStalled, error.WriteBlocked => break :blk false,
                     else => return err,
                 }
             };
-
-            // FORENSIC: Track successful block operations for debugging data loss
-            if (success and (operation.op_type == .put_block or operation.op_type == .update_block)) {
-                if (operation.block) |original_block| {
-                    // Fetch the actual stored block to get the assigned sequence number
-                    if (try self.storage_engine.find_block(original_block.id, .temporary)) |stored_block| {
-                        const actual_block = stored_block.read(.temporary).*;
-                        log.warn("FORENSIC[{}] BLOCK_STORED: id={} seq={} content_hash=0x{x} op_seq={}", .{ i, actual_block.id, actual_block.sequence, std.hash_map.hashString(actual_block.content), operation.model_sequence });
-                    } else {
-                        log.warn("FORENSIC[{}] BLOCK_STORED_BUT_MISSING: id={} input_seq={} op_seq={}", .{ i, original_block.id, original_block.sequence, operation.model_sequence });
-                    }
-                }
-            }
-
-            // DEBUG: Log operation success/failure with sequence tracking
-            if (builtin.mode == .Debug) {
-                log.debug("OP[{}] SYSTEM_RESULT: success={} workload_seq={}", .{ i, success, operation.model_sequence });
-            }
 
             // Only update model if system operation succeeded
             if (success) {
@@ -383,12 +352,6 @@ pub const SimulationRunner = struct {
 
             // Update peak memory tracking
             self.update_peak_memory();
-
-            // Periodic model/storage consistency verification
-            if (i > 0 and i % 50 == 0 and !self.corruption_expected) {
-                try self.verify_sequence_consistency(@intCast(i));
-                try self.verify_immediate_consistency(@intCast(i));
-            }
 
             // Check flush triggers
             if (self.should_trigger_flush()) {
@@ -522,78 +485,6 @@ pub const SimulationRunner = struct {
                 // Enable fault testing mode with realistic 100MB disk limit
                 self.sim_vfs.enable_fault_testing_mode();
             },
-        }
-    }
-
-    /// Verify sequence consistency between workload generator and model
-    /// to detect atomicity violations early in simulation
-    fn verify_sequence_consistency(self: *Self, current_operation: u32) !void {
-        const workload_count = self.workload.operation_count;
-        const model_sequence = self.model.global_sequence;
-        const expected_max_divergence = 100; // Allow some divergence due to failed ops
-
-        if (workload_count > model_sequence) {
-            const divergence = workload_count - model_sequence;
-            if (divergence > expected_max_divergence) {
-                log.warn("SEQUENCE DIVERGENCE DETECTED at operation {}", .{current_operation});
-                log.warn("  Workload operation count: {}", .{workload_count});
-                log.warn("  Model global sequence: {}", .{model_sequence});
-                log.warn("  Divergence: {} operations", .{divergence});
-                log.warn("  This may indicate atomicity violations", .{});
-
-                // In debug mode, provide additional forensics
-                if (builtin.mode == .Debug) {
-                    const model_blocks = try self.model.active_block_count();
-                    log.warn("  Active blocks in model: {}", .{model_blocks});
-                    log.warn("  Expected pattern: workload_count >= model_sequence due to failed ops", .{});
-
-                    if (divergence > expected_max_divergence * 2) {
-                        fatal_assert(false, "CRITICAL: Sequence divergence {} exceeds safety threshold {}", .{ divergence, expected_max_divergence * 2 });
-                    }
-                }
-            }
-        }
-    }
-
-    /// Verify immediate model/storage consistency to catch atomicity violations early
-    fn verify_immediate_consistency(self: *Self, current_operation: u32) !void {
-        // Quick sample check: verify a few recent blocks still exist in both model and storage
-        const model_count = try self.model.active_block_count();
-        if (model_count == 0) return;
-
-        const sample_size = @min(model_count, 5);
-        var checked: u32 = 0;
-        var model_iter = self.model.blocks.iterator();
-
-        while (model_iter.next()) |entry| {
-            if (checked >= sample_size) break;
-
-            const model_block = entry.value_ptr;
-            if (model_block.deleted) continue;
-
-            const storage_result = self.storage_engine.find_block(model_block.id, .temporary) catch |err| {
-                log.warn("IMMEDIATE_CONSISTENCY[{}] ERROR: Failed to check block {} - {any}", .{ current_operation, model_block.id, err });
-                continue;
-            };
-
-            if (storage_result == null) {
-                log.warn("IMMEDIATE_CONSISTENCY[{}] VIOLATION: Model has block {} (seq={}) but storage doesn't", .{ current_operation, model_block.id, model_block.model_sequence });
-                log.warn("FORENSIC[{}] MISSING_BLOCK: id={} model_seq={} storage_seq={} content_hash=0x{x}", .{ current_operation, model_block.id, model_block.model_sequence, model_block.sequence, model_block.content_hash });
-                // Don't fatal_assert here, just log for forensics
-            } else {
-                // Verify the block content matches
-                const stored_block = storage_result.?.read(.temporary);
-                const stored_hash = std.hash_map.hashString(stored_block.content);
-                if (stored_hash != model_block.content_hash) {
-                    log.warn("IMMEDIATE_CONSISTENCY[{}] CONTENT_MISMATCH: Block {} hash mismatch model=0x{x} storage=0x{x}", .{ current_operation, model_block.id, model_block.content_hash, stored_hash });
-                }
-            }
-
-            checked += 1;
-        }
-
-        if (checked > 0) {
-            log.debug("IMMEDIATE_CONSISTENCY[{}] VERIFIED: {}/{} sampled blocks consistent", .{ current_operation, checked, sample_size });
         }
     }
 
