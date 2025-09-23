@@ -174,7 +174,7 @@ pub const BlockIndex = struct {
         const new_memory = cloned_block.source_uri.len + cloned_block.metadata_json.len + cloned_block.content.len;
 
         // Critical: Update HashMap first, then memory accounting to prevent corruption on allocation failure
-        const memtable_owned_block = OwnedBlock.take_ownership(cloned_block, .memtable_manager);
+        const memtable_owned_block = OwnedBlock.take_ownership(&cloned_block, .memtable_manager);
         try self.blocks.put(cloned_block.id, memtable_owned_block);
 
         // Update memory accounting only after successful HashMap operation

@@ -307,7 +307,7 @@ pub const TraversalResult = struct {
                 .metadata_json = try arena_allocator.dupe(u8, ctx_block.metadata_json),
                 .content = try arena_allocator.dupe(u8, ctx_block.content),
             };
-            cloned_blocks[i] = OwnedBlock.take_ownership(cloned_ctx_block, .query_engine);
+            cloned_blocks[i] = OwnedBlock.take_ownership(&cloned_ctx_block, .query_engine);
         }
 
         const cloned_paths = try arena_allocator.alloc([]const BlockId, self.paths.len);

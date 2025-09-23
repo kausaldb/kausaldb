@@ -553,9 +553,6 @@ pub const MemtableManager = struct {
     pub fn flush_to_sstable(self: *MemtableManager, sstable_manager: anytype, graph_index: *const GraphEdgeIndex) !void {
         concurrency.assert_main_thread();
 
-        const initial_edge_count = graph_index.edge_count();
-        log.warn("FLUSH_START: blocks={} tombstones={} edges={}", .{ self.block_index.blocks.count(), self.block_index.tombstones.count(), initial_edge_count });
-
         if (self.block_index.blocks.count() == 0 and self.block_index.tombstones.count() == 0) return;
 
         var owned_blocks = std.array_list.Managed(OwnedBlock).init(self.backing_allocator);
@@ -582,7 +579,10 @@ pub const MemtableManager = struct {
                 break; // Success
             } else {
                 // Collection failed, retry after a brief pause
-                log.warn("Edge collection attempt {} failed: expected {} edges, collected {}", .{ collection_attempts + 1, edge_count_before, edges.len });
+                log.warn(
+                    "Edge collection attempt {} failed: expected {} edges, collected {}",
+                    .{ collection_attempts + 1, edge_count_before, edges.len },
+                );
                 self.backing_allocator.free(edges);
                 if (collection_attempts < 2) {
                     // Brief pause before retry (only for first two attempts)
@@ -598,16 +598,16 @@ pub const MemtableManager = struct {
 
         // Final validation
         const final_edge_count = graph_index.edge_count();
-        log.warn("FLUSH_EDGE_COLLECTION: initial={} final={} collected={}", .{ initial_edge_count, final_edge_count, edges.len });
-        assert_mod.assert_fmt(edges.len == final_edge_count, "Edge collection ultimately failed: expected {} edges, collected {}", .{ final_edge_count, edges.len });
+        assert_mod.assert_fmt(
+            edges.len == final_edge_count,
+            "Edge collection ultimately failed: expected {} edges, collected {}",
+            .{ final_edge_count, edges.len },
+        );
 
         // Validate that counts fit in u16 limits for SSTable format
         const max_items_per_sstable = std.math.maxInt(u16);
 
         if (tombstones.len > max_items_per_sstable or edges.len > max_items_per_sstable) {
-            // Split into multiple SSTables when counts exceed u16 limits
-            // This is a rare case that only happens with very large memtables
-
             // First SSTable: all blocks + as many tombstones/edges as fit
             const first_tombstones = tombstones[0..@min(tombstones.len, max_items_per_sstable)];
             const first_edges = edges[0..@min(edges.len, max_items_per_sstable)];

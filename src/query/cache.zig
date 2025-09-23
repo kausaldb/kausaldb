@@ -168,7 +168,7 @@ fn clone_owned_block(allocator: std.mem.Allocator, owned_block: OwnedBlock) !Own
         .metadata_json = try allocator.dupe(u8, block.metadata_json),
         .content = try allocator.dupe(u8, block.content),
     };
-    return OwnedBlock.take_ownership(cloned_block, .query_engine);
+    return OwnedBlock.take_ownership(&cloned_block, .query_engine);
 }
 
 /// Hash context for CacheKey
@@ -455,7 +455,7 @@ test "cache TTL expiration" {
     }
 
     const cache_key = CacheKey.for_single_block(test_block.id);
-    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(test_block, .query_engine) };
+    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(&test_block, .query_engine) };
 
     // Store in cache
     try query_cache.put(cache_key, cache_value);
@@ -490,7 +490,7 @@ test "cache invalidation" {
     }
 
     const cache_key = CacheKey.for_single_block(test_block.id);
-    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(test_block, .query_engine) };
+    const cache_value = CacheValue{ .find_blocks = OwnedBlock.take_ownership(&test_block, .query_engine) };
 
     // Store in cache
     try query_cache.put(cache_key, cache_value);

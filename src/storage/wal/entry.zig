@@ -282,7 +282,7 @@ pub const WALEntry = struct {
         const block_data = ContextBlock.deserialize(allocator, self.payload) catch {
             return WALError.CorruptedEntry;
         };
-        return OwnedBlock.take_ownership(block_data, .storage_engine);
+        return OwnedBlock.take_ownership(&block_data, .storage_engine);
     }
 
     /// Extract GraphEdge from put_edge entry payload

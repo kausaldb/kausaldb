@@ -269,7 +269,7 @@ pub const BatchWriter = struct {
             } else {
                 // New block in batch
                 gop.value_ptr.* = BatchEntry{
-                    .block = OwnedBlock.take_ownership(block.*, .storage_engine),
+                    .block = OwnedBlock.take_ownership(block, .storage_engine),
                     .submit_order = @as(u32, @intCast(i)),
                     .workspace = workspace,
                 };
@@ -331,7 +331,7 @@ pub const BatchWriter = struct {
                     // Update to newer block
                     const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                     entry_ptr.* = BatchEntry{
-                        .block = OwnedBlock.take_ownership(new_block.*, .storage_engine),
+                        .block = OwnedBlock.take_ownership(new_block, .storage_engine),
                         .submit_order = submit_order,
                         .workspace = workspace,
                     };
@@ -341,7 +341,7 @@ pub const BatchWriter = struct {
                 // Always use the later submitted block
                 const entry_ptr = self.dedup_map.find_ptr(new_block.id).?;
                 entry_ptr.* = BatchEntry{
-                    .block = OwnedBlock.take_ownership(new_block.*, .storage_engine),
+                    .block = OwnedBlock.take_ownership(new_block, .storage_engine),
                     .submit_order = submit_order,
                     .workspace = workspace,
                 };
