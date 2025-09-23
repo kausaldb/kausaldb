@@ -15,6 +15,7 @@ const ctx_block = @import("../core/types.zig");
 const assert_mod = @import("../core/assert.zig");
 const error_context = @import("../core/error_context.zig");
 const query_engine = @import("../query/engine.zig");
+const cli_protocol = @import("../cli/protocol.zig");
 
 const assert = assert_mod.assert;
 const comptime_assert = assert_mod.comptime_assert;
@@ -24,60 +25,8 @@ const log = std.log.scoped(.connection);
 const BlockId = ctx_block.BlockId;
 const ContextBlock = ctx_block.ContextBlock;
 
-/// Binary protocol message types
-pub const MessageType = enum(u8) {
-    ping = 0x01,
-    find_blocks = 0x02,
-    filtered_query = 0x03,
-    traversal_query = 0x04,
-
-    pong = 0x81,
-    blocks_response = 0x82,
-    filtered_response = 0x83,
-    traversal_response = 0x84,
-    error_response = 0xFF,
-
-    pub fn from_u8(value: u8) !MessageType {
-        return std.enums.fromInt(MessageType, value) orelse return error.InvalidRequest;
-    }
-};
-
-/// Binary protocol header (8 bytes, aligned)
-pub const MessageHeader = packed struct {
-    /// Message type
-    msg_type: MessageType,
-    /// Protocol version (currently 1)
-    version: u8 = 1,
-    /// Reserved for future use
-    reserved: u16 = 0,
-    /// Payload length in bytes
-    payload_length: u32,
-
-    pub const HEADER_SIZE = 8;
-
-    /// Encode message header to binary format for network transmission
-    ///
-    /// Writes header fields to buffer in little-endian format.
-    /// Part of the KausalDB wire protocol.
-    pub fn encode(self: MessageHeader, buffer: []u8) void {
-        assert(buffer.len >= HEADER_SIZE);
-        buffer[0] = @intFromEnum(self.msg_type);
-        buffer[1] = self.version;
-        std.mem.writeInt(u16, buffer[2..4], self.reserved, .little);
-        std.mem.writeInt(u32, buffer[4..8], self.payload_length, .little);
-    }
-
-    pub fn decode(buffer: []const u8) !MessageHeader {
-        if (buffer.len < HEADER_SIZE) return error.InvalidRequest;
-
-        return MessageHeader{
-            .msg_type = try MessageType.from_u8(buffer[0]),
-            .version = buffer[1],
-            .reserved = std.mem.readInt(u16, buffer[2..4], .little),
-            .payload_length = std.mem.readInt(u32, buffer[4..8], .little),
-        };
-    }
-};
+pub const MessageType = cli_protocol.MessageType;
+pub const MessageHeader = cli_protocol.MessageHeader;
 
 /// Connection state for async I/O state machine
 pub const ConnectionState = enum {
@@ -186,44 +135,75 @@ pub const ClientConnection = struct {
 
     /// Attempt to read message header non-blockingly
     fn try_read_header(self: *ClientConnection, config: ServerConfig) !bool {
-        const header_remaining = MessageHeader.HEADER_SIZE - self.header_bytes_read;
+        const header_size = @sizeOf(MessageHeader);
+        const header_remaining = header_size - self.header_bytes_read;
+
+        log.debug("Connection {}: Reading header - need {} bytes, have {} bytes, expecting {} total", .{ self.connection_id, header_remaining, self.header_bytes_read, header_size });
+
         const n = self.stream.read(self.read_buffer[self.header_bytes_read .. self.header_bytes_read + header_remaining]) catch |err| switch (err) {
-            error.WouldBlock => return true, // No data available, try again later
-            error.ConnectionResetByPeer, error.BrokenPipe => return false, // Client disconnected
+            error.WouldBlock => {
+                log.debug("Connection {}: WouldBlock on header read", .{self.connection_id});
+                return true; // No data available, try again later
+            },
+            error.ConnectionResetByPeer, error.BrokenPipe => {
+                log.debug("Connection {}: Connection closed by peer during header read", .{self.connection_id});
+                return false; // Client disconnected
+            },
             else => {
+                log.debug("Connection {}: Read error during header: {}", .{ self.connection_id, err });
                 const ctx = error_context.server_io_context("read_header", self.connection_id, self.header_bytes_read);
                 error_context.log_server_error(err, ctx);
                 return err;
             },
         };
 
-        if (n == 0) return false; // Client disconnected
+        if (n == 0) {
+            log.debug("Connection {}: EOF during header read (connection closed)", .{self.connection_id});
+            return false; // Connection closed by peer
+        }
 
+        log.debug("Connection {}: Read {} bytes for header", .{ self.connection_id, n });
         self.header_bytes_read += n;
 
-        if (self.header_bytes_read >= MessageHeader.HEADER_SIZE) {
-            self.current_header = MessageHeader.decode(self.read_buffer[0..MessageHeader.HEADER_SIZE]) catch {
-                log.warn("Connection {d}: Invalid message header", .{self.connection_id});
+        if (self.header_bytes_read >= header_size) {
+            log.debug("Connection {}: Complete header received ({} bytes)", .{ self.connection_id, self.header_bytes_read });
+
+            // Log raw header bytes for debugging
+            const header_bytes = self.read_buffer[0..header_size];
+            log.debug("Connection {}: Raw header bytes: {any}", .{ self.connection_id, header_bytes[0..@min(16, header_size)] });
+
+            // Parse CLI v2 protocol header using safe deserialization
+            self.current_header = std.mem.bytesAsValue(MessageHeader, header_bytes[0..@sizeOf(MessageHeader)]).*;
+
+            log.debug("Connection {}: Parsed header - magic=0x{X}, version={}, type={}, size={}", .{
+                self.connection_id,
+                self.current_header.?.magic,
+                self.current_header.?.version,
+                self.current_header.?.message_type,
+                self.current_header.?.payload_size,
+            });
+
+            // Validate header
+            self.current_header.?.validate() catch |err| {
+                log.warn("Connection {}: Header validation failed: {} - magic=0x{X}, version={}", .{ self.connection_id, err, self.current_header.?.magic, self.current_header.?.version });
                 return false;
             };
 
-            if (self.current_header.?.payload_length == 0) {
+            log.debug("Connection {}: Header validated successfully", .{self.connection_id});
+
+            if (self.current_header.?.payload_size == 0) {
+                log.debug("Connection {}: No payload, transitioning to processing", .{self.connection_id});
                 self.state = .processing;
             } else {
-                if (self.current_header.?.payload_length > config.max_request_size) {
-                    log.warn("Connection {d}: Request too large: {d} > {d}", .{ self.connection_id, self.current_header.?.payload_length, config.max_request_size });
+                if (self.current_header.?.payload_size > config.max_request_size) {
+                    log.warn("Connection {d}: Request too large: {d} > {d}", .{ self.connection_id, self.current_header.?.payload_size, config.max_request_size });
                     return false;
                 }
-
-                self.current_payload = self.arena.allocator().alloc(u8, self.current_header.?.payload_length) catch {
-                    log.warn("Connection {d}: Failed to allocate payload buffer", .{self.connection_id});
-                    return false;
-                };
-                self.payload_bytes_read = 0;
+                log.debug("Connection {}: Payload expected ({} bytes), transitioning to reading_payload", .{ self.connection_id, self.current_header.?.payload_size });
                 self.state = .reading_payload;
+                self.current_payload = try self.arena.allocator().alloc(u8, @intCast(self.current_header.?.payload_size));
             }
         }
-
         return true;
     }
 
@@ -307,11 +287,153 @@ pub const ClientConnection = struct {
 
 // Compile-time guarantees for network protocol stability
 comptime {
-    comptime_assert(@sizeOf(MessageHeader) == 8, "MessageHeader must be exactly 8 bytes for network protocol compatibility");
-    comptime_assert(MessageHeader.HEADER_SIZE == @sizeOf(MessageHeader), "MessageHeader.HEADER_SIZE constant must match actual struct size");
+    // CLI v2 protocol compatibility checks
+    comptime_assert(@sizeOf(MessageHeader) == 16, "CLI v2 MessageHeader must be exactly 16 bytes");
     comptime_no_padding(MessageHeader);
-    comptime_assert(@sizeOf(MessageType) == 1, "MessageType must be 1 byte");
-    comptime_assert(@sizeOf(u8) == 1, "version field must be 1 byte");
-    comptime_assert(@sizeOf(u16) == 2, "reserved field must be 2 bytes");
-    comptime_assert(@sizeOf(u32) == 4, "payload_length field must be 4 bytes");
+}
+
+// === Unit Tests ===
+
+const testing = std.testing;
+
+test "ClientConnection initialization sets correct initial state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Create a mock stream (we can't create a real one without network setup)
+    const mock_stream = std.net.Stream{ .handle = -1 };
+    const connection_id: u32 = 12345;
+
+    const connection = ClientConnection.init(arena.allocator(), mock_stream, connection_id);
+
+    try testing.expectEqual(connection_id, connection.connection_id);
+    try testing.expectEqual(ConnectionState.reading_header, connection.state);
+    try testing.expectEqual(@as(usize, 0), connection.header_bytes_read);
+    try testing.expectEqual(@as(usize, 0), connection.payload_bytes_read);
+    try testing.expectEqual(@as(usize, 0), connection.response_bytes_written);
+    try testing.expect(connection.current_header == null);
+    try testing.expect(connection.current_payload == null);
+    try testing.expect(connection.current_response == null);
+}
+
+test "ConnectionState enum has all expected states" {
+    // Verify all connection states exist and can be compared
+    const states = [_]ConnectionState{
+        .reading_header,
+        .reading_payload,
+        .processing,
+        .writing_response,
+    };
+
+    for (states) |state| {
+        try testing.expect(@intFromEnum(state) >= 0);
+    }
+}
+
+test "has_complete_request returns correct values for each state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const mock_stream = std.net.Stream{ .handle = -1 };
+    var connection = ClientConnection.init(arena.allocator(), mock_stream, 1);
+
+    // reading_header state
+    connection.state = .reading_header;
+    try testing.expectEqual(false, connection.has_complete_request());
+
+    // reading_payload state
+    connection.state = .reading_payload;
+    try testing.expectEqual(false, connection.has_complete_request());
+
+    // processing state
+    connection.state = .processing;
+    try testing.expectEqual(true, connection.has_complete_request());
+
+    // writing_response state
+    connection.state = .writing_response;
+    try testing.expectEqual(false, connection.has_complete_request());
+}
+
+test "request_payload returns correct values based on state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const mock_stream = std.net.Stream{ .handle = -1 };
+    var connection = ClientConnection.init(arena.allocator(), mock_stream, 1);
+
+    // Non-processing state should return null
+    connection.state = .reading_header;
+    try testing.expect(connection.request_payload() == null);
+
+    // Processing state with null payload should return empty slice
+    connection.state = .processing;
+    const empty_payload = connection.request_payload();
+    try testing.expect(empty_payload != null);
+    try testing.expectEqual(@as(usize, 0), empty_payload.?.len);
+
+    // Processing state with payload should return the payload
+    const test_payload = try arena.allocator().alloc(u8, 10);
+    connection.current_payload = test_payload;
+    const returned_payload = connection.request_payload();
+    try testing.expect(returned_payload != null);
+    try testing.expectEqual(test_payload.ptr, returned_payload.?.ptr);
+    try testing.expectEqual(@as(usize, 10), returned_payload.?.len);
+}
+
+test "send_response sets correct state and data" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const mock_stream = std.net.Stream{ .handle = -1 };
+    var connection = ClientConnection.init(arena.allocator(), mock_stream, 1);
+
+    // Must be in processing state to send response
+    connection.state = .processing;
+
+    const response_data = "test response data";
+    connection.send_response(response_data);
+
+    try testing.expectEqual(ConnectionState.writing_response, connection.state);
+    try testing.expectEqualStrings(response_data, connection.current_response.?);
+    try testing.expectEqual(@as(usize, 0), connection.response_bytes_written);
+}
+
+test "MessageHeader validation accepts valid headers" {
+    const valid_header = MessageHeader{
+        .magic = 0x4B41554C, // 'KAUL'
+        .version = 1,
+        .message_type = .ping_request,
+        .payload_size = 0,
+    };
+
+    // Should not return an error
+    try valid_header.validate();
+}
+
+test "MessageHeader validation rejects invalid magic" {
+    var invalid_header = MessageHeader{
+        .magic = 0x12345678, // Wrong magic
+        .version = 1,
+        .message_type = .ping_request,
+        .payload_size = 0,
+    };
+
+    try testing.expectError(error.InvalidMagic, invalid_header.validate());
+}
+
+test "MessageHeader validation rejects invalid version" {
+    var invalid_header = MessageHeader{
+        .magic = 0x4B41554C,
+        .version = 999, // Unsupported version
+        .message_type = .ping_request,
+        .payload_size = 0,
+    };
+
+    try testing.expectError(error.VersionMismatch, invalid_header.validate());
+}
+
+test "ServerConfig default values are reasonable for development" {
+    const config = ServerConfig{};
+    try testing.expect(config.max_request_size > 0);
+    try testing.expect(config.max_request_size <= 1024 * 1024 * 16); // Should be reasonable limit
 }

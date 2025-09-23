@@ -49,10 +49,10 @@ pub const block_index = @import("storage/block_index.zig");
 // WAL (Write-Ahead Log) subsystem
 pub const wal = @import("storage/wal.zig");
 
-// CLI command parsing for fuzzing
-pub const commands = @import("cli/commands.zig");
-pub const CommandError = commands.CommandError;
-pub const parse_command = commands.parse_command;
+// CLI protocol and client
+pub const cli_protocol = @import("cli/protocol.zig");
+pub const cli_parser = @import("cli/parser.zig");
+pub const cli_client = @import("cli/client.zig");
 
 // Simulation testing infrastructure
 pub const simulation_vfs = @import("sim/simulation_vfs.zig");

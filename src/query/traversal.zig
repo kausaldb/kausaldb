@@ -1385,3 +1385,188 @@ pub fn traverse_astar(
     };
     return execute_traversal(allocator, storage_engine, query);
 }
+
+/// Find all paths between two specific blocks using BFS for shortest paths
+/// Returns paths in order of increasing length, with shortest paths first
+pub fn find_paths_between(
+    allocator: std.mem.Allocator,
+    storage_engine: *StorageEngine,
+    source_id: BlockId,
+    target_id: BlockId,
+    max_depth: u32,
+) !TraversalResult {
+    // Early exit if source equals target
+    if (source_id.eql(target_id)) {
+        const single_path = try allocator.alloc(BlockId, 1);
+        single_path[0] = source_id;
+        const paths = try allocator.alloc([]const BlockId, 1);
+        paths[0] = single_path;
+        const depths = try allocator.alloc(u32, 1);
+        depths[0] = 0;
+
+        // Create owned block for source
+        const source_block = try storage_engine.find_block(source_id);
+        if (source_block == null) return TraversalError.BlockNotFound;
+        const blocks = try allocator.alloc(OwnedBlock, 1);
+        blocks[0] = source_block.?;
+
+        return TraversalResult.init(allocator, blocks, paths, depths, 1, 0);
+    }
+
+    var visited = VisitedTracker.init(allocator);
+    defer visited.deinit();
+    try visited.visited_ids.ensureTotalCapacity(1000);
+
+    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
+    defer result_blocks.deinit();
+
+    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
+    defer {
+        for (result_paths.items) |path| {
+            allocator.free(path);
+        }
+        result_paths.deinit();
+    }
+
+    var result_depths = std.array_list.Managed(u32).init(allocator);
+    defer result_depths.deinit();
+
+    // BFS queue with path tracking
+    const QueueNode = struct {
+        block_id: BlockId,
+        depth: u32,
+        path: []BlockId,
+    };
+
+    var queue = std.array_list.Managed(QueueNode).init(allocator);
+    defer {
+        for (queue.items) |node| {
+            allocator.free(node.path);
+        }
+        queue.deinit();
+    }
+
+    // Initialize with source block
+    const initial_path = try allocator.alloc(BlockId, 1);
+    initial_path[0] = source_id;
+    try queue.append(QueueNode{
+        .block_id = source_id,
+        .depth = 0,
+        .path = initial_path,
+    });
+    try visited.put(source_id);
+
+    var blocks_explored: u32 = 0;
+    var max_depth_reached: u32 = 0;
+    var paths_found: u32 = 0;
+
+    while (queue.items.len > 0 and paths_found < 100) { // Limit paths found
+        const current = queue.orderedRemove(0);
+        defer allocator.free(current.path);
+
+        if (current.depth > max_depth) break;
+        max_depth_reached = @max(max_depth_reached, current.depth);
+        blocks_explored += 1;
+
+        // Find outgoing edges from current block
+        const edges = storage_engine.find_outgoing_edges(current.block_id);
+        for (edges) |owned_edge| {
+            const edge = owned_edge.edge;
+            const next_id = edge.target_id;
+
+            // Create new path
+            const new_path = try allocator.alloc(BlockId, current.path.len + 1);
+            @memcpy(new_path[0..current.path.len], current.path);
+            new_path[current.path.len] = next_id;
+
+            if (next_id.eql(target_id)) {
+                // Found target - add to results
+                const target_block = try storage_engine.find_block(target_id);
+                if (target_block) |block| {
+                    try result_blocks.append(block);
+                    try result_paths.append(try allocator.dupe(BlockId, new_path));
+                    try result_depths.append(current.depth + 1);
+                    paths_found += 1;
+                }
+                allocator.free(new_path);
+                continue;
+            }
+
+            // Continue BFS if not visited and within depth limit
+            if (!visited.contains(next_id) and current.depth + 1 <= max_depth) {
+                try queue.append(QueueNode{
+                    .block_id = next_id,
+                    .depth = current.depth + 1,
+                    .path = new_path,
+                });
+                try visited.put(next_id);
+            } else {
+                allocator.free(new_path);
+            }
+        }
+    }
+
+    const owned_blocks = try result_blocks.toOwnedSlice();
+    const owned_paths = try result_paths.toOwnedSlice();
+    const owned_depths = try result_depths.toOwnedSlice();
+
+    return TraversalResult.init(
+        allocator,
+        owned_blocks,
+        owned_paths,
+        owned_depths,
+        blocks_explored,
+        max_depth_reached,
+    );
+}
+
+test "find_paths_between returns direct path for connected blocks" {
+    const allocator = testing.allocator;
+    var vfs = SimulationVFS.init(allocator);
+    defer vfs.deinit();
+
+    var storage_engine = try StorageEngine.init(allocator, &vfs, "test_path_finding");
+    defer storage_engine.deinit();
+    try storage_engine.startup();
+    defer storage_engine.shutdown() catch {};
+
+    // Create test blocks
+    const source_block = ContextBlock.init_for_test(
+        BlockId.from_u64(1),
+        "function source() {}",
+        "source.zig",
+    );
+    const target_block = ContextBlock.init_for_test(
+        BlockId.from_u64(2),
+        "function target() {}",
+        "target.zig",
+    );
+
+    // Store blocks
+    try storage_engine.put_block(source_block);
+    try storage_engine.put_block(target_block);
+
+    // Create edge from source to target
+    const edge = GraphEdge{
+        .source_id = source_block.id,
+        .target_id = target_block.id,
+        .edge_type = .calls,
+    };
+    try storage_engine.put_edge(edge);
+
+    // Test path finding
+    const result = try find_paths_between(
+        allocator,
+        &storage_engine,
+        source_block.id,
+        target_block.id,
+        5,
+    );
+    defer result.deinit();
+
+    // Verify results
+    try testing.expect(result.paths.len >= 1);
+    try testing.expect(result.paths[0].len == 2);
+    try testing.expect(result.paths[0][0].eql(source_block.id));
+    try testing.expect(result.paths[0][1].eql(target_block.id));
+}

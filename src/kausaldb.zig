@@ -43,8 +43,8 @@ pub const FilterExpression = query_engine.FilterExpression;
 pub const FilterOperator = query_engine.FilterOperator;
 pub const FilterTarget = query_engine.FilterTarget;
 
-pub const handler = @import("server/handler.zig");
-pub const Server = handler.Server;
+pub const connection_manager = @import("server/connection_manager.zig");
+pub const cli_protocol = @import("server/cli_protocol.zig");
 
 pub const Allocator = std.mem.Allocator;
 

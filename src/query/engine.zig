@@ -904,6 +904,24 @@ pub const QueryEngine = struct {
         return self.filter_traversal_by_codebase(&traversal_result, codebase);
     }
 
+    /// Find paths between two specific blocks using BFS for shortest paths
+    pub fn find_paths_between(
+        self: *QueryEngine,
+        source_id: BlockId,
+        target_id: BlockId,
+        max_depth: u32,
+    ) !TraversalResult {
+        self.traversal_queries.incr();
+        self.queries_executed.incr();
+        return traversal.find_paths_between(
+            self.allocator,
+            self.storage_engine,
+            source_id,
+            target_id,
+            max_depth,
+        );
+    }
+
     /// Execute a semantic search query
     /// Execute a semantic query to find related blocks
     pub fn execute_semantic_query(

@@ -20,6 +20,8 @@ const ownership = @import("../core/ownership.zig");
 const query_engine = @import("../query/engine.zig");
 const signals = @import("../core/signals.zig");
 const storage = @import("../storage/engine.zig");
+const workspace_manager = @import("../workspace/manager.zig");
+const cli_protocol = @import("cli_protocol.zig");
 
 const assert = assert_mod.assert;
 const comptime_assert = assert_mod.comptime_assert;
@@ -35,6 +37,7 @@ pub const ConnectionManager = connection_manager.ConnectionManager;
 const StorageEngine = storage.StorageEngine;
 const QueryResult = query_engine.QueryResult;
 const QueryEngine = query_engine.QueryEngine;
+const WorkspaceManager = workspace_manager.WorkspaceManager;
 const ContextBlock = ctx_block.ContextBlock;
 const BlockId = ctx_block.BlockId;
 
@@ -98,6 +101,8 @@ pub const Server = struct {
     storage_engine: *StorageEngine,
     /// Query engine reference for request processing
     query_engine: *QueryEngine,
+    /// Workspace manager reference for project management
+    workspace_manager: *WorkspaceManager,
     /// TCP listener socket
     listener: ?std.net.Server = null,
     /// Connection state manager
@@ -133,6 +138,7 @@ pub const Server = struct {
         config: ServerConfig,
         storage_engine: *StorageEngine,
         query_eng: *QueryEngine,
+        workspace_mgr: *WorkspaceManager,
     ) Server {
         const conn_config = connection_manager.ConnectionManagerConfig{
             .max_connections = config.max_connections,
@@ -145,6 +151,7 @@ pub const Server = struct {
             .config = config,
             .storage_engine = storage_engine,
             .query_engine = query_eng,
+            .workspace_manager = workspace_mgr,
             .listener = null,
             .connection_manager = ConnectionManager.init(allocator, conn_config),
             .stats = ServerStats{},
@@ -239,43 +246,43 @@ pub const Server = struct {
         self.stats.connections_active = conn_stats.connections_active;
     }
 
-    /// Process a complete request from a connection
+    /// Process a complete request from a connection by delegating to CLI handler
     fn process_connection_request(self: *Server, connection: *ClientConnection) !void {
         const payload = connection.request_payload() orelse return;
         const header = connection.current_header orelse return;
 
-        switch (header.msg_type) {
-            .ping => {
-                const response = "KausalDB server v0.1.0";
-                connection.send_response(response);
-                self.stats.bytes_sent += response.len + MessageHeader.HEADER_SIZE;
+        // Create CLI handler context for this request
+        const handler_context = cli_protocol.HandlerContext.init(
+            connection.arena.allocator(),
+            self.storage_engine,
+            self.query_engine,
+            self.workspace_manager,
+        );
 
-                if (self.config.enable_logging) {
-                    log.debug("Connection {d}: handled ping request", .{connection.connection_id});
-                }
-            },
+        // Delegate message processing to CLI handler
+        const response_data = cli_protocol.handle_cli_message(
+            handler_context,
+            header.message_type,
+            payload,
+        ) catch |err| {
+            const ctx = error_context.connection_context("cli_message_processing", connection.connection_id);
+            error_context.log_server_error(err, ctx);
 
-            .find_blocks => {
-                try self.handle_find_blocks_request_async(connection, payload);
-            },
+            const error_msg = "Internal server error processing request";
+            connection.send_response(error_msg);
+            self.stats.errors_encountered += 1;
+            return;
+        };
 
-            .filtered_query => {
-                try self.handle_filtered_query_request_async(connection, payload);
-            },
-
-            .traversal_query => {
-                try self.handle_traversal_query_request_async(connection, payload);
-            },
-
-            .pong, .blocks_response, .filtered_response, .traversal_response, .error_response => {
-                const error_msg = "Invalid request: client sent server response type";
-                connection.send_response(error_msg);
-                self.stats.errors_encountered += 1;
-            },
-        }
-
+        // Send response back to client
+        connection.send_response(response_data);
+        self.stats.bytes_sent += response_data.len;
         self.stats.requests_processed += 1;
-        self.stats.bytes_received += payload.len + MessageHeader.HEADER_SIZE;
+        self.stats.bytes_received += payload.len + @sizeOf(MessageHeader);
+
+        if (self.config.enable_logging) {
+            log.debug("Connection {d}: processed message type {} successfully", .{ connection.connection_id, header.message_type });
+        }
     }
 
     /// Stop the server
@@ -286,256 +293,30 @@ pub const Server = struct {
         }
         log.info("KausalDB server stopped", .{});
     }
-
-    /// Handle find_blocks request asynchronously
-    fn handle_find_blocks_request_async(
-        self: *Server,
-        connection: *ClientConnection,
-        payload: []const u8,
-    ) !void {
-        const allocator = connection.arena.allocator();
-
-        if (payload.len < 4) {
-            const error_msg = "Invalid find_blocks request: missing block count";
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        }
-
-        const block_count = std.mem.readInt(u32, payload[0..4], .little);
-        if (block_count == 0) {
-            const error_msg = "Invalid find_blocks request: zero blocks requested";
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        }
-
-        if (payload.len < 4 + (block_count * 16)) {
-            const error_msg = "Invalid find_blocks request: insufficient payload for block IDs";
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        }
-
-        var found_blocks = std.array_list.Managed(ownership.OwnedBlock).init(allocator);
-        defer found_blocks.deinit();
-
-        for (0..block_count) |i| {
-            const id_start = 4 + (i * 16);
-            const id_bytes = payload[id_start .. id_start + 16];
-            const block_id = ctx_block.BlockId{ .bytes = id_bytes[0..16].* };
-
-            const maybe_block = self.query_engine.find_block(block_id) catch |err| {
-                const ctx = error_context.ServerContext{
-                    .operation = "find_block",
-                    .connection_id = connection.connection_id,
-                    .message_size = block_count,
-                };
-                error_context.log_server_error(err, ctx);
-                const error_msg = try std.fmt.allocPrint(allocator, "Query execution failed: {any}", .{err});
-                connection.send_response(error_msg);
-                self.stats.errors_encountered += 1;
-                return;
-            };
-
-            if (maybe_block) |block| {
-                try found_blocks.append(block);
-            }
-        }
-
-        const response_data = try self.serialize_blocks_array(allocator, found_blocks.items);
-        connection.send_response(response_data);
-        self.stats.bytes_sent += response_data.len + MessageHeader.HEADER_SIZE;
-
-        if (self.config.enable_logging) {
-            log.debug("Connection {d}: handled find_blocks request, returned {d} blocks", .{ connection.connection_id, found_blocks.items.len });
-        }
-    }
-
-    /// Handle filtered query request asynchronously
-    fn handle_filtered_query_request_async(
-        self: *Server,
-        connection: *ClientConnection,
-        payload: []const u8,
-    ) !void {
-        _ = payload;
-        const allocator = connection.arena.allocator();
-
-        const empty_block_ids: []const BlockId = &[_]BlockId{};
-        const common_result = QueryResult.init(allocator, self.storage_engine, empty_block_ids);
-        var mutable_result = common_result;
-        const response_data = try self.serialize_blocks_response(allocator, &mutable_result);
-        connection.send_response(response_data);
-        self.stats.bytes_sent += response_data.len + MessageHeader.HEADER_SIZE;
-
-        if (self.config.enable_logging) {
-            log.debug("Connection {d}: handled filtered query (placeholder), returned {d} blocks", .{ connection.connection_id, common_result.total_found });
-        }
-    }
-
-    /// Handle traversal query request asynchronously
-    fn handle_traversal_query_request_async(
-        self: *Server,
-        connection: *ClientConnection,
-        payload: []const u8,
-    ) !void {
-        const allocator = connection.arena.allocator();
-
-        if (payload.len < 20) { // minimum: 4 bytes count + 16 bytes start ID
-            const error_msg = "Invalid traversal request: insufficient payload";
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        }
-
-        const start_count = std.mem.readInt(u32, payload[0..4], .little);
-        if (start_count == 0) {
-            const error_msg = "Invalid traversal request: no starting blocks";
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        }
-
-        const start_id_bytes = payload[4..20];
-        const start_id = ctx_block.BlockId{ .bytes = start_id_bytes[0..16].* };
-
-        var result_blocks = std.array_list.Managed(ownership.OwnedBlock).init(allocator);
-        defer result_blocks.deinit();
-
-        const start_block = (try self.storage_engine.find_block(start_id, .query_engine)) orelse {
-            const error_msg = try std.fmt.allocPrint(allocator, "Starting block not found", .{});
-            connection.send_response(error_msg);
-            self.stats.errors_encountered += 1;
-            return;
-        };
-
-        try result_blocks.append(start_block);
-        const block_ids = try allocator.alloc(BlockId, result_blocks.items.len);
-        for (result_blocks.items, 0..) |block, i| {
-            const block_data = block.read(.query_engine);
-            block_ids[i] = block_data.id;
-        }
-        const common_result = QueryResult.init_with_owned_ids(allocator, self.storage_engine, block_ids);
-        var mutable_result = common_result;
-        const response_data = try self.serialize_blocks_response(allocator, &mutable_result);
-        connection.send_response(response_data);
-        self.stats.bytes_sent += response_data.len + MessageHeader.HEADER_SIZE;
-
-        if (self.config.enable_logging) {
-            log.debug("Connection {d}: handled traversal query, returned {d} blocks", .{ connection.connection_id, common_result.total_found });
-        }
-    }
-
-    /// Serialize query results into binary format for network transmission using streaming
-    fn serialize_blocks_response(_: *Server, allocator: std.mem.Allocator, result_ptr: *QueryResult) ![]u8 {
-        var total_size: usize = 4; // 4 bytes for block count
-        var block_count: u32 = 0;
-
-        while (try result_ptr.next()) |block| {
-            block_count += 1;
-            total_size += 16;
-            const context_block = block.read(.query_engine);
-            total_size += 4 + context_block.source_uri.len;
-            total_size += 4 + context_block.metadata_json.len;
-            total_size += 4 + context_block.content.len;
-        }
-
-        const buffer = try allocator.alloc(u8, total_size);
-        var offset: usize = 0;
-
-        std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], block_count, .little);
-        offset += 4;
-
-        result_ptr.reset();
-
-        while (try result_ptr.next()) |block| {
-            const context_block = block.read(.query_engine);
-            @memcpy(buffer[offset .. offset + 16], &context_block.id.bytes);
-            offset += 16;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(context_block.source_uri.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + context_block.source_uri.len], context_block.source_uri);
-            offset += context_block.source_uri.len;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(context_block.metadata_json.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + context_block.metadata_json.len], context_block.metadata_json);
-            offset += context_block.metadata_json.len;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(context_block.content.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + context_block.content.len], context_block.content);
-            offset += context_block.content.len;
-        }
-
-        assert(offset == total_size);
-        return buffer;
-    }
-
-    /// Serialize array of blocks into binary format for network transmission
-    fn serialize_blocks_array(
-        _: *Server,
-        allocator: std.mem.Allocator,
-        blocks: []const ownership.OwnedBlock,
-    ) ![]u8 {
-        var total_size: usize = 4; // 4 bytes for block count
-
-        for (blocks) |block| {
-            const block_data = block.read_immutable();
-            total_size += 16; // Block ID
-            total_size += 4 + block_data.source_uri.len;
-            total_size += 4 + block_data.metadata_json.len;
-            total_size += 4 + block_data.content.len;
-        }
-
-        const buffer = try allocator.alloc(u8, total_size);
-        var offset: usize = 0;
-
-        std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(blocks.len), .little);
-        offset += 4;
-
-        for (blocks) |block| {
-            const block_data = block.read_immutable();
-            @memcpy(buffer[offset .. offset + 16], &block_data.id.bytes);
-            offset += 16;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(block_data.source_uri.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + block_data.source_uri.len], block_data.source_uri);
-            offset += block_data.source_uri.len;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(block_data.metadata_json.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + block_data.metadata_json.len], block_data.metadata_json);
-            offset += block_data.metadata_json.len;
-
-            std.mem.writeInt(u32, buffer[offset .. offset + 4][0..4], @intCast(block_data.content.len), .little);
-            offset += 4;
-            @memcpy(buffer[offset .. offset + block_data.content.len], block_data.content);
-            offset += block_data.content.len;
-        }
-
-        assert(offset == total_size);
-        return buffer;
-    }
 };
 
-test "message header encode/decode" {
+test "message header validation" {
     const testing = std.testing;
 
-    const original = MessageHeader{
-        .msg_type = .ping,
-        .payload_length = 1024,
+    const valid_header = MessageHeader{
+        .magic = 0x4B41554C,
+        .version = 1,
+        .message_type = .ping_request,
+        .payload_size = 1024,
     };
 
-    var buffer: [8]u8 = undefined;
-    original.encode(&buffer);
+    try valid_header.validate();
+    try testing.expectEqual(MessageType.ping_request, valid_header.message_type);
+    try testing.expectEqual(@as(u64, 1024), valid_header.payload_size);
 
-    const decoded = try MessageHeader.decode(&buffer);
-    try testing.expectEqual(original.msg_type, decoded.msg_type);
-    try testing.expectEqual(original.version, decoded.version);
-    try testing.expectEqual(original.payload_length, decoded.payload_length);
+    // Test invalid magic
+    const invalid_magic = MessageHeader{
+        .magic = 0x12345678,
+        .version = 1,
+        .message_type = .ping_request,
+        .payload_size = 0,
+    };
+    try testing.expectError(error.InvalidMagic, invalid_magic.validate());
 }
 
 test "server initialization" {
@@ -546,9 +327,10 @@ test "server initialization" {
 
     var mock_storage: StorageEngine = undefined;
     var mock_query: QueryEngine = undefined;
+    var mock_workspace: WorkspaceManager = undefined;
 
     const config = ServerConfig{ .port = 0 }; // Use ephemeral port for testing
-    var server = Server.init(allocator, config, &mock_storage, &mock_query);
+    var server = Server.init(allocator, config, &mock_storage, &mock_query, &mock_workspace);
     defer server.deinit();
 
     try testing.expectEqual(@as(u32, 0), server.stats.connections_active);
