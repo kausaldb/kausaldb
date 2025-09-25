@@ -1,433 +1,461 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const zig_version = std.SemanticVersion{
-    .major = 0,
-    .minor = 15,
-    .patch = 1,
-};
+const REQUIRED_ZIG_VERSION = std.SemanticVersion{ .major = 0, .minor = 15, .patch = 1 };
 
 comptime {
-    const version_matches = zig_version.major == builtin.zig_version.major and
-        zig_version.minor == builtin.zig_version.minor and
-        zig_version.patch == builtin.zig_version.patch;
-
-    if (!version_matches) {
+    const correct_zig_version = REQUIRED_ZIG_VERSION.order(builtin.zig_version) == .eq;
+    if (!correct_zig_version) {
         @compileError(std.fmt.comptimePrint(
             "KausalDB requires exact Zig version {}, found {}. Run: ./scripts/install_zig.sh",
-            .{ zig_version, builtin.zig_version },
+            .{ REQUIRED_ZIG_VERSION, builtin.zig_version },
         ));
     }
 }
 
-const BuildOptions = struct {
+const BinaryType = enum {
+    kausal,
+    testing,
+    dev_tool,
+};
+
+const BuildContext = struct {
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    log_level: std.log.Level,
     options: *std.Build.Step.Options,
-};
-
-const TestOptions = struct {
-    seed: ?u64,
     filter: ?[]const u8,
-    iterations: u32,
 };
 
-const DevOptions = struct {
-    fuzz_iterations: u32,
-    fuzz_corpus: []const u8,
-    bench_iterations: u32,
-    bench_warmup: u32,
-    bench_baseline: ?[]const u8,
-};
+fn parse_log_level(level_str: []const u8) std.log.Level {
+    const level_map = std.StaticStringMap(std.log.Level).initComptime(.{
+        .{ "err", .err },
+        .{ "warn", .warn },
+        .{ "info", .info },
+        .{ "debug", .debug },
+    });
+
+    return level_map.get(level_str) orelse .info;
+}
 
 pub fn build(b: *std.Build) void {
-    const target = resolve_target(b);
-    const optimize = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{});
+    // Log level defaults to 'info' for optimal production performance
+    // Debug logs can significantly impact hot path performance (microsecond-level operations)
+    // Override with -Dlog-level=debug for development debugging
+    const log_level = parse_log_level(b.option([]const u8, "log-level", "Log level") orelse "info");
+    const filter = b.option([]const u8, "filter", "Test filter pattern");
 
-    // Deterministic seeds enable reproducible test failures across CI runs.
-    const test_seed_str = b.option([]const u8, "seed", "Test seed (hex or decimal)");
-    const test_seed: ?u64 = if (test_seed_str) |str| blk: {
-        if (std.mem.startsWith(u8, str, "0x") or std.mem.startsWith(u8, str, "0X")) {
-            break :blk std.fmt.parseInt(u64, str[2..], 16) catch
-                std.debug.panic("Invalid hex seed format. Use: 0xDEADBEEF", .{});
-        } else {
-            break :blk std.fmt.parseInt(u64, str, 10) catch
-                std.debug.panic("Invalid decimal seed format. Use: 123456", .{});
-        }
-    } else null;
+    // ReleaseSafe provides optimal performance while maintaining safety checks
+    // Essential for KausalDB's microsecond-level performance requirements
+    // Override with -Doptimize=Debug for development debugging and detailed stack traces
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
-    const test_options = TestOptions{
-        .seed = test_seed,
-        .filter = b.option([]const u8, "filter", "Filter tests by name"),
-        .iterations = b.option(u32, "test-iterations", "Number of test iterations") orelse 1,
-    };
-
-    const dev_options = DevOptions{
-        .fuzz_iterations = b.option(u32, "fuzz-iterations", "Fuzzing iterations") orelse 10000,
-        .fuzz_corpus = b.option([]const u8, "fuzz-corpus", "Fuzzing corpus directory") orelse "fuzz-corpus",
-        .bench_iterations = b.option(u32, "bench-iterations", "Benchmark iterations") orelse 1000,
-        .bench_warmup = b.option(u32, "bench-warmup", "Benchmark warmup iterations") orelse 100,
-        .bench_baseline = b.option([]const u8, "bench-baseline", "Baseline results for comparison"),
-    };
+    // Build options for benchmarks and fuzzing
+    const bench_iterations = b.option(u32, "bench-iterations", "Number of benchmark iterations") orelse 1000;
+    const bench_warmup = b.option(u32, "bench-warmup", "Number of warmup iterations") orelse 100;
+    const bench_baseline = b.option([]const u8, "bench-baseline", "Baseline file for regression detection");
+    const fuzz_iterations = b.option(u32, "fuzz-iterations", "Number of fuzzing iterations") orelse 10000;
+    const fuzz_corpus = b.option([]const u8, "fuzz-corpus", "Fuzz corpus directory") orelse "fuzz-corpus";
 
     const options = b.addOptions();
-    options.addOption(std.builtin.OptimizeMode, "optimize", optimize);
-    options.addOption(?u64, "test_seed", test_options.seed);
-    options.addOption(?[]const u8, "test_filter", test_options.filter);
-    options.addOption(u32, "test_iterations", test_options.iterations);
-    options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
-    options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
-    options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
-    options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
-    options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
-    options.addOption(bool, "sanitizers_active", b.option(bool, "sanitizers-active", "Enable sanitizers") orelse false);
-    options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log", "Log level") orelse .err);
-    options.addOption(bool, "debug_tests", b.option(bool, "debug-tests", "Enable debug tests") orelse true);
+    options.addOption(std.log.Level, "log_level", log_level);
+    options.addOption(u32, "bench_iterations", bench_iterations);
+    options.addOption(u32, "bench_warmup", bench_warmup);
+    options.addOption(?[]const u8, "bench_baseline", bench_baseline);
+    options.addOption(u32, "fuzz_iterations", fuzz_iterations);
+    options.addOption([]const u8, "fuzz_corpus", fuzz_corpus);
 
-    const build_options = BuildOptions{
+    const context = BuildContext{
         .b = b,
         .target = target,
         .optimize = optimize,
+        .log_level = log_level,
         .options = options,
+        .filter = filter,
     };
 
-    // Core build targets - the essential functionality
-    build_executable(build_options);
-    build_tests(build_options, test_options);
-    build_dev_tools(build_options, dev_options);
-    build_ci_targets(build_options);
+    build_kausal_binaries(context);
+    build_test_suites(context);
+    build_lint(context);
+    build_performance_tools(context);
 }
 
-fn resolve_target(b: *std.Build) std.Build.ResolvedTarget {
-    var target = b.standardTargetOptions(.{});
-
-    // Enable CPU features for consistent performance across builds
-    if (target.result.cpu.arch == .x86_64) {
-        // SSE4.2 for string operations
-        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.sse4_2));
-        // POPCNT for bit manipulation
-        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.popcnt));
-        // CRC32 for checksums
-        target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.crc32));
-        // AVX2 for SIMD operations if available
-        const no_avx2 = b.option(bool, "no-avx2", "Disable AVX2") orelse false;
-        if (!no_avx2) {
-            target.result.cpu.features.addFeature(@intFromEnum(std.Target.x86.Feature.avx2));
-        }
-    } else if (target.result.cpu.arch == .aarch64) {
-        // Enable NEON and crypto extensions for ARM64
-        target.result.cpu.features.addFeature(@intFromEnum(std.Target.aarch64.Feature.neon));
-        target.result.cpu.features.addFeature(@intFromEnum(std.Target.aarch64.Feature.crypto));
-    }
-
-    return target;
-}
-
-fn build_executable(build_options: BuildOptions) void {
-    const exe = build_options.b.addExecutable(.{
-        .name = "kausaldb",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/main.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
-        }),
+fn build_kausal_binaries(context: BuildContext) void {
+    const kausal_cli = create_executable(context, .{
+        .name = "kausal",
+        .root_source = "src/main.zig",
+        .binary_type = .kausal,
     });
 
-    exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(exe.root_module, build_options);
+    const kausal_server = create_executable(context, .{
+        .name = "kausal-server",
+        .root_source = "src/server_main.zig",
+        .binary_type = .kausal,
+    });
 
-    build_options.b.installArtifact(exe);
+    context.b.installArtifact(kausal_cli);
+    context.b.installArtifact(kausal_server);
 
-    // Build integration test binary for valgrind analysis
-    const test_exe = build_options.b.addTest(.{
+    // Default run target points to `kausal` (CLI)
+    const run_cli = context.b.addRunArtifact(kausal_cli);
+    run_cli.step.dependOn(context.b.getInstallStep());
+    if (context.b.args) |args| {
+        run_cli.addArgs(args);
+    }
+
+    const run_step = context.b.step("run", "Run KausalDB CLI");
+    run_step.dependOn(&run_cli.step);
+}
+
+fn build_test_suites(context: BuildContext) void {
+    const unit_tests = create_test_executable(context, .{
         .name = "test",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/integration_tests.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
-        }),
+        .root_source = "src/unit_tests.zig",
+        .description = "Run unit tests",
     });
 
-    test_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(test_exe.root_module, build_options);
-    build_options.b.installArtifact(test_exe);
-
-    const run_cmd = build_options.b.addRunArtifact(exe);
-    run_cmd.step.dependOn(build_options.b.getInstallStep());
-    if (build_options.b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = build_options.b.step("run", "Run the KausalDB server");
-    run_step.dependOn(&run_cmd.step);
-}
-
-fn build_tests(build_options: BuildOptions, test_options: TestOptions) void {
-    const unit_tests = build_test_artifact(build_options, "src/unit_tests.zig", "unit-tests", test_options);
-    const unit_run = build_options.b.addRunArtifact(unit_tests);
-    const unit_step = build_options.b.step("test-unit", "Run unit tests");
-    unit_step.dependOn(&unit_run.step);
-
-    const integration_tests = build_test_artifact(build_options, "src/integration_tests.zig", "integration-tests", test_options);
-    const integration_run = build_options.b.addRunArtifact(integration_tests);
-    const integration_step = build_options.b.step("test-integration", "Run integration tests");
-    integration_step.dependOn(&integration_run.step);
-
-    const e2e_tests = build_test_artifact(build_options, "tests/e2e_tests.zig", "e2e-tests", test_options);
-    const e2e_run = build_options.b.addRunArtifact(e2e_tests);
-    const e2e_step = build_options.b.step("test-e2e", "Run end-to-end tests");
-    e2e_step.dependOn(&e2e_run.step);
-
-    const test_fast = build_options.b.step("test", "Run fast test suite (unit + integration)");
-    test_fast.dependOn(&unit_run.step);
-    test_fast.dependOn(&integration_run.step);
-
-    const test_all = build_options.b.step("test-all", "Run complete test suite");
-    test_all.dependOn(&unit_run.step);
-    test_all.dependOn(&integration_run.step);
-    test_all.dependOn(&e2e_run.step);
-}
-
-fn build_dev_tools(build_options: BuildOptions, options: DevOptions) void {
-    build_benchmarks(build_options, options);
-    build_fuzzer(build_options, options);
-    build_tidy(build_options);
-    build_git_hooks(build_options);
-}
-
-fn build_benchmarks(build_options: BuildOptions, _: DevOptions) void {
-    // Ensure main kausaldb binary is built first (required for E2E benchmarks)
-    const kausaldb_exe = build_options.b.addExecutable(.{
-        .name = "kausaldb",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/main.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
-        }),
-    });
-    kausaldb_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(kausaldb_exe.root_module, build_options);
-
-    const bench_exe = build_options.b.addExecutable(.{
-        .name = "bench",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/bench/main.zig"),
-            .target = build_options.target,
-            .optimize = .ReleaseFast,
-        }),
+    const integration_tests = create_test_executable(context, .{
+        .name = "integration-tests",
+        .root_source = "src/integration_tests.zig",
+        .description = "Run integration tests",
     });
 
-    bench_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(bench_exe.root_module, build_options);
+    // E2E tests expect the server port as the first command-line argument
+    const e2e_tests = create_test_executable(context, .{
+        .name = "e2e-tests",
+        .root_source = "tests/e2e_tests.zig",
+        .description = "End-to-end tests",
+    });
 
-    const bench_run = build_options.b.addRunArtifact(bench_exe);
-    // Benchmarks require main binary to be available
-    bench_run.step.dependOn(&kausaldb_exe.step);
+    const test_unit = context.b.step("test-unit", "Run unit tests");
+    test_unit.dependOn(&create_test_runner(context, unit_tests).step);
 
-    // Allow component selection via command line args
-    if (build_options.b.args) |args| {
-        bench_run.addArgs(args);
-    }
+    const test_integration = context.b.step("test-integration", "Run integration tests");
+    test_integration.dependOn(&create_test_runner(context, integration_tests).step);
 
-    const bench_step = build_options.b.step("bench", "Run performance benchmarks");
-    bench_step.dependOn(&bench_run.step);
+    const test_fast = context.b.step("test", "Run fast test suite (unit + integration)");
+    test_fast.dependOn(&create_test_runner(context, unit_tests).step);
+    test_fast.dependOn(&create_test_runner(context, integration_tests).step);
 
-    const bench_compile_step = build_options.b.step("bench-compile", "Compile benchmark binary");
-    bench_compile_step.dependOn(&bench_exe.step);
+    const e2e_step = create_e2e_runner(context, e2e_tests);
+    const test_e2e = context.b.step("test-e2e", "Run end-to-end tests with server lifecycle");
+    test_e2e.dependOn(e2e_step);
+
+    const test_all = context.b.step("test-all", "Run complete test suite");
+    test_all.dependOn(test_fast);
+    test_all.dependOn(test_e2e);
 }
 
-fn build_fuzzer(build_options: BuildOptions, dev_options: DevOptions) void {
-    // Create custom options for main fuzz binary with error-level logging
-    const fuzz_options = build_options.b.addOptions();
-    // Copy existing options but override log level for quieter fuzzing
-    fuzz_options.addOption(std.builtin.OptimizeMode, "optimize", build_options.optimize);
-    fuzz_options.addOption(?u64, "test_seed", null);
-    fuzz_options.addOption(?[]const u8, "test_filter", null);
-    fuzz_options.addOption(u32, "test_iterations", 1);
-    fuzz_options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
-    fuzz_options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
-    fuzz_options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
-    fuzz_options.addOption(u32, "fuzz_iterations", dev_options.fuzz_iterations);
-    fuzz_options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
-    fuzz_options.addOption(bool, "sanitizers_active", false);
-    fuzz_options.addOption(std.log.Level, "log_level", .err); // Error-level logging for fuzzer
-    fuzz_options.addOption(bool, "debug_tests", true);
+fn build_lint(context: BuildContext) void {
+    const fmt_step = context.b.step("fmt", "Format source code");
+    fmt_step.dependOn(&context.b.addFmt(.{ .paths = &.{ "src", "tests", "build.zig" } }).step);
 
-    const fuzz_exe = build_options.b.addExecutable(.{
+    const fmt_check = context.b.step("fmt-check", "Check source code formatting");
+    fmt_check.dependOn(&context.b.addFmt(.{ .paths = &.{ "src", "tests", "build.zig" }, .check = true }).step);
+
+    const tidy = create_tidy_checker(context);
+    const run_tidy = context.b.addRunArtifact(tidy);
+    const tidy_step = context.b.step("tidy", "Run code quality checks");
+    tidy_step.dependOn(&run_tidy.step);
+}
+
+fn build_performance_tools(context: BuildContext) void {
+
+    // Create benchmark executable
+    const benchmark_exe = create_executable(context, .{
+        .name = "benchmark",
+        .root_source = "src/bench/main.zig",
+        .binary_type = .dev_tool,
+    });
+    context.b.installArtifact(benchmark_exe);
+
+    // Create fuzzing executable
+    const fuzz_exe = create_executable(context, .{
         .name = "fuzz",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/fuzz/main.zig"),
-            .target = build_options.target,
-            .optimize = .ReleaseFast,
-        }),
+        .root_source = "src/fuzz/main.zig",
+        .binary_type = .dev_tool,
     });
+    context.b.installArtifact(fuzz_exe);
 
-    // Use ReleaseFast for speed but enables sanitizers
-    fuzz_exe.root_module.sanitize_c = .full;
-
-    fuzz_exe.root_module.addImport("build_options", fuzz_options.createModule());
-    add_internal_module(fuzz_exe.root_module, build_options);
-
-    const fuzz_run = build_options.b.addRunArtifact(fuzz_exe);
-
-    // Allow target selection via command line args
-    if (build_options.b.args) |args| {
-        fuzz_run.addArgs(args);
+    // Benchmark step - the executable will read build options and handle CLI args
+    const run_bench = context.b.addRunArtifact(benchmark_exe);
+    if (context.b.args) |args| {
+        run_bench.addArgs(args);
     }
 
-    const fuzz_step = build_options.b.step("fuzz", "Run fuzz testing");
-    fuzz_step.dependOn(&fuzz_run.step);
+    const bench_step = context.b.step("bench", "Run performance benchmarks");
+    bench_step.dependOn(&run_bench.step);
 
-    const fuzz_compile_step = build_options.b.step("fuzz-compile", "Compile fuzz binary");
-    fuzz_compile_step.dependOn(&fuzz_exe.step);
-
-    // Create a separate build options for fuzz-quick with 100 iterations and error-level logging
-    const quick_options = build_options.b.addOptions();
-    // Copy existing options but override iterations and log level for quick fuzzing
-    quick_options.addOption(std.builtin.OptimizeMode, "optimize", build_options.optimize);
-    quick_options.addOption(?u64, "test_seed", null);
-    quick_options.addOption(?[]const u8, "test_filter", null);
-    quick_options.addOption(u32, "test_iterations", 1);
-    quick_options.addOption(u32, "bench_iterations", dev_options.bench_iterations);
-    quick_options.addOption(u32, "bench_warmup", dev_options.bench_warmup);
-    quick_options.addOption(?[]const u8, "bench_baseline", dev_options.bench_baseline);
-    quick_options.addOption(u32, "fuzz_iterations", 100);
-    quick_options.addOption([]const u8, "fuzz_corpus", dev_options.fuzz_corpus);
-    quick_options.addOption(bool, "sanitizers_active", false);
-    quick_options.addOption(std.log.Level, "log_level", .err); // Error-level logging for quick fuzzer
-    quick_options.addOption(bool, "debug_tests", true);
-
-    const quick_exe = build_options.b.addExecutable(.{
-        .name = "fuzz-quick",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/fuzz/main.zig"),
-            .target = build_options.target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-
-    quick_exe.root_module.sanitize_c = .full;
-    quick_exe.root_module.addImport("build_options", quick_options.createModule());
-    add_internal_module(quick_exe.root_module, build_options);
-
-    const quick_run = build_options.b.addRunArtifact(quick_exe);
-    if (build_options.b.args) |args| {
-        quick_run.addArgs(args);
+    // Fuzzing steps - the executable will read build options and handle CLI args
+    const run_fuzz = context.b.addRunArtifact(fuzz_exe);
+    if (context.b.args) |args| {
+        run_fuzz.addArgs(args);
     }
 
-    const fuzz_quick_step = build_options.b.step("fuzz-quick", "Run quick fuzz test (100 iterations)");
-    fuzz_quick_step.dependOn(&quick_run.step);
+    const fuzz_step = context.b.step("fuzz", "Run extensive fuzzing tests");
+    fuzz_step.dependOn(&run_fuzz.step);
 
-    const fuzz_quick_compile_step = build_options.b.step("fuzz-quick-compile", "Compile quick fuzz binary");
-    fuzz_quick_compile_step.dependOn(&quick_exe.step);
+    // Quick fuzzing for CI with reduced iterations
+    const run_fuzz_quick = context.b.addRunArtifact(fuzz_exe);
+    run_fuzz_quick.addArg("--iterations");
+    run_fuzz_quick.addArg("1000");
+    run_fuzz_quick.addArg("--timeout");
+    run_fuzz_quick.addArg("100");
+    if (context.b.args) |args| {
+        run_fuzz_quick.addArgs(args);
+    }
+
+    const fuzz_quick_step = context.b.step("fuzz-quick", "Run quick fuzzing tests for CI");
+    fuzz_quick_step.dependOn(&run_fuzz_quick.step);
 }
 
-fn build_tidy(build_options: BuildOptions) void {
-    const fmt_paths = [_][]const u8{ "src", "tests", "build.zig" };
+const ExecutableConfig = struct {
+    name: []const u8,
+    root_source: []const u8,
+    binary_type: BinaryType,
+};
 
-    const fmt_step = build_options.b.step("fmt", "Format all source code");
-    const fmt_run = build_options.b.addFmt(.{
-        .paths = &fmt_paths,
-        .check = false,
-    });
-    fmt_step.dependOn(&fmt_run.step);
-
-    const fmt_check_step = build_options.b.step("fmt-check", "Check code formatting");
-    const fmt_check = build_options.b.addFmt(.{
-        .paths = &fmt_paths,
-        .check = true,
-    });
-    fmt_check_step.dependOn(&fmt_check.step);
-
-    const tidy_exe = build_options.b.addExecutable(.{
-        .name = "tidy",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/dev/tidy.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
+fn create_executable(context: BuildContext, config: ExecutableConfig) *std.Build.Step.Compile {
+    const exe = context.b.addExecutable(.{
+        .name = config.name,
+        .root_module = context.b.createModule(.{
+            .root_source_file = context.b.path(config.root_source),
+            .target = context.target,
+            .optimize = context.optimize,
+            .single_threaded = true, // KausalDB is single-threaded by design
         }),
     });
 
-    tidy_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(tidy_exe.root_module, build_options);
+    exe.root_module.addImport("build_options", context.options.createModule());
 
-    const tidy_run = build_options.b.addRunArtifact(tidy_exe);
-    const tidy_step = build_options.b.step("tidy", "Check naming conventions and style rules");
-    tidy_step.dependOn(&tidy_run.step);
+    // Add internal module for dev tools (benchmarks, fuzzing)
+    if (config.binary_type == .dev_tool) {
+        const internal_module = context.b.createModule(.{
+            .root_source_file = context.b.path("src/internal.zig"),
+        });
+        exe.root_module.addImport("internal", internal_module);
+    }
+
+    return exe;
 }
 
-fn build_git_hooks(build_options: BuildOptions) void {
-    const hooks_exe = build_options.b.addExecutable(.{
-        .name = "hooks",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/dev/hooks.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
+const TestConfig = struct {
+    name: []const u8,
+    root_source: []const u8,
+    description: []const u8,
+};
+
+fn create_test_executable(context: BuildContext, config: TestConfig) *std.Build.Step.Compile {
+    // Allow threading for integration tests to support client-server testing
+    const allow_threading = std.mem.eql(u8, config.name, "integration-tests");
+
+    const test_exe = context.b.addTest(.{
+        .name = config.name,
+        .root_module = context.b.createModule(.{
+            .root_source_file = context.b.path(config.root_source),
+            .target = context.target,
+            .optimize = context.optimize,
+            .single_threaded = !allow_threading,
         }),
     });
 
-    hooks_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(hooks_exe.root_module, build_options);
+    test_exe.root_module.addImport("build_options", context.options.createModule());
 
-    const hooks_install = build_options.b.addRunArtifact(hooks_exe);
-    hooks_install.addArg("install");
-    const hooks_install_step = build_options.b.step("hooks-install", "Install git hooks");
-    hooks_install_step.dependOn(&hooks_install.step);
-}
-
-fn build_ci_targets(build_options: BuildOptions) void {
-    const lint_step = build_options.b.step("lint", "Run all linters and style checks");
-
-    const fmt_check = build_options.b.addFmt(.{
-        .paths = &[_][]const u8{ "src", "tests", "build.zig" },
-        .check = true,
-    });
-    lint_step.dependOn(&fmt_check.step);
-
-    const tidy_exe = build_options.b.addExecutable(.{
-        .name = "lint-tidy",
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path("src/dev/tidy.zig"),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
-        }),
-    });
-    tidy_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(tidy_exe.root_module, build_options);
-
-    const tidy_run = build_options.b.addRunArtifact(tidy_exe);
-    lint_step.dependOn(&tidy_run.step);
-}
-
-fn add_internal_module(module: *std.Build.Module, build_options: BuildOptions) void {
-    const internal_module = build_options.b.createModule(.{
-        .root_source_file = build_options.b.path("src/internal.zig"),
-        .target = build_options.target,
-        .optimize = build_options.optimize,
-    });
-    internal_module.addImport("build_options", build_options.options.createModule());
-    module.addImport("internal", internal_module);
-}
-
-fn build_test_artifact(build_options: BuildOptions, source_path: []const u8, name: []const u8, test_options: TestOptions) *std.Build.Step.Compile {
-    const filters = if (test_options.filter) |filter|
-        build_options.b.allocator.dupe([]const u8, &[_][]const u8{filter}) catch @panic("OOM")
-    else
-        &[_][]const u8{};
-
-    const test_exe = build_options.b.addTest(.{
-        .name = name,
-        .root_module = build_options.b.createModule(.{
-            .root_source_file = build_options.b.path(source_path),
-            .target = build_options.target,
-            .optimize = build_options.optimize,
-        }),
-        .filters = filters,
-    });
-
-    test_exe.root_module.addImport("build_options", build_options.options.createModule());
-    add_internal_module(test_exe.root_module, build_options);
+    if (context.filter) |filter| {
+        const filter_slice = context.b.allocator.dupe([]const u8, &.{filter}) catch &.{};
+        test_exe.filters = filter_slice;
+    }
 
     return test_exe;
+}
+
+fn create_test_runner(context: BuildContext, test_exe: *std.Build.Step.Compile) *std.Build.Step.Run {
+    const run_test = context.b.addRunArtifact(test_exe);
+    return run_test;
+}
+
+const E2EServerStep = struct {
+    step: std.Build.Step,
+    b: *std.Build,
+    allocator: std.mem.Allocator,
+    server_exe: *std.Build.Step.Compile,
+
+    const E2E_PORT: u16 = 3839;
+    const E2E_DATA_DIR = ".kausaldb_data/e2e";
+    const E2E_TIMEOUT_MS: u32 = 10000;
+
+    const Self = @This();
+
+    pub fn create(b: *std.Build, server_exe: *std.Build.Step.Compile) *Self {
+        const self = b.allocator.create(Self) catch @panic("OOM");
+        self.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "start-e2e-server",
+                .owner = b,
+                .makeFn = make,
+            }),
+            .b = b,
+            .allocator = b.allocator,
+            .server_exe = server_exe,
+        };
+
+        self.step.dependOn(&server_exe.step);
+        self.step.dependOn(b.getInstallStep());
+
+        return self;
+    }
+
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
+        const self: *Self = @fieldParentPtr("step", step);
+
+        // Clean test environment and stray log files
+        std.fs.cwd().deleteTree(E2E_DATA_DIR) catch {};
+        std.fs.cwd().deleteFile("e2e-server-stdout.log") catch {};
+        std.fs.cwd().deleteFile("e2e-server-stderr.log") catch {};
+        try std.fs.cwd().makePath(E2E_DATA_DIR);
+
+        // Start server in background
+        const server_path = self.server_exe.getEmittedBin().getPath(self.b);
+        const port_str = try std.fmt.allocPrint(self.allocator, "{}", .{E2E_PORT});
+        defer self.allocator.free(port_str);
+
+        var server_process = std.process.Child.init(&.{
+            server_path,
+            "start",
+            "--foreground",
+            "--port",
+            port_str,
+            "--data-dir",
+            E2E_DATA_DIR,
+            "--log-level",
+            "warn",
+        }, self.allocator);
+
+        server_process.stdout_behavior = .Ignore;
+        server_process.stderr_behavior = .Ignore;
+        server_process.stdin_behavior = .Close;
+
+        try server_process.spawn();
+
+        // Write PID to file for cleanup
+        const pid_file = try std.fs.cwd().createFile(".kausaldb_data/e2e/server.pid", .{});
+        defer pid_file.close();
+        const pid_str = try std.fmt.allocPrint(self.allocator, "{}\n", .{server_process.id});
+        defer self.allocator.free(pid_str);
+        try pid_file.writeAll(pid_str);
+
+        // Wait for server readiness
+        try self.wait_for_server();
+    }
+
+    fn wait_for_server(self: *Self) !void {
+        _ = self;
+        const start_time = std.time.milliTimestamp();
+        var retry_delay_ms: u64 = 50;
+
+        while (std.time.milliTimestamp() - start_time < E2E_TIMEOUT_MS) {
+            if (try_connect(E2E_PORT)) return;
+
+            std.Thread.sleep(retry_delay_ms * std.time.ns_per_ms);
+            retry_delay_ms = @min(retry_delay_ms * 2, 500);
+        }
+
+        return error.ServerTimeout;
+    }
+
+    fn try_connect(port: u16) bool {
+        const address = std.net.Address.parseIp("127.0.0.1", port) catch return false;
+        const socket = std.net.tcpConnectToAddress(address) catch return false;
+        socket.close();
+        return true;
+    }
+};
+
+const E2ECleanupStep = struct {
+    step: std.Build.Step,
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    pub fn create(b: *std.Build) *Self {
+        const self = b.allocator.create(Self) catch @panic("OOM");
+        self.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "cleanup-e2e-server",
+                .owner = b,
+                .makeFn = make,
+            }),
+            .allocator = b.allocator,
+        };
+        return self;
+    }
+
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
+        const self: *Self = @fieldParentPtr("step", step);
+
+        // Kill server using PID file
+        const pid_file = std.fs.cwd().openFile(".kausaldb_data/e2e/server.pid", .{}) catch return;
+        defer pid_file.close();
+
+        const pid_str = try pid_file.readToEndAlloc(self.allocator, 32);
+        defer self.allocator.free(pid_str);
+
+        const pid = std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, pid_str, " \n\r\t"), 10) catch return;
+
+        // Try graceful shutdown first, then force kill
+        std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+        std.Thread.sleep(100 * std.time.ns_per_ms); // Give it time to shutdown
+        std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+
+        // Clean up PID file
+        std.fs.cwd().deleteFile(".kausaldb_data/e2e/server.pid") catch {};
+    }
+};
+
+fn create_e2e_runner(context: BuildContext, e2e_tests: *std.Build.Step.Compile) *std.Build.Step {
+    const kausal_server = create_executable(context, .{
+        .name = "kausal-server",
+        .root_source = "src/server_main.zig",
+        .binary_type = .kausal,
+    });
+
+    // Install artifacts
+    context.b.installArtifact(kausal_server);
+    context.b.installArtifact(e2e_tests);
+
+    // Create server startup step
+    const server_step = E2EServerStep.create(context.b, kausal_server);
+
+    // Create native test runner that depends on server
+    const test_runner = create_test_runner(context, e2e_tests);
+    test_runner.step.dependOn(&server_step.step);
+
+    // Set environment variable so tests know which port to use
+    test_runner.setEnvironmentVariable("KAUSAL_E2E_TEST_PORT", "3839");
+
+    // Create cleanup step that runs after tests
+    const cleanup_step = E2ECleanupStep.create(context.b);
+    cleanup_step.step.dependOn(&test_runner.step);
+
+    return &cleanup_step.step;
+}
+
+fn create_tidy_checker(context: BuildContext) *std.Build.Step.Compile {
+    const tidy_exe = context.b.addExecutable(.{
+        .name = "tidy",
+        .root_module = context.b.createModule(.{
+            .root_source_file = context.b.path("src/dev/tidy.zig"),
+            .target = context.target,
+            .optimize = context.optimize,
+            .single_threaded = true,
+        }),
+    });
+
+    tidy_exe.root_module.addImport("build_options", context.options.createModule());
+
+    return tidy_exe;
 }
