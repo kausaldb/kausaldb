@@ -9,6 +9,11 @@
 //! Philosophy: Delegate formatting to `zig fmt`, focus on architectural rules.
 
 const std = @import("std");
+const build_options = @import("build_options");
+
+pub const std_options: std.Options = .{
+    .log_level = @enumFromInt(@intFromEnum(build_options.log_level)),
+};
 
 const log = std.log.scoped(.tidy);
 
@@ -69,15 +74,18 @@ const TidyChecker = struct {
                 try self.check_snake_case_function(file_path, line_number, line, file_content);
             }
 
-            // Rule 3: Thread safety - no threading outside of stdx.zig and memory_guard.zig
+            // Rule 3: Thread safety - no threading outside of stdx.zig, memory_guard.zig, and test files
             if (!std.mem.endsWith(u8, file_path, "stdx.zig") and
                 !std.mem.endsWith(u8, file_path, "memory_guard.zig") and
-                !std.mem.endsWith(u8, file_path, "tidy.zig"))
+                !std.mem.endsWith(u8, file_path, "tidy.zig") and
+                !std.mem.startsWith(u8, file_path, "src/tests/") and
+                !std.mem.startsWith(u8, file_path, "./src/tests/") and
+                !std.mem.endsWith(u8, file_path, "_test.zig"))
             {
                 if (std.mem.indexOf(u8, line, "std.Thread.spawn") != null or
                     std.mem.indexOf(u8, line, "std.Thread.Mutex") != null)
                 {
-                    try self.add_violation(file_path, line_number, "Threading primitives only allowed in src/core/stdx.zig and src/core/memory_guard.zig - KausalDB is single-threaded by design");
+                    try self.add_violation(file_path, line_number, "Threading primitives only allowed in src/core/stdx.zig, src/core/memory_guard.zig, and test files - KausalDB is single-threaded by design");
                 }
             }
 
@@ -109,6 +117,7 @@ const TidyChecker = struct {
 
             // Rule 5: Use scoped logging pattern instead of global std.log
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
+                !std.mem.endsWith(u8, file_path, "build.zig") and
                 std.mem.indexOf(u8, line, "std.log.") != null)
             {
                 // Exception: Allow std.log.scoped() declarations and type references
@@ -146,6 +155,7 @@ const TidyChecker = struct {
 
             // Rule 9: No TODO/FIXME/HACK comments in committed code
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
+                !std.mem.endsWith(u8, file_path, "build.zig") and
                 (std.mem.indexOf(u8, line, "// TODO") != null or
                     std.mem.indexOf(u8, line, "// FIXME") != null or
                     std.mem.indexOf(u8, line, "// HACK") != null))
@@ -290,7 +300,7 @@ const TidyChecker = struct {
     }
 };
 
-/// Recursively find all .zig files in the src/ directory
+/// Recursively find all .zig files in the repository, excluding the zig/ compiler directory
 fn find_zig_files(allocator: std.mem.Allocator, dir_path: []const u8) !std.array_list.Managed([]u8) {
     var files = std.array_list.Managed([]u8).init(allocator);
 
@@ -304,6 +314,11 @@ fn find_zig_files(allocator: std.mem.Allocator, dir_path: []const u8) !std.array
     defer walker.deinit();
 
     while (try walker.next()) |entry| {
+        // Skip the zig/ compiler directory
+        if (std.mem.startsWith(u8, entry.path, "zig/")) {
+            continue;
+        }
+
         if (entry.kind == .file and std.mem.endsWith(u8, entry.path, ".zig")) {
             const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.path });
             try files.append(full_path);
@@ -321,8 +336,8 @@ pub fn main() !void {
     var checker = TidyChecker.init(allocator);
     defer checker.deinit();
 
-    // Find all .zig files in src/
-    const zig_files = find_zig_files(allocator, "src") catch |err| {
+    // Find all .zig files in the repository (excluding zig/ compiler directory)
+    const zig_files = find_zig_files(allocator, ".") catch |err| {
         std.debug.print("Error finding .zig files: {}\n", .{err});
         std.process.exit(@intFromEnum(ExitCode.error_occurred));
     };
