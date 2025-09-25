@@ -1331,6 +1331,31 @@ pub const StorageEngine = struct {
         return &self.storage_metrics;
     }
 
+    /// Statistics structure for CLI status reporting
+    pub const StorageStatistics = struct {
+        total_blocks: u64,
+        total_edges: u64,
+        sstable_count: u64,
+        memtable_bytes: u64,
+        total_disk_bytes: u64,
+    };
+
+    /// Query current storage statistics for status reporting
+    pub fn query_statistics(self: *const StorageEngine) StorageStatistics {
+        const blocks_written = self.storage_metrics.blocks_written.load();
+        const edges_added = self.storage_metrics.edges_added.load();
+        const sstable_count = @as(u64, @intCast(self.sstable_manager.sstable_paths.items.len));
+        const memtable_bytes = self.memtable_manager.block_index.memory_used;
+
+        return StorageStatistics{
+            .total_blocks = blocks_written,
+            .total_edges = edges_added,
+            .sstable_count = sstable_count,
+            .memtable_bytes = memtable_bytes,
+            .total_disk_bytes = 0, // Would need disk usage calculation implementation
+        };
+    }
+
     /// Calculate current memory pressure level for backpressure control.
     /// Updates metrics with current memtable and compaction state before calculation.
     /// Used by ingestion pipeline to adapt batch sizes based on storage load.
