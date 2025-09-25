@@ -18,7 +18,6 @@ const workspace_manager = @import("../workspace/manager.zig");
 const ownership = @import("../core/ownership.zig");
 
 const assert = assert_mod.assert;
-const log = std.log.scoped(.cli_protocol);
 const fatal_assert = assert_mod.fatal_assert;
 
 const ArenaCoordinator = memory.ArenaCoordinator;
@@ -658,10 +657,10 @@ fn serialize_trace_response(ctx: HandlerContext, path_result: TraversalResult) !
     }
 
     const response_header = cli_protocol.MessageHeader{
-        .protocol_version = cli_protocol.PROTOCOL_VERSION,
-        .message_type = @intFromEnum(cli_protocol.MessageType.trace_response),
+        .version = cli_protocol.PROTOCOL_VERSION,
+        .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .checksum = 0,
+        .magic = 0,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -677,10 +676,10 @@ fn serialize_empty_trace_response(ctx: HandlerContext) ![]const u8 {
     const response = cli_protocol.TraceResponse.init();
 
     const response_header = cli_protocol.MessageHeader{
-        .protocol_version = cli_protocol.PROTOCOL_VERSION,
-        .message_type = @intFromEnum(cli_protocol.MessageType.trace_response),
+        .version = cli_protocol.PROTOCOL_VERSION,
+        .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .checksum = 0,
+        .magic = 0,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
