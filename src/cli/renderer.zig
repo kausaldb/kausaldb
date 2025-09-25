@@ -97,17 +97,18 @@ fn render_general_help(ctx: *RenderContext) !void {
     try ctx.write("  help [topic]           Show help for a command\n");
     try ctx.write("  version                Show version information\n");
     try ctx.write("  server [mode]          Manage the KausalDB server\n");
-    try ctx.write("  status                 Show database status\n\n");
+    try ctx.write("  status                 Show database status\n");
+    try ctx.write("  ping                   Check server connectivity\n\n");
 
     try ctx.write_colored(RenderContext.Color.yellow, "Query Commands:\n");
-    try ctx.write("  find <query>           Find blocks matching a query\n");
-    try ctx.write("  show <dir> <target>    Show relationships (callers/callees)\n");
-    try ctx.write("  trace <src> <dst>      Trace paths between blocks\n\n");
+    try ctx.write("  find --type <type> --name <name>         Find entities by type and name\n");
+    try ctx.write("  show --relation <dir> --target <name>    Show relationships (callers/callees/imports/exports)\n");
+    try ctx.write("  trace --direction <dir> --target <name>  Trace paths from target\n\n");
 
     try ctx.write_colored(RenderContext.Color.yellow, "Workspace Commands:\n");
-    try ctx.write("  link <path> <name>     Link a codebase to workspace\n");
-    try ctx.write("  unlink <name>          Remove a codebase from workspace\n");
-    try ctx.write("  sync [name]            Sync workspace with filesystem\n\n");
+    try ctx.write("  link --path <path> --name <name>  Link a codebase to workspace\n");
+    try ctx.write("  unlink --name <name>              Remove a codebase from workspace\n");
+    try ctx.write("  sync [--name <name>]              Sync workspace with filesystem\n\n");
 
     try ctx.write_colored(RenderContext.Color.dim, "Run 'kausal help <command>' for detailed information\n");
 }
@@ -119,15 +120,21 @@ fn render_command_help(ctx: *RenderContext, command: []const u8) !void {
     }
 
     if (std.mem.eql(u8, command, "find")) {
-        try ctx.write_colored(RenderContext.Color.bold, "kausal find - Find blocks matching a query\n\n");
-        try ctx.write("Usage: kausal find <query> [options]\n\n");
+        try ctx.write_colored(RenderContext.Color.bold, "kausal find - Find entities by type and name\n\n");
+        try ctx.write("Usage: kausal find --type <type> --name <name> [options]\n\n");
+        try ctx.write("Entity Types:\n");
+        try ctx.write("  function           Find functions\n");
+        try ctx.write("  struct             Find struct types\n");
+        try ctx.write("  constant           Find constants\n");
+        try ctx.write("  variable           Find variables\n\n");
         try ctx.write("Options:\n");
-        try ctx.write("  --format <fmt>     Output format: text, json, csv (default: text)\n");
+        try ctx.write("  --workspace <name> Search in specific workspace\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n");
         try ctx.write("  --max-results <n>  Maximum results to return (default: 10)\n");
         try ctx.write("  --show-metadata    Include block metadata in output\n\n");
         try ctx.write("Examples:\n");
-        try ctx.write("  kausal find parse_command\n");
-        try ctx.write("  kausal find \"StorageEngine.init\" --max-results 5\n");
+        try ctx.write("  kausal find --type function --name parse_command\n");
+        try ctx.write("  kausal find --type struct --name StorageEngine --workspace myproject\n");
     } else if (std.mem.eql(u8, command, "server")) {
         try ctx.write_colored(RenderContext.Color.bold, "kausal server - Manage the KausalDB server\n\n");
         try ctx.write("Usage: kausal server [mode] [options]\n\n");
@@ -140,6 +147,47 @@ fn render_command_help(ctx: *RenderContext, command: []const u8) !void {
         try ctx.write("  --host <addr>      Bind address (default: 127.0.0.1)\n");
         try ctx.write("  --port <port>      Port number (default: 3838)\n");
         try ctx.write("  --data-dir <path>  Data directory (default: .kausal-data)\n");
+        try ctx.write("  --foreground       Run in foreground mode\n");
+    } else if (std.mem.eql(u8, command, "show")) {
+        try ctx.write_colored(RenderContext.Color.bold, "kausal show - Show relationships for an entity\n\n");
+        try ctx.write("Usage: kausal show --relation <direction> --target <target> [options]\n\n");
+        try ctx.write("Directions:\n");
+        try ctx.write("  callers            Show what calls this entity\n");
+        try ctx.write("  callees            Show what this entity calls\n");
+        try ctx.write("  imports            Show what this entity imports\n");
+        try ctx.write("  exports            Show what this entity exports\n\n");
+        try ctx.write("Options:\n");
+        try ctx.write("  --workspace <name> Search in specific workspace\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n");
+        try ctx.write("  --max-depth <n>    Maximum traversal depth (default: 3)\n\n");
+        try ctx.write("Examples:\n");
+        try ctx.write("  kausal show --relation callers --target authenticate_user\n");
+        try ctx.write("  kausal show --relation callees --target StorageEngine.init --max-depth 2\n");
+    } else if (std.mem.eql(u8, command, "trace")) {
+        try ctx.write_colored(RenderContext.Color.bold, "kausal trace - Trace execution paths from an entity\n\n");
+        try ctx.write("Usage: kausal trace --direction <direction> --target <target> [options]\n\n");
+        try ctx.write("Directions:\n");
+        try ctx.write("  callers            Trace caller chains\n");
+        try ctx.write("  callees            Trace callee chains\n\n");
+        try ctx.write("Options:\n");
+        try ctx.write("  --workspace <name> Search in specific workspace\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n");
+        try ctx.write("  --max-depth <n>    Maximum traversal depth (default: 10)\n");
+        try ctx.write("  --all-paths        Show all paths, not just shortest\n\n");
+        try ctx.write("Examples:\n");
+        try ctx.write("  kausal trace --direction callees --target main --max-depth 5\n");
+        try ctx.write("  kausal trace --direction callers --target error_handler --all-paths\n");
+    } else if (std.mem.eql(u8, command, "link")) {
+        try ctx.write_colored(RenderContext.Color.bold, "kausal link - Link a codebase to workspace\n\n");
+        try ctx.write("Usage: kausal link --path <path> [--name <name>] [options]\n\n");
+        try ctx.write("Required Arguments:\n");
+        try ctx.write("  --path <path>      Path to codebase directory\n\n");
+        try ctx.write("Options:\n");
+        try ctx.write("  --name <name>      Workspace name (defaults to directory name)\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n\n");
+        try ctx.write("Examples:\n");
+        try ctx.write("  kausal link --path /path/to/project\n");
+        try ctx.write("  kausal link --path /path/to/project --name myproject\n");
     } else {
         try ctx.writer.interface.print("No help available for command: {s}\n", .{command});
     }

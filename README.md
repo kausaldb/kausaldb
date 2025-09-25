@@ -23,16 +23,16 @@ KausalDB discovers and stores the causal relationships within your code. Instead
 
 ```bash
 # Link your codebase first
-kausaldb link /path/to/codebase as myproject
+kausal link --path /path/to/codebase --name myproject
 
 # Find a specific function
-kausaldb find function "authenticate_user" in myproject
+kausal find --type function --name authenticate_user --workspace myproject
 
 # What calls this function?
-kausaldb show callers "authenticate_user" in myproject
+kausal show --relation callers --target authenticate_user --workspace myproject
 
 # Trace deep call chains
-kausaldb trace callees "StorageEngine.put_block" --depth 3
+kausal trace --direction callees --target StorageEngine.put_block --max-depth 3
 
 [+] MemtableManager.put_block_durable
 [+] BlockIndex.put_block
@@ -60,27 +60,6 @@ Built from scratch in Zig with **zero-cost abstractions**, no hidden allocations
 ## Philosophy
 
 **Correctness over performance**. Property-based testing with deterministic simulation finds edge cases traditional unit tests miss.
-
-## Performance
-
-Realistic end-to-end benchmark results measuring complete user workflows on Apple M1 (macOS ARM64, ReleaseFast build):
-
-**Test Methodology:**
-
-- Workload: 25-file codebase with 6 functions per file and realistic cross-module dependencies
-- Operations: 50 iterations each of `find`, `show`, and `trace` commands
-- Metrics: P95 latencies (95th percentile) representing real-world performance expectations
-
-**Results:**
-
-- **Ingestion Pipeline** (`link` + `sync`): P95 69ms
-- **Find Function Queries**: P95 429ms
-- **Show File Queries**: P95 505ms
-- **Trace Call Chain Queries**: P95 1,107ms
-
-Current performance level: **ACCEPTABLE** for development tooling (< 1s P95 for most operations).
-
-_Run `./zig/zig build bench -- e2e` to reproduce these benchmarks on your system._
 
 **Simplicity over features**. Arena memory management, explicit control flow, and zero-cost abstractions keep the design clean and maintainable.
 
