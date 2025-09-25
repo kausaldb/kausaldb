@@ -47,6 +47,14 @@ pub fn build(b: *std.Build) void {
     const log_level = parse_log_level(b.option([]const u8, "log-level", "Log level") orelse "info");
     const filter = b.option([]const u8, "filter", "Test filter pattern");
 
+    // CI compatibility options
+    const seed_str = b.option([]const u8, "seed", "Random seed for testing") orelse "0xDEADBEEF";
+    const seed = if (std.mem.startsWith(u8, seed_str, "0x"))
+        std.fmt.parseInt(u64, seed_str[2..], 16) catch 0xDEADBEEF
+    else
+        std.fmt.parseInt(u64, seed_str, 10) catch 0xDEADBEEF;
+    const test_iterations = b.option(u32, "test-iterations", "Number of test iterations") orelse 1;
+
     // ReleaseSafe provides optimal performance while maintaining safety checks
     // Essential for KausalDB's microsecond-level performance requirements
     // Override with -Doptimize=Debug for development debugging and detailed stack traces
@@ -66,6 +74,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(?[]const u8, "bench_baseline", bench_baseline);
     options.addOption(u32, "fuzz_iterations", fuzz_iterations);
     options.addOption([]const u8, "fuzz_corpus", fuzz_corpus);
+    options.addOption(u64, "seed", seed);
+    options.addOption(u32, "test_iterations", test_iterations);
 
     const context = BuildContext{
         .b = b,
