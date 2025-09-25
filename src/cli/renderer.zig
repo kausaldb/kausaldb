@@ -358,9 +358,11 @@ fn render_find_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
     try ctx.writer.interface.print("Found {d} result{s}:\n\n", .{ blocks.len, if (blocks.len == 1) "" else "s" });
 
     for (blocks, 0..) |block, i| {
+        const index_str = try std.fmt.allocPrint(ctx.allocator, "[{d}] ", .{i + 1});
+        defer ctx.allocator.free(index_str);
         try ctx.write_colored(
             RenderContext.Color.cyan,
-            try std.fmt.allocPrint(ctx.allocator, "[{d}] ", .{i + 1}),
+            index_str,
         );
 
         const uri = block.uri[0..block.uri_len];
