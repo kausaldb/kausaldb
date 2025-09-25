@@ -4,7 +4,9 @@
 //! connection manager handling concurrent connections.
 
 const std = @import("std");
+const build_options = @import("build_options");
 
+const stdx = @import("core/stdx.zig");
 const assert_mod = @import("core/assert.zig");
 const concurrency = @import("core/concurrency.zig");
 const error_context = @import("core/error_context.zig");
@@ -37,6 +39,28 @@ const ConnectionHandlingError = error{
     InvalidMagic,
     VersionMismatch,
 } || std.mem.Allocator.Error || std.posix.ReadError || std.posix.WriteError;
+
+/// The runtime maximum log level.
+/// One of: .err, .warn, .info, .debug
+pub var log_level_runtime: std.log.Level = @enumFromInt(@intFromEnum(build_options.log_level));
+
+pub fn log_runtime(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(message_level) <= @intFromEnum(log_level_runtime)) {
+        stdx.log_with_timestamp(message_level, scope, format, args);
+    }
+}
+
+pub const std_options: std.Options = .{
+    // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
+    // The runtime filtering is handled by log_level_runtime.
+    .log_level = .debug,
+    .logFn = log_runtime,
+};
 
 const log = std.log.scoped(.kausaldb_server);
 
@@ -80,7 +104,7 @@ const ServerConfig = struct {
     max_connections: u32 = 100,
     connection_timeout_sec: u32 = 300,
     daemonize: bool = true, // Default to daemon mode for production
-    log_level: std.log.Level = .info,
+    log_level: std.log.Level = @enumFromInt(@intFromEnum(build_options.log_level)),
     pid_file_path: ?[]const u8 = null,
 };
 
@@ -295,7 +319,8 @@ const KausalServer = struct {
 
         // Verify socket is actually listening
         const socket_addr = self.server_socket.?.listen_address;
-        log.info("Server listening on {s}:{} (actual socket: {any})", .{ self.config.host, self.config.port, socket_addr });
+        const actual_port = socket_addr.getPort();
+        log.info("Server listening on {s}:{} (requested: {}, actual socket: {any})", .{ self.config.host, actual_port, self.config.port, socket_addr });
 
         self.running.store(true, .monotonic);
     }
@@ -386,9 +411,16 @@ const KausalServer = struct {
         var total_read: usize = 0;
 
         while (total_read < header_bytes.len) {
-            const bytes_read = connection.stream.read(header_bytes[total_read..]) catch |err| {
-                log.err("Error reading header bytes from connection {}: {}", .{ connection.connection_id, err });
-                return err;
+            const bytes_read = connection.stream.read(header_bytes[total_read..]) catch |err| switch (err) {
+                // THE FIX: Handle WouldBlock gracefully by sleeping briefly and retrying.
+                error.WouldBlock => {
+                    std.Thread.sleep(1 * std.time.ns_per_ms); // Prevent a tight spin-loop
+                    continue;
+                },
+                else => |other_err| {
+                    log.err("Error reading header bytes from connection {}: {}", .{ connection.connection_id, other_err });
+                    return other_err;
+                },
             };
 
             if (bytes_read == 0) {
@@ -412,9 +444,16 @@ const KausalServer = struct {
 
             total_read = 0;
             while (total_read < payload.len) {
-                const bytes_read = connection.stream.read(payload[total_read..]) catch |err| {
-                    log.err("Connection {}: Error reading payload bytes: {}", .{ connection.connection_id, err });
-                    return err;
+                const bytes_read = connection.stream.read(payload[total_read..]) catch |err| switch (err) {
+                    // APPLY THE SAME FIX to the payload read loop.
+                    error.WouldBlock => {
+                        std.Thread.sleep(1 * std.time.ns_per_ms);
+                        continue;
+                    },
+                    else => |other_err| {
+                        log.err("Connection {}: Error reading payload bytes: {}", .{ connection.connection_id, other_err });
+                        return other_err;
+                    },
                 };
 
                 if (bytes_read == 0) {
@@ -859,14 +898,9 @@ fn parse_server_config(args: []const []const u8) !ServerConfig {
                 return error.InvalidArgs;
             }
             const level_str = args[i];
-            if (std.mem.eql(u8, level_str, "debug")) {
-                config.log_level = .debug;
-            } else if (std.mem.eql(u8, level_str, "info")) {
-                config.log_level = .info;
-            } else if (std.mem.eql(u8, level_str, "warn")) {
-                config.log_level = .warn;
-            } else if (std.mem.eql(u8, level_str, "err")) {
-                config.log_level = .err;
+            if (std.meta.stringToEnum(std.log.Level, level_str)) |level| {
+                config.log_level = level;
+                log_level_runtime = level;
             } else {
                 std.debug.print("Error: Invalid log level: {s}\n", .{level_str});
                 return error.InvalidArgs;

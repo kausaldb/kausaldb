@@ -2,16 +2,93 @@
 //!
 //! Provides safer alternatives to std library functions and thread-safe primitives
 //! with explicit buffer validation and consistent error handling patterns.
-//!
-//! Design rationale: Wrappers prevent common memory safety issues while maintaining
-//! zero-cost abstractions. Consistent naming and validation patterns reduce bugs
-//! across subsystem boundaries.
 
 const std = @import("std");
 
 const assert_mod = @import("assert.zig");
 
 const assert = assert_mod.assert;
+
+/// DateTime in UTC, intended primarily for logging.
+///
+/// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
+/// timezones or leap seconds is necessary.
+pub const DateTimeUTC = struct {
+    year: u16,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    millisecond: u16,
+
+    pub fn now() DateTimeUTC {
+        const timestamp_ms = std.time.milliTimestamp();
+        assert(timestamp_ms > 0);
+        return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
+    }
+
+    pub fn from_timestamp_s(timestamp_s: u64) DateTimeUTC {
+        return DateTimeUTC.from_timestamp_ms(timestamp_s * std.time.ms_per_s);
+    }
+
+    pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
+        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
+        const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+        const month_day = year_day.calculateMonthDay();
+        const time = epoch_seconds.getDaySeconds();
+
+        return DateTimeUTC{
+            .year = year_day.year,
+            .month = month_day.month.numeric(),
+            .day = month_day.day_index + 1,
+            .hour = time.getHoursIntoDay(),
+            .minute = time.getMinutesIntoHour(),
+            .second = time.getSecondsIntoMinute(),
+            .millisecond = @intCast(@mod(timestamp_ms, 1000)),
+        };
+    }
+
+    pub fn format(
+        datetime: DateTimeUTC,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
+            datetime.year,
+            datetime.month,
+            datetime.day,
+            datetime.hour,
+            datetime.minute,
+            datetime.second,
+            datetime.millisecond,
+        });
+    }
+};
+
+/// An alternative to the default logFn from `std.log`, which prepends a UTC timestamp.
+pub fn log_with_timestamp(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    const level_text = comptime message_level.asText();
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const date_time = DateTimeUTC.now();
+
+    var buffer: [64]u8 = undefined;
+    const stderr = std.debug.lockStderrWriter(&buffer);
+    defer std.debug.unlockStderrWriter();
+
+    nosuspend {
+        date_time.format("", .{}, stderr) catch return;
+        stderr.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+    }
+}
 
 /// Thread-safe metrics counter for tracking various statistics.
 ///
