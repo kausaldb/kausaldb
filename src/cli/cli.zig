@@ -240,7 +240,14 @@ pub const CLI = struct {
         }
 
         try self.ensure_connected();
-        const response = try self.client.?.trace_paths(cmd.target, cmd.target, cmd.max_depth);
+
+        // Set source and target based on trace direction
+        // callees: find what cmd.target calls (target is source)
+        // callers: find what calls cmd.target (target is target)
+        const source = if (cmd.direction == .callees) cmd.target else "*";
+        const target = if (cmd.direction == .callers) cmd.target else "*";
+
+        const response = try self.client.?.trace_paths(source, target, cmd.max_depth);
 
         if (response.path_count > 0) {
             const direction_str = if (cmd.direction == .callers) "callers of" else "callees of";
@@ -335,6 +342,94 @@ pub fn run() !void {
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
+
+    if (args.len >= 2) {
+        const first_arg = args[1];
+        if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
+            const help_args = [_][]const u8{ args[0], "help" };
+            const command = try parser.parse_command(&help_args);
+
+            var cli = CLI.init(allocator, .{});
+            defer cli.deinit();
+            try cli.execute_command(command);
+            return;
+        }
+
+        if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
+            const version_args = [_][]const u8{ args[0], "version" };
+            const command = try parser.parse_command(&version_args);
+
+            var cli = CLI.init(allocator, .{});
+            defer cli.deinit();
+            try cli.execute_command(command);
+            return;
+        }
+    }
+
+    const parse_result = parser.parse_command_with_globals(args) catch |err| {
+        var stderr_buffer: [4096]u8 = undefined;
+        const stderr_file = std.fs.File{ .handle = 2 };
+        var stderr = stderr_file.writer(stderr_buffer[0..]);
+        switch (err) {
+            parser.ParseError.UnknownCommand => {
+                if (args.len >= 2) {
+                    try (&stderr.interface).print("Unknown command: {s}\n", .{args[1]});
+                }
+                try stderr.interface.writeAll("Run 'kausal help' for usage information\n");
+                try stderr.interface.flush();
+            },
+            parser.ParseError.MissingArgument => {
+                try stderr.interface.writeAll("Missing required argument\n");
+                try stderr.interface.writeAll("Run 'kausal help' for usage information\n");
+                try stderr.interface.flush();
+            },
+            parser.ParseError.InvalidArgument => {
+                try stderr.interface.writeAll("Invalid argument\n");
+                try stderr.interface.writeAll("Run 'kausal help' for usage information\n");
+                try stderr.interface.flush();
+            },
+            else => {
+                try (&stderr.interface).print("Error: {}\n", .{err});
+                try stderr.interface.flush();
+            },
+        }
+        std.process.exit(1);
+    };
+
+    var cli_config = CLI.CLIConfig{};
+    if (parse_result.global_options.port) |port| {
+        cli_config.server_port = port;
+    }
+    if (parse_result.global_options.host) |host| {
+        cli_config.server_host = host;
+    }
+
+    var cli = CLI.init(allocator, cli_config);
+    defer cli.deinit();
+
+    cli.execute_command(parse_result.command) catch |err| {
+        var stderr_buffer2: [4096]u8 = undefined;
+        const stderr_file2 = std.fs.File{ .handle = 2 };
+        var stderr = stderr_file2.writer(stderr_buffer2[0..]);
+
+        switch (err) {
+            client_mod.ClientError.ServerNotRunning => {
+                std.process.exit(1);
+            },
+            else => {
+                try (&stderr.interface).print("Error: {}\n", .{err});
+                try stderr.interface.flush();
+                std.process.exit(1);
+            },
+        }
+    };
+}
+
+/// CLI execution entry point with pre-filtered arguments
+pub fn run_with_args(args: []const []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
     if (args.len >= 2) {
         const first_arg = args[1];

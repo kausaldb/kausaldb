@@ -170,10 +170,6 @@ pub const OwnedBlock = struct {
             .content = cloned_content,
         };
 
-        if (builtin.mode == .Debug) {
-            log.debug("Cloned block {any} from {s} to {s}", .{ self.block.id, self.ownership.name(), new_ownership.name() });
-        }
-
         _ = new_arena; // Arena tracking handled separately
         return OwnedBlock{
             .block = cloned_block,
