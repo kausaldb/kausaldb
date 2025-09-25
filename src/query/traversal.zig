@@ -281,7 +281,17 @@ pub const TraversalResult = struct {
     /// Free allocated memory for traversal results
     /// Uses O(1) arena deallocation for optimal performance
     pub fn deinit(self: TraversalResult) void {
-        // All memory is managed by the arena - O(1) cleanup
+        // Free directly allocated arrays first
+        self.allocator.free(self.blocks);
+        self.allocator.free(self.depths);
+
+        // Free paths array and each individual path
+        for (self.paths) |path| {
+            self.allocator.free(path);
+        }
+        self.allocator.free(self.paths);
+
+        // All other memory is managed by the arena - O(1) cleanup
         self.query_arena.deinit();
     }
 
@@ -1405,7 +1415,7 @@ pub fn find_paths_between(
         depths[0] = 0;
 
         // Create owned block for source
-        const source_block = try storage_engine.find_block(source_id);
+        const source_block = try storage_engine.find_block(source_id, .query_engine);
         if (source_block == null) return TraversalError.BlockNotFound;
         const blocks = try allocator.alloc(OwnedBlock, 1);
         blocks[0] = source_block.?;
@@ -1481,7 +1491,7 @@ pub fn find_paths_between(
 
             if (next_id.eql(target_id)) {
                 // Found target - add to results
-                const target_block = try storage_engine.find_block(target_id);
+                const target_block = try storage_engine.find_block(target_id, .query_engine);
                 if (target_block) |block| {
                     try result_blocks.append(block);
                     try result_paths.append(try allocator.dupe(BlockId, new_path));
@@ -1522,25 +1532,32 @@ pub fn find_paths_between(
 
 test "find_paths_between returns direct path for connected blocks" {
     const allocator = testing.allocator;
-    var vfs = SimulationVFS.init(allocator);
-    defer vfs.deinit();
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
 
-    var storage_engine = try StorageEngine.init(allocator, &vfs, "test_path_finding");
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_path_finding");
     defer storage_engine.deinit();
     try storage_engine.startup();
     defer storage_engine.shutdown() catch {};
 
     // Create test blocks
-    const source_block = ContextBlock.init_for_test(
-        BlockId.from_u64(1),
-        "function source() {}",
-        "source.zig",
-    );
-    const target_block = ContextBlock.init_for_test(
-        BlockId.from_u64(2),
-        "function target() {}",
-        "target.zig",
-    );
+    const source_block = ContextBlock{
+        .id = BlockId.from_u64(1),
+        .sequence = 0,
+        .source_uri = "source.zig",
+        .metadata_json = "{}",
+        .content = "function source() {}",
+    };
+    const target_block = ContextBlock{
+        .id = BlockId.from_u64(2),
+        .sequence = 0,
+        .source_uri = "target.zig",
+        .metadata_json = "{}",
+        .content = "function target() {}",
+    };
 
     // Store blocks
     try storage_engine.put_block(source_block);
