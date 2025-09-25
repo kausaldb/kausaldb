@@ -86,6 +86,8 @@ pub fn handle_cli_message(
 
 fn handle_ping_request(ctx: HandlerContext) ![]const u8 {
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .pong_response,
         .payload_size = 0,
     };
@@ -410,39 +412,47 @@ fn handle_trace_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
     const source_text = request.source_text();
     const target_text = request.target_text();
 
-    // Find source and target blocks
-    const source_result = ctx.query_engine.find_by_name("", "function", source_text) catch |err| {
-        const error_msg = try std.fmt.allocPrint(ctx.allocator, "Source lookup failed: {}", .{err});
+    // Determine the actual entity to trace based on which field is non-empty
+    const entity_name = if (source_text.len > 0) source_text else target_text;
+    const is_callees_trace = source_text.len > 0; // source non-empty means finding callees
+
+    if (entity_name.len == 0) {
+        return try create_error_response(
+            ctx,
+            @intFromEnum(cli_protocol.ErrorCode.invalid_request),
+            "Either source or target must be specified",
+        );
+    }
+
+    // Find the entity to trace from
+    const entity_result = ctx.query_engine.find_by_name("", "function", entity_name) catch |err| {
+        const error_msg = try std.fmt.allocPrint(ctx.allocator, "Entity lookup failed: {}", .{err});
         defer ctx.allocator.free(error_msg);
         return try create_error_response(ctx, @intFromEnum(cli_protocol.ErrorCode.server_error), error_msg);
     };
-    defer source_result.deinit();
+    defer entity_result.deinit();
 
-    const target_result = ctx.query_engine.find_by_name("", "function", target_text) catch |err| {
-        const error_msg = try std.fmt.allocPrint(ctx.allocator, "Target lookup failed: {}", .{err});
-        defer ctx.allocator.free(error_msg);
-        return try create_error_response(ctx, @intFromEnum(cli_protocol.ErrorCode.server_error), error_msg);
-    };
-    defer target_result.deinit();
-
-    if (source_result.results.len == 0 or target_result.results.len == 0) {
+    if (entity_result.results.len == 0) {
         return try serialize_empty_trace_response(ctx);
     }
 
-    // Execute trace query using path finding
-    const source_id = source_result.results[0].block.block.id;
-    const target_id = target_result.results[0].block.block.id;
+    // Execute trace query using appropriate direction
+    const entity_id = entity_result.results[0].block.block.id;
+    const trace_result = if (is_callees_trace)
+        ctx.query_engine.find_callees("", entity_id, request.max_depth)
+    else
+        ctx.query_engine.find_callers("", entity_id, request.max_depth);
 
-    const path_result = ctx.query_engine.find_paths_between(source_id, target_id, request.max_depth) catch |err| {
+    const path_result = trace_result catch |err| {
         const ctx_info = error_context.ServerContext{
-            .operation = "find_paths_between",
+            .operation = if (is_callees_trace) "find_callees" else "find_callers",
         };
         error_context.log_server_error(err, ctx_info);
         return try serialize_empty_trace_response(ctx);
     };
     defer path_result.deinit();
 
-    return try serialize_trace_response(ctx, path_result);
+    return try serialize_trace_response_from_blocks(ctx, path_result.blocks);
 }
 
 fn handle_link_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
@@ -584,6 +594,8 @@ fn handle_clear_workspace_request(ctx: HandlerContext, payload: []const u8) ![]c
 
 fn serialize_find_response(ctx: HandlerContext, response: cli_protocol.FindResponse) ![]const u8 {
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .find_response,
         .payload_size = @sizeOf(cli_protocol.FindResponse),
     };
@@ -611,6 +623,8 @@ fn serialize_show_response(ctx: HandlerContext, blocks: []const ContextBlock, ed
     }
 
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
     };
@@ -628,11 +642,44 @@ fn serialize_empty_show_response(ctx: HandlerContext) ![]const u8 {
     const response = cli_protocol.ShowResponse.init();
 
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.ShowResponse);
+    const response_bytes = try ctx.allocator.alloc(u8, total_size);
+
+    @memcpy(response_bytes[0..@sizeOf(cli_protocol.MessageHeader)], std.mem.asBytes(&response_header));
+    @memcpy(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], std.mem.asBytes(&response));
+
+    return response_bytes;
+}
+
+fn serialize_trace_response_from_blocks(ctx: HandlerContext, blocks: []const OwnedBlock) ![]const u8 {
+    var response = cli_protocol.TraceResponse.init();
+
+    if (blocks.len > 0) {
+        // Create a single path from the blocks
+        response.path_count = 1;
+        const node_count = @min(blocks.len, response.paths[0].nodes.len);
+        response.paths[0].node_count = @intCast(node_count);
+        response.paths[0].total_distance = @intCast(node_count);
+
+        for (blocks[0..node_count], 0..) |owned_block, i| {
+            response.paths[0].nodes[i] = owned_block.block.id;
+        }
+    }
+
+    const response_header = cli_protocol.MessageHeader{
+        .version = cli_protocol.PROTOCOL_VERSION,
+        .message_type = cli_protocol.MessageType.trace_response,
+        .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
+        .magic = 0x4B41554C,
+    };
+
+    const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
     const response_bytes = try ctx.allocator.alloc(u8, total_size);
 
     @memcpy(response_bytes[0..@sizeOf(cli_protocol.MessageHeader)], std.mem.asBytes(&response_header));
@@ -660,7 +707,7 @@ fn serialize_trace_response(ctx: HandlerContext, path_result: TraversalResult) !
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .magic = 0,
+        .magic = 0x4B41554C,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -679,7 +726,7 @@ fn serialize_empty_trace_response(ctx: HandlerContext) ![]const u8 {
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .magic = 0,
+        .magic = 0x4B41554C,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -695,6 +742,8 @@ fn serialize_operation_response(ctx: HandlerContext, success: bool, message: []c
     const response = cli_protocol.OperationResponse.init(success, message);
 
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .operation_response,
         .payload_size = @sizeOf(cli_protocol.OperationResponse),
     };
@@ -712,6 +761,8 @@ fn create_error_response(ctx: HandlerContext, error_code: u32, message: []const 
     const error_resp = cli_protocol.ErrorResponse.init(error_code, message);
 
     const response_header = cli_protocol.MessageHeader{
+        .magic = 0x4B41554C,
+        .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .error_response,
         .payload_size = @sizeOf(cli_protocol.ErrorResponse),
     };

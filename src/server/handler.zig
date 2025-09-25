@@ -109,6 +109,8 @@ pub const Server = struct {
     connection_manager: ConnectionManager,
     /// Server-level statistics (aggregated from managers)
     stats: ServerStats,
+    /// Server start timestamp for uptime calculations
+    server_start_time: i64,
 
     pub const ServerStats = struct {
         connections_accepted: u64 = 0,
@@ -155,6 +157,7 @@ pub const Server = struct {
             .listener = null,
             .connection_manager = ConnectionManager.init(allocator, conn_config),
             .stats = ServerStats{},
+            .server_start_time = 0, // Will be set in startup()
         };
     }
 
@@ -168,6 +171,9 @@ pub const Server = struct {
     /// Phase 2 initialization: Start managers and bind listener socket.
     /// Delegates to ConnectionManager startup and performs network binding.
     pub fn startup(self: *Server) !void {
+        // Record server start time
+        self.server_start_time = std.time.timestamp();
+
         // Manager must be started before binding to allocate poll_fds
         try self.connection_manager.startup();
 
@@ -257,6 +263,7 @@ pub const Server = struct {
             self.storage_engine,
             self.query_engine,
             self.workspace_manager,
+            self.server_start_time,
         );
 
         // Delegate message processing to CLI handler
