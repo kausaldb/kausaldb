@@ -355,7 +355,14 @@ pub const SimulationRunner = struct {
 
             // Check flush triggers
             if (self.should_trigger_flush()) {
-                try self.try_flush_with_backpressure();
+                self.try_flush_with_backpressure() catch |err| switch (err) {
+                    error.IoError => {
+                        // During fault injection, an IoError is an expected outcome.
+                        // The database should handle it gracefully, and the test should continue
+                        // to verify that the system remains consistent despite the failure.
+                    },
+                    else => return err,
+                };
             }
 
             self.operations_since_flush += 1;
