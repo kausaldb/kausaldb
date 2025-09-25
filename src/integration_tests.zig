@@ -23,6 +23,7 @@ comptime {
     _ = @import("tests/scenarios/deletion_compaction.zig");
     _ = @import("tests/scenarios/edge_persistence.zig");
     _ = @import("tests/scenarios/tombstone_sequencing.zig");
+    _ = @import("tests/scenarios/cli_integration.zig");
 
     // Regression tests (keeps bugs fixed)
     _ = @import("tests/regression/regression.zig");
