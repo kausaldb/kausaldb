@@ -1,4 +1,4 @@
-//! E2E tests for storage pressure scenarios with realistic codebase sizes.
+//! End-to-end tests for storage pressure scenarios.
 //!
 //! Tests storage engine robustness under load, including WriteStalled error
 //! prevention and backpressure handling when ingesting larger projects.
@@ -15,7 +15,7 @@ test "link large codebase does not cause WriteStalled errors" {
     const project_path = try test_harness.create_large_test_project("large_project");
 
     // Attempt to link the larger project
-    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", project_path, "as", "large_test" });
+    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", "large_test" });
     defer link_result.deinit();
 
     // Should not fail with WriteStalled error
@@ -55,7 +55,7 @@ test "multiple workspaces can be linked without storage conflicts" {
         const workspace_name = try std.fmt.allocPrint(testing.allocator, "workspace_{d}", .{i});
         defer testing.allocator.free(workspace_name);
 
-        var link_result = try test_harness.execute_command(&[_][]const u8{ "link", project_path, "as", workspace_name });
+        var link_result = try test_harness.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", workspace_name });
         defer link_result.deinit();
 
         // Should not fail with storage pressure errors
@@ -89,7 +89,7 @@ test "ingestion handles files with substantial content" {
     // Create project with files containing substantial content
     const project_path = try test_harness.create_substantial_content_project("substantial_test");
 
-    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", project_path, "as", "substantial" });
+    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", "substantial" });
     defer link_result.deinit();
 
     // Should handle substantial file content without memory or storage pressure
@@ -117,7 +117,7 @@ test "repeated sync operations handle storage pressure gracefully" {
 
     const project_path = try test_harness.create_large_test_project("repeated_test");
 
-    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", project_path, "as", "repeated" });
+    var link_result = try test_harness.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", "repeated" });
     defer link_result.deinit();
 
     if (link_result.exit_code == 0) {
@@ -151,7 +151,7 @@ test "storage cleanup between operations prevents accumulation" {
         const project_path = try test_harness.create_large_test_project(project_name);
 
         // Link project
-        var link_result = try test_harness.execute_command(&[_][]const u8{ "link", project_path, "as", workspace_name });
+        var link_result = try test_harness.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", workspace_name });
         defer link_result.deinit();
 
         // Should not accumulate storage pressure across operations
@@ -170,7 +170,7 @@ test "storage cleanup between operations prevents accumulation" {
         }
 
         // Unlink to test cleanup
-        var unlink_result = try test_harness.execute_command(&[_][]const u8{ "unlink", workspace_name });
+        var unlink_result = try test_harness.execute_command(&[_][]const u8{ "unlink", "--name", workspace_name });
         defer unlink_result.deinit();
 
         // Unlink should work without storage issues

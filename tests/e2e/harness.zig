@@ -1,11 +1,24 @@
-//! Core E2E test harness for KausalDB binary interface testing.
+//! E2E test harness for KausalDB client-server testing.
 //!
-//! Provides unified utilities for executing the KausalDB binary, managing
-//! test environments, and validating command outputs. Eliminates duplication
-//! across e2e test files and ensures consistent test isolation.
+//! Provides utilities for executing CLI commands and validating responses.
+//! Server lifecycle is managed by the e2e_orchestrator, not by this harness.
 
 const std = @import("std");
 const testing = std.testing;
+const net = std.net;
+
+const log = std.log.scoped(.e2e_harness);
+
+/// Test if server is reachable on given port - fail fast if not
+fn test_server_connection(port: u16) !void {
+    const address = try net.Address.parseIp("127.0.0.1", port);
+    var stream = net.tcpConnectToAddress(address) catch |err| {
+        log.err("Failed to connect to server on port {}: {}", .{ port, err });
+        return error.ServerUnreachable;
+    };
+    defer stream.close();
+    // Connection successful - server is reachable
+}
 
 /// Result of executing a KausalDB command
 pub const CommandResult = struct {
@@ -71,39 +84,29 @@ pub fn process_succeeded(term: std.process.Child.Term) bool {
     };
 }
 
-/// E2E test harness for binary interface testing
 pub const E2EHarness = struct {
     allocator: std.mem.Allocator,
     binary_path: []const u8,
     test_workspace: []const u8,
-    cleanup_paths: std.ArrayList([]const u8),
+    cleanup_paths: std.array_list.Managed([]const u8),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, test_name: []const u8) !Self {
-        // Try to ensure binary exists, build if needed (CI fallback)
-        const relative_binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+        // Binary should already be built by build system before e2e tests run
+        const relative_binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausal" });
         defer allocator.free(relative_binary_path);
         const binary_path = try std.fs.cwd().realpathAlloc(allocator, relative_binary_path);
 
-        // Check if binary exists, if not try to build it
-        std.fs.cwd().access(binary_path, .{}) catch {
-            std.debug.print("Binary not found at {s}, attempting to build...\n", .{binary_path});
-            build_kausaldb_binary(allocator) catch |err| {
-                std.debug.print("Failed to build binary: {}\n", .{err});
-                return err;
-            };
-
-            // Verify the binary was actually built
-            std.fs.cwd().access(binary_path, .{}) catch {
-                std.debug.print("Binary still not found after build attempt at: {s}\n", .{binary_path});
-                return error.BinaryNotFound;
-            };
-            std.debug.print("Binary successfully built at: {s}\n", .{binary_path});
+        // Verify binary exists (build system should have created it)
+        std.fs.cwd().access(binary_path, .{}) catch |err| {
+            log.err("Binary not found at {s}: {}", .{ binary_path, err });
+            return err;
         };
+
         const test_workspace = try create_isolated_workspace(allocator, test_name);
 
-        const cleanup_paths = std.ArrayList([]const u8){};
+        const cleanup_paths = std.array_list.Managed([]const u8).init(allocator);
 
         return Self{
             .allocator = allocator,
@@ -114,71 +117,101 @@ pub const E2EHarness = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // Database state is automatically cleaned up with the test workspace
+        // Clean up file system resources only - no CLI calls during teardown
+        // Server cleanup is handled by e2e test runner restart between runs
 
-        // Clean up all registered paths with robust error handling
         for (self.cleanup_paths.items) |path| {
-            // Skip empty or obviously invalid paths
-            if (path.len == 0) {
-                self.allocator.free(path);
-                continue;
+            if (path.len > 0 and std.fs.path.isAbsolute(path)) {
+                std.fs.deleteTreeAbsolute(path) catch {}; // Best effort cleanup
             }
-
-            // Only attempt cleanup on absolute paths that seem valid
-            if (std.fs.path.isAbsolute(path)) {
-                std.fs.deleteTreeAbsolute(path) catch {}; // Ignore all errors during cleanup
-            }
-
-            // Free the path memory
             self.allocator.free(path);
         }
-        self.cleanup_paths.deinit(self.allocator);
+        self.cleanup_paths.deinit();
 
-        self.allocator.free(self.binary_path);
         std.fs.deleteTreeAbsolute(self.test_workspace) catch {};
+        self.allocator.free(self.binary_path);
         self.allocator.free(self.test_workspace);
     }
 
-    /// Clean up KausalDB database state to prevent SSTable accumulation
-    /// Execute KausalDB command and return structured result
+    /// Execute a KausalDB command and return the result
     pub fn execute_command(self: *Self, args: []const []const u8) !CommandResult {
-        // Build argv array with binary + args
-        var argv_list = std.ArrayList([]const u8){};
-        defer argv_list.deinit(self.allocator);
+        var argv_list = std.array_list.Managed([]const u8).init(self.allocator);
+        defer argv_list.deinit();
 
-        try argv_list.append(self.allocator, self.binary_path);
-        try argv_list.appendSlice(self.allocator, args);
+        try argv_list.append(self.binary_path);
 
-        // Execute using the same pattern as working debug tests
-        // Increase max_output_bytes to handle verbose debug output from successful ingestion
-        const result = try std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = argv_list.items,
-            .cwd = self.test_workspace, // Run in isolated test workspace
-            .max_output_bytes = 4 * 1024 * 1024, // 4MB
-        });
-
-        const exit_code: u8 = switch (result.term) {
-            .Exited => |code| @intCast(code),
-            .Signal => |sig| blk: {
-                std.debug.print("Process terminated with signal: {}\n", .{sig});
-                // Use 255 for signals to stay within u8 range
-                break :blk @as(u8, @intCast(255));
-            },
-            .Stopped => |sig| blk: {
-                std.debug.print("Process stopped with signal: {}\n", .{sig});
-                break :blk @as(u8, @intCast(255));
-            },
-            .Unknown => |code| blk: {
-                std.debug.print("Process terminated with unknown code: {}\n", .{code});
-                break :blk @as(u8, @intCast(@min(code, 255)));
-            },
+        // Check if this command needs server connection
+        // Commands that DON'T need server: help, version, and their flag variants
+        const needs_server = blk: {
+            if (args.len == 0) break :blk false;
+            const first_arg = args[0];
+            if (std.mem.eql(u8, first_arg, "help") or
+                std.mem.eql(u8, first_arg, "version") or
+                std.mem.eql(u8, first_arg, "--help") or
+                std.mem.eql(u8, first_arg, "-h") or
+                std.mem.eql(u8, first_arg, "--version") or
+                std.mem.eql(u8, first_arg, "-v"))
+            {
+                break :blk false;
+            }
+            // Server command with 'status' subcommand also doesn't need connection
+            if (std.mem.eql(u8, first_arg, "server") and args.len > 1 and
+                std.mem.eql(u8, args[1], "status"))
+            {
+                break :blk false;
+            }
+            break :blk true;
         };
+
+        // Only add port for commands that connect to the server
+        if (needs_server) {
+            if (std.posix.getenv("KAUSAL_E2E_TEST_PORT")) |port_env| {
+                // Test connection immediately - fail fast if server unreachable
+                const port = std.fmt.parseInt(u16, port_env, 10) catch return error.InvalidPort;
+                test_server_connection(port) catch |err| {
+                    const cmd = if (args.len > 0) args[0] else "unknown";
+                    log.err("Server connection test failed for command: {s}", .{cmd});
+                    return err;
+                };
+
+                try argv_list.append("--port");
+                try argv_list.append(port_env);
+            }
+        }
+
+        // Then add the command and its arguments
+        try argv_list.appendSlice(args);
+
+        if (args.len > 0) {
+            log.info("Running: {s}", .{args[0]});
+        }
+
+        var process = std.process.Child.init(argv_list.items, self.allocator);
+        process.stdout_behavior = .Pipe;
+        process.stderr_behavior = .Pipe;
+        process.stdin_behavior = .Close;
+        process.cwd = self.test_workspace;
+
+        try process.spawn();
+
+        const stdout = if (process.stdout) |pipe|
+            try pipe.readToEndAlloc(self.allocator, 4 * 1024 * 1024)
+        else
+            try self.allocator.dupe(u8, "");
+
+        const stderr = if (process.stderr) |pipe|
+            try pipe.readToEndAlloc(self.allocator, 1 * 1024 * 1024)
+        else
+            try self.allocator.dupe(u8, "");
+
+        const term = try process.wait();
+
+        const exit_code = safe_exit_code(term);
 
         return CommandResult{
             .exit_code = exit_code,
-            .stdout = result.stdout,
-            .stderr = result.stderr,
+            .stdout = stdout,
+            .stderr = stderr,
             .allocator = self.allocator,
         };
     }
@@ -192,12 +225,12 @@ pub const E2EHarness = struct {
         const full_cmd = try std.fmt.allocPrint(arena_allocator, cmd_fmt, args);
 
         // Split command into argv
-        var argv = std.ArrayList([]const u8){};
-        defer argv.deinit(arena_allocator);
+        var argv = std.array_list.Managed([]const u8).init(arena_allocator);
+        defer argv.deinit();
 
         var arg_iter = std.mem.tokenizeAny(u8, full_cmd, " \t");
         while (arg_iter.next()) |arg| {
-            try argv.append(arena_allocator, arg);
+            try argv.append(arg);
         }
 
         if (argv.items.len == 0) return error.EmptyCommand;
@@ -220,20 +253,59 @@ pub const E2EHarness = struct {
         return try self.allocator.dupe(u8, result.stdout);
     }
 
-    /// Execute workspace command (link, unlink, sync)
+    /// Execute workspace command - simplified, explicit method
     pub fn execute_workspace_command(self: *Self, comptime fmt: []const u8, args: anytype) !CommandResult {
-        const cmd_string = try std.fmt.allocPrint(self.allocator, fmt, args);
-        defer self.allocator.free(cmd_string);
+        // Build command arguments explicitly
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
 
-        var cmd_parts = std.mem.splitSequence(u8, cmd_string, " ");
-        var cmd_args = std.ArrayList([]const u8){};
-        defer cmd_args.deinit(self.allocator);
+        const cmd_string = try std.fmt.allocPrint(arena.allocator(), fmt, args);
 
-        while (cmd_parts.next()) |part| {
-            if (part.len > 0) try cmd_args.append(self.allocator, part);
+        // Simple argument splitting on spaces (tests should use simple arguments)
+        var cmd_args = std.array_list.Managed([]const u8).init(arena.allocator());
+        defer cmd_args.deinit();
+        var arg_iter = std.mem.tokenizeAny(u8, cmd_string, " \t");
+        while (arg_iter.next()) |arg| {
+            try cmd_args.append(arg);
         }
 
         return self.execute_command(cmd_args.items);
+    }
+
+    pub const LinkedProject = struct {
+        project_path: []const u8,
+        workspace_name: []const u8,
+
+        pub fn deinit(self: *const LinkedProject, allocator: std.mem.Allocator) void {
+            allocator.free(self.workspace_name);
+        }
+    };
+
+    /// Create and automatically link a test project with a unique workspace name
+    /// Returns both project path and workspace name for subsequent operations
+    pub fn auto_link_project(self: *Self, project_name: []const u8) !LinkedProject {
+        const project_path = try self.create_test_project(project_name);
+
+        // Generate truly unique workspace name with additional randomness
+        const timestamp = std.time.timestamp();
+        var prng = std.Random.DefaultPrng.init(@as(u64, @bitCast(timestamp)));
+        const random_suffix = prng.random().int(u32);
+        const test_prefix = std.fs.path.basename(self.test_workspace);
+        const workspace_name = try std.fmt.allocPrint(self.allocator, "{s}_{s}_{d}", .{ test_prefix, project_name, random_suffix });
+
+        var link_result = try self.execute_command(&[_][]const u8{ "link", "--path", project_path, "--name", workspace_name });
+        defer link_result.deinit();
+
+        if (link_result.exit_code != 0) {
+            std.debug.print("Link command failed. STDERR: {s}\n", .{link_result.stderr});
+            self.allocator.free(workspace_name);
+            return error.CommandFailed;
+        }
+
+        return LinkedProject{
+            .project_path = project_path,
+            .workspace_name = workspace_name,
+        };
     }
 
     /// Create test project with realistic code structure
@@ -242,7 +314,7 @@ pub const E2EHarness = struct {
 
         // Don't register paths ending with "." for cleanup as they can't be deleted safely
         if (!std.mem.endsWith(u8, project_path, "/.") and !std.mem.eql(u8, std.fs.path.basename(project_path), ".")) {
-            try self.cleanup_paths.append(self.allocator, project_path);
+            try self.cleanup_paths.append(project_path);
         }
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
@@ -341,6 +413,33 @@ pub const E2EHarness = struct {
         return project_path;
     }
 
+    /// Create a test file with custom content
+    pub fn create_test_file_with_content(self: *Self, project_name: []const u8, content: []const u8) ![]const u8 {
+        const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
+
+        // Register for cleanup
+        if (!std.mem.endsWith(u8, project_path, "/.") and !std.mem.eql(u8, std.fs.path.basename(project_path), ".")) {
+            try self.cleanup_paths.append(project_path);
+        }
+
+        std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {}, // OK if it already exists
+            else => return err,
+        };
+
+        // Create main.zig with the custom content
+        const main_zig_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_path, "main.zig" });
+        defer self.allocator.free(main_zig_path);
+
+        {
+            const file = try std.fs.createFileAbsolute(main_zig_path, .{});
+            defer file.close();
+            try file.writeAll(content);
+        }
+
+        return project_path;
+    }
+
     /// Validate JSON output format
     pub fn validate_json_output(self: *Self, json_string: []const u8) !std.json.Parsed(std.json.Value) {
         return std.json.parseFromSlice(std.json.Value, self.allocator, json_string, .{});
@@ -357,7 +456,7 @@ pub const E2EHarness = struct {
     pub fn create_enhanced_test_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(self.allocator, project_path);
+        try self.cleanup_paths.append(project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
@@ -486,7 +585,7 @@ pub const E2EHarness = struct {
     pub fn create_large_test_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(self.allocator, project_path);
+        try self.cleanup_paths.append(project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
@@ -588,7 +687,7 @@ pub const E2EHarness = struct {
     pub fn create_substantial_content_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(self.allocator, project_path);
+        try self.cleanup_paths.append(project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
@@ -654,25 +753,6 @@ pub const E2EHarness = struct {
     }
 };
 
-/// Build KausalDB binary to ensure latest version for testing
-fn build_kausaldb_binary(allocator: std.mem.Allocator) !void {
-    // Create a temporary harness just for the shell command
-    var temp_harness = E2EHarness{
-        .allocator = allocator,
-        .binary_path = "",
-        .test_workspace = "",
-        .cleanup_paths = std.ArrayList([]const u8){},
-    };
-
-    _ = temp_harness.execute_shell_command("./zig/zig build", .{}) catch |err| switch (err) {
-        error.CommandFailed => {
-            std.debug.print("Build failed: ./zig/zig build command failed\n", .{});
-            return error.BuildFailed;
-        },
-        else => return err,
-    };
-}
-
 /// Create isolated workspace directory for test execution
 fn create_isolated_workspace(allocator: std.mem.Allocator, test_name: []const u8) ![]const u8 {
     const timestamp = std.time.timestamp();
@@ -687,8 +767,7 @@ fn create_isolated_workspace(allocator: std.mem.Allocator, test_name: []const u8
     return workspace_name;
 }
 
-// Tests for the harness itself
-test "E2EHarness basic initialization" {
+test "harness basic initialization" {
     var harness = try E2EHarness.init(testing.allocator, "harness_test");
     defer harness.deinit();
 
@@ -705,7 +784,7 @@ test "E2EHarness basic initialization" {
     };
 }
 
-test "E2EHarness command execution" {
+test "harness command execution" {
     var harness = try E2EHarness.init(testing.allocator, "cmd_test");
     defer harness.deinit();
 
@@ -716,7 +795,7 @@ test "E2EHarness command execution" {
     try testing.expect(result.contains_output("KausalDB"));
 }
 
-test "E2EHarness test project creation" {
+test "harness test project creation" {
     var harness = try E2EHarness.init(testing.allocator, "project_test");
     defer harness.deinit();
 
