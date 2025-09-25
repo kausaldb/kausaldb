@@ -126,7 +126,7 @@ jobs:
       - name: Build KausalDB Binary
         run: |
           echo "Building KausalDB binary..."
-          ./zig/zig build -Doptimize=ReleaseFast
+          ./zig/zig build --release=fast
 
           echo "Verifying binary was created and works..."
           ./zig-out/bin/kausaldb --version
@@ -140,7 +140,7 @@ jobs:
           # Run benchmarks with reduced iterations for CI
           # Show output directly to avoid hiding errors
           ./zig/zig build bench \
-            -Doptimize=ReleaseFast \
+            --release=fast \
             -Dbench-iterations=5000 \
             -Dbench-warmup=500 \
             $(test -f bench-baseline.json && echo "-Dbench-baseline=bench-baseline.json" || echo "") \
@@ -262,7 +262,7 @@ jobs:
       - name: Build Release Binary
         run: |
           ./zig/zig build \
-            -Doptimize=ReleaseSafe \
+            --release=safe \
             -Dtarget=${{ matrix.os == 'ubuntu-latest' && 'x86_64-linux' || 'x86_64-macos' }}
 
       - name: Test Release Binary
