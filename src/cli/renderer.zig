@@ -108,7 +108,7 @@ fn render_general_help(ctx: *RenderContext) !void {
     try ctx.write_colored(RenderContext.Color.yellow, "Workspace Commands:\n");
     try ctx.write("  link --path <path> --name <name>  Link a codebase to workspace\n");
     try ctx.write("  unlink --name <name>              Remove a codebase from workspace\n");
-    try ctx.write("  sync [--name <name>]              Sync workspace with filesystem\n\n");
+    try ctx.write("  sync [<name>]                     Sync workspace with filesystem\n\n");
 
     try ctx.write_colored(RenderContext.Color.dim, "Run 'kausal help <command>' for detailed information\n");
 }
@@ -188,6 +188,29 @@ fn render_command_help(ctx: *RenderContext, command: []const u8) !void {
         try ctx.write("Examples:\n");
         try ctx.write("  kausal link --path /path/to/project\n");
         try ctx.write("  kausal link --path /path/to/project --name myproject\n");
+    } else if (std.mem.eql(u8, command, "sync")) {
+        try ctx.write_colored(RenderContext.Color.bold, "kausal sync - Sync workspace with filesystem\n\n");
+        try ctx.write("Usage: kausal sync [<name>] [options]\n\n");
+        try ctx.write("Arguments:\n");
+        try ctx.write("  <name>             Workspace name (optional, syncs all if omitted)\n\n");
+        try ctx.write("Options:\n");
+        try ctx.write("  --force            Force resync even if no changes detected\n");
+        try ctx.write("  --all              Sync all workspaces (same as omitting name)\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n\n");
+        try ctx.write("Examples:\n");
+        try ctx.write("  kausal sync\n");
+        try ctx.write("  kausal sync myproject\n");
+        try ctx.write("  kausal sync --force --all\n");
+    } else if (std.mem.eql(u8, command, "unlink")) {
+        try ctx.write_colored(RenderContext.Color.bold, "kausal unlink - Remove a codebase from workspace\n\n");
+        try ctx.write("Usage: kausal unlink --name <name> [options]\n\n");
+        try ctx.write("Required Arguments:\n");
+        try ctx.write("  --name <name>      Name of workspace to remove\n\n");
+        try ctx.write("Options:\n");
+        try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n\n");
+        try ctx.write("Examples:\n");
+        try ctx.write("  kausal unlink --name myproject\n");
+        try ctx.write("  kausal unlink --name backend --format json\n");
     } else {
         try ctx.writer.interface.print("No help available for command: {s}\n", .{command});
     }
