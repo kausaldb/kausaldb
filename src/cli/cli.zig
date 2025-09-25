@@ -115,8 +115,48 @@ pub const CLI = struct {
                 try renderer.render_error(&self.render_ctx, "Use 'kausal-server' to start the server");
                 try self.render_ctx.flush();
             },
-            .stop, .restart => {
-                try renderer.render_error(&self.render_ctx, "Server management not yet implemented");
+            .stop => {
+                const result = std.process.Child.run(.{
+                    .allocator = self.allocator,
+                    .argv = &[_][]const u8{ "./zig-out/bin/kausal-server", "stop" },
+                }) catch |err| {
+                    const msg = try std.fmt.allocPrint(self.allocator, "Failed to stop server: {}", .{err});
+                    defer self.allocator.free(msg);
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try self.render_ctx.flush();
+                    return;
+                };
+                defer self.allocator.free(result.stdout);
+                defer self.allocator.free(result.stderr);
+
+                if (result.term.Exited == 0) {
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(true, "Server stopped"));
+                } else {
+                    const msg = if (result.stderr.len > 0) result.stderr else "Failed to stop server";
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                }
+                try self.render_ctx.flush();
+            },
+            .restart => {
+                const result = std.process.Child.run(.{
+                    .allocator = self.allocator,
+                    .argv = &[_][]const u8{ "./zig-out/bin/kausal-server", "restart" },
+                }) catch |err| {
+                    const msg = try std.fmt.allocPrint(self.allocator, "Failed to restart server: {}", .{err});
+                    defer self.allocator.free(msg);
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try self.render_ctx.flush();
+                    return;
+                };
+                defer self.allocator.free(result.stdout);
+                defer self.allocator.free(result.stderr);
+
+                if (result.term.Exited == 0) {
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(true, "Server restarted"));
+                } else {
+                    const msg = if (result.stderr.len > 0) result.stderr else "Failed to restart server";
+                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                }
                 try self.render_ctx.flush();
             },
         }
@@ -242,12 +282,27 @@ pub const CLI = struct {
         try self.ensure_connected();
 
         // Set source and target based on trace direction
-        // callees: find what cmd.target calls (target is source)
-        // callers: find what calls cmd.target (target is target)
-        const source = if (cmd.direction == .callees) cmd.target else "*";
-        const target = if (cmd.direction == .callers) cmd.target else "*";
+        // callees: find what cmd.target calls (pass target as source)
+        // callers: find what calls cmd.target (pass target as target)
+        const source = if (cmd.direction == .callees) cmd.target else "";
+        const target = if (cmd.direction == .callers) cmd.target else "";
 
-        const response = try self.client.?.trace_paths(source, target, cmd.max_depth);
+        const response = self.client.?.trace_paths(source, target, cmd.max_depth) catch |err| {
+            const direction_str = if (cmd.direction == .callers) "callers of" else "callees of";
+            const msg = try std.fmt.allocPrint(
+                self.allocator,
+                "Failed to trace {s} '{s}': {}",
+                .{ direction_str, cmd.target, err },
+            );
+            defer self.allocator.free(msg);
+
+            try renderer.render_operation_result(
+                &self.render_ctx,
+                protocol.OperationResponse.init(false, msg),
+            );
+            try self.render_ctx.flush();
+            return;
+        };
 
         if (response.path_count > 0) {
             const direction_str = if (cmd.direction == .callers) "callers of" else "callees of";

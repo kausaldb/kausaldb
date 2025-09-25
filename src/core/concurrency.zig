@@ -15,6 +15,11 @@ pub fn init() void {
     main_thread_id = std.Thread.getCurrentId();
 }
 
+/// Reset the main thread ID to the current thread. Used after fork() in daemon processes.
+pub fn reset_main_thread() void {
+    main_thread_id = std.Thread.getCurrentId();
+}
+
 /// Assert that we're running on the main KausalDB thread.
 /// In debug builds, this provides immediate feedback about threading violations.
 /// In release builds, this compiles to nothing.

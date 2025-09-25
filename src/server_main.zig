@@ -644,26 +644,40 @@ fn daemonize() !void {
     if (pid > 0) std.process.exit(0);
 
     // Child process continues as daemon
+    // Reset main thread ID for the child process
+    concurrency.reset_main_thread();
+
     // Create new session to detach from terminal
     _ = std.posix.setsid() catch |err| {
         log.err("Failed to create new session: {}", .{err});
         return err;
     };
 
-    // Change working directory to root to avoid holding directory handles
-    std.posix.chdir("/") catch |err| {
-        log.warn("Failed to change working directory to root: {}", .{err});
-    };
+    // Keep original working directory to avoid filesystem permission issues
+    // when creating data files and directories
 
     // Close standard file descriptors to detach from terminal
     std.posix.close(std.posix.STDIN_FILENO);
     std.posix.close(std.posix.STDOUT_FILENO);
     std.posix.close(std.posix.STDERR_FILENO);
 
-    // Redirect to /dev/null to avoid issues with code expecting these to exist
+    // Redirect stdin to /dev/null
     _ = std.posix.open("/dev/null", .{ .ACCMODE = .RDONLY }, 0) catch {};
-    _ = std.posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {};
-    _ = std.posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {};
+
+    // Redirect stdout and stderr to log file
+    const log_fd = std.posix.open("/tmp/kausaldb.log", .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, 0o644) catch blk: {
+        // Fallback to /dev/null if log file can't be created
+        break :blk std.posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch return;
+    };
+
+    // Duplicate log_fd to stdout and stderr
+    _ = std.posix.dup2(log_fd, std.posix.STDOUT_FILENO) catch {};
+    _ = std.posix.dup2(log_fd, std.posix.STDERR_FILENO) catch {};
+
+    // Close the original log_fd if it's not stdout or stderr
+    if (log_fd > std.posix.STDERR_FILENO) {
+        std.posix.close(log_fd);
+    }
 }
 
 /// Write all data to a stream, handling WouldBlock errors and partial writes
