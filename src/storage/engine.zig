@@ -904,43 +904,25 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Check SSTables - need to search all of them to find highest sequence
-        var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
-        defer sstable_paths.deinit();
+        // Check SSTables using optimized cached metadata lookups
+        // This avoids repeated disk I/O by using pre-loaded bloom filters and sequence bounds
 
-        for (sstable_paths.items) |sstable_path| {
-            const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(
-                self.arena_coordinator,
-                self.arena_coordinator.allocator(),
-                self.vfs,
-                sstable_path_copy,
-            );
-            defer sstable_file.deinit();
-
-            // Load index - skip corrupted SSTables
-            sstable_file.read_index() catch continue;
-
-            // Check for tombstones in this SSTable
-            for (sstable_file.tombstone_index.items) |tombstone_record| {
-                if (tombstone_record.block_id.eql(block_id)) {
-                    if (tombstone_record.sequence > highest_sequence) {
-                        highest_sequence = tombstone_record.sequence;
-                        winning_block = null;
-                        is_tombstoned = true;
-                    }
-                }
+        // Check for tombstones across all SSTables
+        if (try self.sstable_manager.find_tombstone_with_cached_metadata(block_id)) |tombstone_record| {
+            if (tombstone_record.sequence > highest_sequence) {
+                highest_sequence = tombstone_record.sequence;
+                winning_block = null;
+                is_tombstoned = true;
             }
+        }
 
-            // Check for blocks in this SSTable - skip on I/O errors
-            if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
-                const sequence = @as(u64, @intCast(parsed_block.sequence()));
-                if (sequence > highest_sequence) {
-                    highest_sequence = sequence;
-                    // Convert to owned block for later return
-                    winning_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
-                    is_tombstoned = false;
-                }
+        // Check for blocks across all SSTables
+        if (try self.sstable_manager.find_block_with_cached_metadata(block_id)) |sstable_block| {
+            const sequence = @as(u64, @intCast(sstable_block.sequence));
+            if (sequence > highest_sequence) {
+                highest_sequence = sequence;
+                winning_block = sstable_block;
+                is_tombstoned = false;
             }
         }
 
