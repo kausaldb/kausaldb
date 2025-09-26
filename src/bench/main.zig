@@ -12,6 +12,10 @@ const e2e_bench = @import("e2e_workload_bench.zig");
 
 const output = @import("output.zig");
 
+pub const std_options: std.Options = .{
+    .log_level = @enumFromInt(@intFromEnum(build_options.log_level)),
+};
+
 const Timer = std.time.Timer;
 const Allocator = std.mem.Allocator;
 
@@ -49,6 +53,8 @@ pub const BenchmarkResult = struct {
     median_ns: u64,
     min_ns: u64,
     max_ns: u64,
+    p95_ns: u64,
+    p99_ns: u64,
     std_dev_ns: u64,
     ops_per_second: f64,
     baseline_mean_ns: ?u64 = null,
@@ -62,9 +68,12 @@ pub const BenchmarkResult = struct {
         const mean_us = format_time_us(self.mean_ns);
         const min_us = format_time_us(self.min_ns);
         const max_us = format_time_us(self.max_ns);
+        const p95_us = format_time_us(self.p95_ns);
+        const p99_us = format_time_us(self.p99_ns);
 
         output.print_benchmark_results(allocator, "  {s}:\n", .{self.name});
         output.print_benchmark_results(allocator, "    Mean: {d:.2}μs  Min: {d:.2}μs  Max: {d:.2}μs\n", .{ mean_us, min_us, max_us });
+        output.print_benchmark_results(allocator, "    P95: {d:.2}μs  P99: {d:.2}μs\n", .{ p95_us, p99_us });
         output.print_benchmark_results(allocator, "    Ops/sec: {d:.0}\n", .{self.ops_per_second});
 
         if (self.regression_percent) |regression| {
@@ -302,8 +311,8 @@ pub fn main() !void {
             output.write_status("Component not implemented yet\n");
         },
         .all => {
-            output.write_status("Running realistic end-to-end workload benchmark...\n");
-            try e2e_bench.run_e2e_benchmark_with_harness(&harness);
+            const storage = @import("storage.zig");
+            try storage.run_benchmarks(&harness);
         },
     }
 

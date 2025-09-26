@@ -100,30 +100,30 @@ const E2EWorkloadBench = struct {
     config: BenchmarkConfig,
     temp_dir: std.testing.TmpDir,
     binary_path: []const u8,
+    server_path: []const u8,
+    server_process: ?std.process.Child,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, config: BenchmarkConfig) !Self {
-        const relative_binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausaldb" });
+        const relative_binary_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausal" });
         defer allocator.free(relative_binary_path);
         const binary_path = try std.fs.cwd().realpathAlloc(allocator, relative_binary_path);
+
+        const relative_server_path = try std.fs.path.join(allocator, &[_][]const u8{ "zig-out", "bin", "kausal-server" });
+        defer allocator.free(relative_server_path);
+        const server_path = try std.fs.cwd().realpathAlloc(allocator, relative_server_path);
 
         std.fs.cwd().access(binary_path, .{}) catch |err| {
             output.print_error(allocator, "ERROR: KausalDB binary not found at {s}\n", .{binary_path});
             output.print_error(allocator, "Error details: {}\n", .{err});
-            output.print_error(allocator, "Current working directory: {s}\n", .{std.fs.cwd().realpathAlloc(allocator, ".") catch "unknown"});
+            return error.BinaryNotFound;
+        };
 
-            if (std.fs.cwd().openDir("zig-out/bin", .{})) |bin_dir| {
-                output.print_error(allocator, "Contents of zig-out/bin:\n", .{});
-                var iterator = bin_dir.iterate();
-                while (iterator.next() catch null) |entry| {
-                    output.print_error(allocator, "  - {s} ({s})\n", .{ entry.name, @tagName(entry.kind) });
-                }
-            } else |_| {
-                output.print_error(allocator, "zig-out/bin directory does not exist\n", .{});
-            }
-
-            output.print_error(allocator, "Run './zig/zig build' first to build the binary\n", .{});
+        std.fs.cwd().access(server_path, .{}) catch |err| {
+            output.print_error(allocator, "ERROR: KausalDB server binary not found at {s}\n", .{server_path});
+            output.print_error(allocator, "Error details: {}\n", .{err});
+            output.print_error(allocator, "Run './zig/zig build' first to build all binaries\n", .{});
             return error.BinaryNotFound;
         };
 
@@ -150,12 +150,21 @@ const E2EWorkloadBench = struct {
             .config = config,
             .temp_dir = temp_dir,
             .binary_path = binary_path,
+            .server_path = server_path,
+            .server_process = null,
         };
     }
 
     pub fn deinit(self: *Self) void {
+        // Stop server if it's running
+        if (self.server_process) |*process| {
+            _ = process.kill() catch {};
+            _ = process.wait() catch {};
+        }
+
         self.temp_dir.cleanup();
         self.allocator.free(self.binary_path);
+        self.allocator.free(self.server_path);
     }
 
     fn create_test_project(self: *Self) ![]const u8 {
@@ -323,6 +332,43 @@ const E2EWorkloadBench = struct {
         }
     }
 
+    /// Start the KausalDB server for benchmarking
+    fn start_server(self: *Self) !void {
+        output.print_status(self.allocator, "Starting KausalDB server for benchmarking...\n", .{});
+
+        // Create a temp data directory for the server
+        try self.temp_dir.dir.makeDir("server_data");
+        const server_data_path = try self.temp_dir.dir.realpathAlloc(self.allocator, "server_data");
+        defer self.allocator.free(server_data_path);
+
+        // Start server as background process
+        var server_process = std.process.Child.init(&[_][]const u8{
+            self.server_path,
+            "start",
+            "--data-dir",
+            server_data_path,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "3838",
+            "--foreground", // Run in foreground so we can manage it
+        }, self.allocator);
+
+        server_process.stdin_behavior = .Ignore;
+        server_process.stdout_behavior = .Ignore; // Ignore output to avoid blocking
+        server_process.stderr_behavior = .Ignore;
+
+        try server_process.spawn();
+        self.server_process = server_process;
+
+        // Wait for server to be ready
+        std.Thread.sleep(3 * std.time.ns_per_s); // 3 seconds for startup
+
+        if (self.config.verbose) {
+            output.print_verbose(self.allocator, "Server started successfully (PID: {})\n", .{server_process.id});
+        }
+    }
+
     /// Run the complete mixed-workload benchmark
     pub fn run_benchmark(self: *Self) !BenchmarkResults {
         output.print_benchmark_header(self.allocator, "E2E Workload");
@@ -343,10 +389,16 @@ const E2EWorkloadBench = struct {
         };
         output.print_benchmark_config(self.allocator, &config_items);
 
+        // Start the server before running benchmarks
+        try self.start_server();
+
         output.print_status(self.allocator, "Creating test project with {d} files, {d} functions per file...\n", .{ self.config.codebase_size, self.config.functions_per_file });
 
         const project_path = try self.create_test_project();
         defer self.allocator.free(project_path);
+
+        var connectivity_sampler = LatencySampler.init(self.allocator);
+        defer connectivity_sampler.deinit();
 
         var ingestion_sampler = LatencySampler.init(self.allocator);
         defer ingestion_sampler.deinit();
@@ -360,13 +412,20 @@ const E2EWorkloadBench = struct {
         var trace_sampler = LatencySampler.init(self.allocator);
         defer trace_sampler.deinit();
 
-        // Phase 1: Ingestion benchmark (link + sync)
-        output.print_phase_header(self.allocator, "ingestion pipeline");
+        // Phase 1: Server connectivity benchmark
+        output.print_phase_header(self.allocator, "server connectivity");
 
-        try self.execute_timed_command(&[_][]const u8{ "link", project_path }, &ingestion_sampler);
-        try self.execute_timed_command(&[_][]const u8{"sync"}, &ingestion_sampler);
+        try self.execute_timed_command(&[_][]const u8{"ping"}, &connectivity_sampler);
+        try self.execute_timed_command(&[_][]const u8{"status"}, &connectivity_sampler);
 
-        // Phase 2: Mixed query benchmark
+        // Phase 2: Ingestion benchmark - link and sync the test project
+        output.print_phase_header(self.allocator, "ingestion (link + sync)");
+
+        const project_name = "kausal_bench_project";
+        try self.execute_timed_command(&[_][]const u8{ "link", "--path", project_path, "--name", project_name }, &ingestion_sampler);
+        try self.execute_timed_command(&[_][]const u8{ "sync", project_name }, &ingestion_sampler);
+
+        // Phase 3: Mixed query benchmark
         const phase_header = try std.fmt.allocPrint(self.allocator, "mixed query workload ({d} operations per type)", .{self.config.operations_per_type});
         defer self.allocator.free(phase_header);
         output.print_phase_header(self.allocator, phase_header);
@@ -376,7 +435,7 @@ const E2EWorkloadBench = struct {
             const func_name = try std.fmt.allocPrint(self.allocator, "process_data_{d}", .{op_idx % self.config.functions_per_file});
             defer self.allocator.free(func_name);
 
-            try self.execute_timed_command(&[_][]const u8{ "find", "function", func_name }, &find_sampler);
+            try self.execute_timed_command(&[_][]const u8{ "find", "--type", "function", "--name", func_name }, &find_sampler);
         }
 
         op_idx = 0;
@@ -384,18 +443,19 @@ const E2EWorkloadBench = struct {
             const file_name = try std.fmt.allocPrint(self.allocator, "module_{d}.zig", .{op_idx % self.config.codebase_size});
             defer self.allocator.free(file_name);
 
-            try self.execute_timed_command(&[_][]const u8{ "show", "file", file_name }, &show_sampler);
+            try self.execute_timed_command(&[_][]const u8{ "show", "--relation", "callers", "--target", file_name }, &show_sampler);
         }
 
         op_idx = 0;
         while (op_idx < self.config.operations_per_type) : (op_idx += 1) {
-            const func_name = try std.fmt.allocPrint(self.allocator, "process_data_{d}", .{op_idx % 3}); // Focus on heavily used functions
+            const func_name = try std.fmt.allocPrint(self.allocator, "process_data_{d}", .{op_idx % 3});
             defer self.allocator.free(func_name);
 
-            try self.execute_timed_command(&[_][]const u8{ "trace", "callees", func_name, "--depth", "3" }, &trace_sampler);
+            try self.execute_timed_command(&[_][]const u8{ "trace", "--direction", "outgoing", "--target", func_name }, &trace_sampler);
         }
 
         return BenchmarkResults{
+            .connectivity = connectivity_sampler.calculate_percentiles(),
             .ingestion = ingestion_sampler.calculate_percentiles(),
             .find_queries = find_sampler.calculate_percentiles(),
             .show_queries = show_sampler.calculate_percentiles(),
@@ -405,6 +465,7 @@ const E2EWorkloadBench = struct {
 };
 
 const BenchmarkResults = struct {
+    connectivity: PercentileStats,
     ingestion: PercentileStats,
     find_queries: PercentileStats,
     show_queries: PercentileStats,
@@ -413,9 +474,13 @@ const BenchmarkResults = struct {
     pub fn print_results(self: BenchmarkResults, allocator: std.mem.Allocator) void {
         output.print_results_header();
 
+        const connectivity_p50_ms = @as(f64, @floatFromInt(self.connectivity.p50_ns)) / 1_000_000.0;
+        const connectivity_p95_ms = @as(f64, @floatFromInt(self.connectivity.p95_ns)) / 1_000_000.0;
+        output.print_benchmark_results(allocator, "Connectivity (ping + status): P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ connectivity_p50_ms, connectivity_p95_ms, self.connectivity.samples });
+
         const ingestion_p50_ms = @as(f64, @floatFromInt(self.ingestion.p50_ns)) / 1_000_000.0;
         const ingestion_p95_ms = @as(f64, @floatFromInt(self.ingestion.p95_ns)) / 1_000_000.0;
-        output.print_benchmark_results(allocator, "Ingestion (link + sync): P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ ingestion_p50_ms, ingestion_p95_ms, self.ingestion.samples });
+        output.print_benchmark_results(allocator, "Ingestion (link + sync):      P50 {d:.1}ms, P95 {d:.1}ms ({} samples)\n", .{ ingestion_p50_ms, ingestion_p95_ms, self.ingestion.samples });
 
         const find_p50_ms = @as(f64, @floatFromInt(self.find_queries.p50_ns)) / 1_000_000.0;
         const find_p95_ms = @as(f64, @floatFromInt(self.find_queries.p95_ns)) / 1_000_000.0;
@@ -493,13 +558,24 @@ pub fn run_e2e_benchmark_with_harness(harness: anytype) !void {
     const BenchmarkResult = main.BenchmarkResult;
 
     try harness.add_result(BenchmarkResult{
+        .name = "e2e_connectivity",
+        .iterations = @intCast(results.connectivity.samples),
+        .mean_ns = results.connectivity.p50_ns,
+        .median_ns = results.connectivity.p50_ns,
+        .min_ns = results.connectivity.min_ns,
+        .max_ns = results.connectivity.max_ns,
+        .std_dev_ns = 0,
+        .ops_per_second = if (results.connectivity.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.connectivity.p50_ns)) else 0,
+    });
+
+    try harness.add_result(BenchmarkResult{
         .name = "e2e_ingestion",
         .iterations = @intCast(results.ingestion.samples),
-        .mean_ns = results.ingestion.p50_ns, // Use median as mean for robust comparison
+        .mean_ns = results.ingestion.p50_ns,
         .median_ns = results.ingestion.p50_ns,
         .min_ns = results.ingestion.min_ns,
         .max_ns = results.ingestion.max_ns,
-        .std_dev_ns = 0, // Not calculated in e2e benchmark
+        .std_dev_ns = 0,
         .ops_per_second = if (results.ingestion.p50_ns > 0) 1_000_000_000.0 / @as(f64, @floatFromInt(results.ingestion.p50_ns)) else 0,
     });
 

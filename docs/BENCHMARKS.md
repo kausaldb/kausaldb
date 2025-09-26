@@ -1,242 +1,184 @@
-# Benchmarks
+# KausalDB Performance Benchmarks
 
-Performance measurements from actual implementation. All numbers from development hardware (M1 MacBook Pro) with production settings enabled.
+Performance measurements from the actual implementation running on M1 MacBook Pro with ReleaseSafe build mode.
 
-## Core Operations
+## Current Performance (September 2025)
 
-### Storage Engine
+### Storage Engine Operations
 
-| Operation         | P50   | P95   | P99   | Throughput  | Memory/Op |
-| ----------------- | ----- | ----- | ----- | ----------- | --------- |
-| Block Write       | 42µs  | 68µs  | 152µs | 14.6K ops/s | 1.6KB     |
-| Block Read (hot)  | 23ns  | 45ns  | 89ns  | 41M ops/s   | 0B        |
-| Block Read (cold) | 12µs  | 18µs  | 45µs  | 83K ops/s   | 0B        |
-| Block Delete      | 2.8µs | 3.2µs | 4.1µs | 357K ops/s  | 0B        |
-| Edge Insert       | 1.2µs | 1.8µs | 2.4µs | 833K ops/s  | 128B      |
-| Edge Lookup       | 89ns  | 134ns | 267ns | 11M ops/s   | 0B        |
+| Operation             | Mean Time | Min Time | Max Time | Iterations | Notes                    |
+| --------------------- | --------- | -------- | -------- | ---------- | ------------------------ |
+| Block Write           | 0.88μs    | 0.46μs   | 42.58μs  | 1,000      | Write to memtable + WAL  |
+| Block Read (memtable) | 0.05μs    | 0.00μs   | 0.21μs   | 1,000      | Memory access            |
+| Block Read (SSTable)  | 0.02μs    | 0.00μs   | 0.17μs   | 50         | Bloom filter + disk read |
+| Memtable Flush        | 752.78μs  | 90.54μs  | 5.96ms   | 10         | Background operation     |
+| Edge Insert           | 1.26μs    | 0.92μs   | 4.50μs   | 1,000      | Validation + WAL + index |
+| Edge Lookup           | 0.04μs    | 0.00μs   | 0.13μs   | 1,000      | Graph index access       |
+| Graph Traversal       | 0.10μs    | 0.04μs   | 0.17μs   | 1,000      | Single hop with bounds   |
 
-### Graph Operations
+### What Each Benchmark Measures
 
-| Operation          | P50   | P95   | P99   | Throughput | Notes          |
-| ------------------ | ----- | ----- | ----- | ---------- | -------------- |
-| 1-hop traversal    | 130ns | 189ns | 312ns | 7.7M ops/s | From cache     |
-| 3-hop traversal    | 890ns | 1.2µs | 2.1µs | 1.1M ops/s | From cache     |
-| Reverse traversal  | 145ns | 210ns | 389ns | 6.9M ops/s | Incoming edges |
-| Filtered traversal | 234ns | 378ns | 623ns | 4.3M ops/s | Type filter    |
+**Block Write**
 
-### Compaction
+- Creates test block in memory
+- Calls `storage.put_block()` which writes to memtable and WAL
+- Measures time from function entry to return
 
-| Operation      | Throughput | Write Amp | Space Amp | CPU Usage |
-| -------------- | ---------- | --------- | --------- | --------- |
-| L0→L1 Merge    | 87MB/s     | 2.3x      | 1.1x      | 45%       |
-| Size-tiered    | 94MB/s     | 2.1x      | 1.2x      | 38%       |
-| Manual compact | 102MB/s    | 1.0x      | 1.0x      | 52%       |
+**Block Read (memtable)**
 
-## Memory Characteristics
+- Pre-populates storage with test blocks (stored in memtable)
+- Calls `storage.find_block()` which searches memtable
+- Measures memory-based lookup time
 
-### Per-Operation Overhead
+**Block Read (SSTable)**
 
-```
-Block Write:
-  - Block content: ~500B (average)
-  - Metadata: 256B
-  - Index entry: 64B
-  - Edge entries: 128B × N edges
-  - WAL entry: 64B header + payload
-  Total: ~1.6KB typical
+- Pre-populates storage, forces flush to create SSTable on disk
+- SSTable creation immediately loads bloom filter into memory
+- Calls `storage.find_block()` which:
+  1. Checks cached bloom filter (memory access)
+  2. If bloom filter says "exists", reads from disk
+  3. If bloom filter says "doesn't exist", returns immediately
+- Measures bloom-filter-assisted lookup time
 
-Block Read:
-  - Zero allocation (returns reference)
-  - Ownership transfer via zero-cost abstraction
+**Edge Insert**
 
-Graph Traversal:
-  - BoundedQueue: 8KB pre-allocated
-  - Visited set: 16KB pre-allocated
-  - Zero allocation during traversal
-```
+- Validates source and target blocks exist (uses block lookups above)
+- Writes edge to WAL for durability
+- Updates in-memory graph index
+- Measures complete operation including validation
 
-### Arena Memory Patterns
+**Graph Traversal**
 
-```
-Flush Cycle (10K blocks):
-  Before flush: 16.4MB (BlockIndex + GraphEdgeIndex)
-  After flush:  0.2MB (empty indices)
-  Time to reset: <1µs (O(1) arena cleanup)
+- Single-step traversal with edge type filtering
+- Uses bounded pre-allocated data structures (no allocation)
+- Measures traversal logic excluding result processing
 
-Compaction (100MB):
-  Peak memory: 112MB (input + output buffers)
-  Steady state: 8MB (block cache)
-  Cleanup time: <1µs (arena reset)
-```
+## Architecture Impact on Performance
 
-## WAL Performance
+### Bloom Filter Caching
 
-| Metric               | Value       | Notes                       |
-| -------------------- | ----------- | --------------------------- |
-| Sequential write     | 487MB/s     | With fsync per batch        |
-| Random write         | 12MB/s      | Forced individual fsync     |
-| Recovery speed       | 892MB/s     | Sequential replay           |
-| Batch size (optimal) | 256 entries | Balances latency/throughput |
-| Segment rotation     | 127µs       | 64MB segments               |
+SSTable reads benefit from pre-loaded bloom filters:
 
-## SSTable Operations
+- Bloom filters loaded during SSTable discovery (startup)
+- Cached in memory for entire server lifetime
+- False positive rate: ~1% (configurable)
+- Cache never evicted (remains until restart)
 
-| Operation          | Time  | Throughput    | Notes               |
-| ------------------ | ----- | ------------- | ------------------- |
-| Build (10K blocks) | 89ms  | 112K blocks/s | With sorting        |
-| Binary search      | 34ns  | 29M lookups/s | In-memory index     |
-| Bloom filter check | 12ns  | 83M checks/s  | 0.1% false positive |
-| Load index         | 1.2ms | -             | 10K entries         |
-| Scan full table    | 67ms  | 149K blocks/s | Sequential read     |
+This means SSTable reads in production are always bloom-filter-assisted.
 
-## Query Engine
+### Memory Management
 
-### Direct Lookup
+- Block Index (memtable): Arena-allocated, O(1) cleanup on flush
+- WAL: Append-only, background segment rotation
+- SSTable Manager: Bloom filters cached, indices loaded on demand
 
-```
-Cache hit:   23ns (BlockIndex)
-L0 hit:      1.2µs (1 SSTable)
-L1 hit:      3.4µs (Binary search + read)
-L2 hit:      8.9µs (Multiple SSTables)
-Miss:        45µs (Full scan)
-```
+### Single-threaded Architecture
 
-### Traversal Performance
+All measurements reflect single-threaded execution:
 
-```
-BFS Traversal (depth=3, fanout=10):
-  Nodes visited: 1,111
-  Time: 14.2µs
-  Throughput: 78K nodes/µs
-  Memory: 24KB (bounded)
+- No lock contention overhead
+- No cache coherency costs
+- Deterministic performance characteristics
 
-DFS Traversal (depth=5, fanout=5):
-  Nodes visited: 3,906
-  Time: 38.9µs
-  Throughput: 100K nodes/µs
-  Memory: 16KB (bounded)
-```
+## Performance Targets vs Achieved
 
-## Benchmark Methodology
+| Operation        | Target | Achieved    | Status |
+| ---------------- | ------ | ----------- | ------ |
+| Block Write      | <2.0μs | 0.88μs      | Met    |
+| Block Read       | <0.1μs | 0.02-0.05μs | Met    |
+| Edge Operations  | <2.0μs | 1.26μs      | Met    |
+| Memory per Write | <2KB   | ~1KB        | Met    |
 
-### Statistical Sampling
+## Test Environment
 
-```zig
-pub const StatisticalSampler = struct {
-    samples: BoundedArray(u64, 10_000),
-    warmup_count: u32 = 100,
+- Platform: Apple M1 Pro (ARM64)
+- OS: macOS 14.6
+- Compiler: Zig 0.13.0 (exact version controlled)
+- Build: ReleaseSafe (optimizations + safety checks)
+- Storage: SSD with fsync enabled
+- Configuration: Production defaults
 
-    pub fn measure(self: *Self, iterations: u32) !void {
-        // Warmup phase
-        for (0..self.warmup_count) |_| {
-            _ = operation();
-        }
+## Methodology
 
-        // Measurement phase
-        for (0..iterations) |_| {
-            const start = std.time.nanoTimestamp();
-            _ = operation();
-            const elapsed = std.time.nanoTimestamp() - start;
-            try self.samples.append(elapsed);
-        }
-    }
-};
-```
+### Statistical Approach
 
-### Memory Tracking
+Each benchmark runs with:
 
-Direct measurement via StorageEngine metrics:
+- Warmup iterations: 100 (excluded from results)
+- Measurement iterations: 50-1,000 (depending on operation cost)
+- Timer: High-resolution monotonic clock
+- Results: Mean, min, max reported (no percentiles due to small sample sizes)
 
-```zig
-const initial = storage.memory_usage();
-// Operations...
-const growth = storage.memory_usage() - initial;
-const per_op = growth / operation_count;
-```
+### Setup Isolation
 
-### Environment
+- Fresh StorageEngine instance per benchmark run
+- Deterministic test data (seeded random generation)
+- Setup costs excluded from measurements
+- Background operations (compaction) disabled during measurement
 
-- **Platform**: macOS ARM64 (M1 Pro)
-- **Zig Version**: 0.13.0
-- **Build Mode**: ReleaseSafe
-- **Configuration**: Default (production settings)
-- **Durability**: fsync enabled
-- **Concurrency**: Single-threaded
+### Limitations
 
-## Performance vs Targets
+- Synthetic workload (uniform block sizes, predictable access patterns)
+- Single-threaded only (no concurrency stress testing)
+- Limited dataset size (fits in available memory)
+- No durability stress testing (power failure scenarios)
 
-| Metric          | Target | Achieved    | Status | Margin |
-| --------------- | ------ | ----------- | ------ | ------ |
-| Block Write     | <100µs | 68µs (P95)  | OK     | 32%    |
-| Block Read      | <1µs   | 45ns (P95)  | OK     | 22x    |
-| Graph Traversal | <100µs | 1.2µs (P95) | OK     | 83x    |
-| Memory/Write    | <2KB   | 1.6KB       | OK     | 20%    |
-| Recovery        | <1s/GB | 1.12s/GB    | FAIL   | -12%   |
+## Known Measurement Issues
+
+### SSTable Read Performance Anomaly
+
+SSTable reads (0.02μs) appear faster than memtable reads (0.05μs), which violates physical constraints since disk access cannot be faster than memory access.
+
+Potential causes:
+
+1. Measurement noise at nanosecond resolution
+2. Bloom filter cache effects (false negatives skip disk I/O entirely)
+3. Different code paths with varying overhead
+4. Timer resolution limitations
+
+This requires investigation before the benchmark can be considered reliable for SSTable performance analysis.
 
 ## Running Benchmarks
 
 ```bash
-# All benchmarks
+# All benchmarks (release mode)
+./zig/zig build bench --release=safe
+
+# Debug mode (slower, more detailed)
 ./zig/zig build bench
 
-# Configure benchmark parameters
-./zig/zig build bench \
-    -Dbench-iterations=10000 \
-    -Dbench-warmup=1000
-
-# Compare against baseline for regression detection
-./zig/zig build bench -Dbench-baseline=baseline.json
-
-# With memory profiling
-./zig-out/bin/benchmark storage --memory-stats
-
-# Custom iterations
-./zig-out/bin/benchmark storage --iterations=10000
+# Specific component only
+./zig/zig build bench -- --component storage
 ```
 
-## Optimization Opportunities
+## Historical Context
 
-### Identified Bottlenecks
+Previous measurements showed significantly slower performance before recent optimizations:
 
-1. **WAL fsync latency**: 40% of write time is fsync
-   - Potential: Group commit with configurable delay
-   - Trade-off: Latency vs durability
+- Block reads were measured in milliseconds (2.8ms for cold reads)
+- Edge operations took >7ms
+- Performance was unusable for production workloads
 
-2. **SSTable binary search**: Cache misses on cold indices
-   - Potential: Bloom filter for existence checks
-   - Status: Implemented, 83M checks/s
+Current measurements show dramatic improvement but require validation to ensure benchmark accuracy.
 
-3. **Graph traversal allocation**: Currently uses bounded pre-allocation
-   - Potential: Dynamic sizing based on graph density
-   - Trade-off: Memory predictability vs efficiency
+## Future Work
 
-### Future Optimizations
+### Benchmark Improvements Needed
 
-- **Parallel SSTable scans**: For multi-file lookups
-- **Compression**: LZ4 for SSTables (est. 3x reduction)
-- **Tiered caching**: Hot/cold block separation
-- **SIMD operations**: For bulk comparisons
-- **io_uring**: For batched I/O on Linux
+1. Separate true cold reads (no bloom filter cache) from warm reads
+2. Add cache miss rate measurements
+3. Implement proper percentile calculations (P50, P95, P99)
+4. Add concurrent workload testing
+5. Add memory pressure testing
+6. Add durability/crash recovery benchmarks
+
+### Performance Analysis
+
+- Profile SSTable read path to understand performance characteristics
+- Measure actual disk I/O vs bloom filter cache hit rates
+- Validate timer resolution and measurement accuracy
+- Add CPU profiling during benchmark runs
 
 ## Regression Detection
 
-CI automatically fails if:
-
-```yaml
-performance_thresholds:
-  block_write_p99: 200µs # Current: 152µs
-  block_read_p99: 1µs # Current: 89ns
-  memory_per_write: 2048B # Current: 1638B
-  compaction_throughput: 50MB/s # Current: 94MB/s
-```
-
-## Historical Performance
-
-| Version    | Write P95 | Read P95 | Traversal P95 | Memory/Op |
-| ---------- | --------- | -------- | ------------- | --------- |
-| v0.1.0-dev | 68µs      | 45ns     | 1.2µs         | 1.6KB     |
-| baseline   | 62µs      | 41ns     | 1.1µs         | 1.5KB     |
-
----
-
-**Note**: Benchmarks measure actual implementation, not aspirational targets. Numbers include all overhead (WAL, checksums, index updates). Production settings enabled (fsync, safety checks).
+Automated performance regression detection is not yet implemented. Manual comparison against previous runs is required to detect performance degradation.
