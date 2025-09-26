@@ -31,14 +31,16 @@ const GUARD_SIZE: usize = 32;
 /// Maximum number of allocation entries to track
 const MAX_TRACKED_ALLOCATIONS: usize = if (builtin.mode == .Debug) 512 else 256;
 
-/// Enable stack trace capture (can be disabled to avoid slow Debug linking)
-const ENABLE_STACK_TRACES: bool = false;
+/// Enable stack trace capture (only valid in Debug mode)
+const ENABLE_STACK_TRACES: bool = if (builtin.mode == .Debug) false else false;
 
 /// Maximum depth for stack trace collection
 const MAX_STACK_TRACE_DEPTH: usize = if (ENABLE_STACK_TRACES and builtin.mode == .Debug) 16 else 0;
 
+// Simplified comptime validation that doesn't confuse LLVM optimizer
 comptime {
-    if (builtin.mode != .Debug and ENABLE_STACK_TRACES) {
+    // Ensure stack traces are never enabled in release builds
+    if (ENABLE_STACK_TRACES and builtin.mode != .Debug) {
         @compileError("Stack traces cannot be enabled in release builds - would severely impact performance");
     }
 }
