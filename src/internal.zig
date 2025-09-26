@@ -25,6 +25,11 @@ pub const StorageEngine = storage.StorageEngine;
 // Query engine
 pub const query_engine = @import("query/engine.zig");
 pub const QueryEngine = query_engine.QueryEngine;
+pub const TraversalQuery = query_engine.TraversalQuery;
+pub const TraversalDirection = query_engine.TraversalDirection;
+pub const TraversalAlgorithm = query_engine.TraversalAlgorithm;
+pub const EdgeTypeFilter = query_engine.EdgeTypeFilter;
+pub const SemanticQuery = query_engine.SemanticQuery;
 
 // Core utilities
 pub const concurrency = @import("core/concurrency.zig");

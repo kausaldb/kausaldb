@@ -901,7 +901,7 @@ pub const ModelState = struct {
                 if (comptime std.debug.runtime_safety) {
                     const expected_checksum = ModelBlock.compute_validation_checksum(block.id, block.content_hash, block.model_sequence);
                     if (block.validation_checksum != expected_checksum) {
-                        log.warn("Block integrity violation in find_active_block");
+                        log.warn("Block integrity violation in find_active_block", .{});
                         return null;
                     }
                 }

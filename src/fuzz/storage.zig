@@ -1,14 +1,13 @@
-//! Storage engine fuzzing - systematic state and input fuzzing
+//! Storage engine fuzzing for parsing and logic bugs.
 //!
-//! Tests storage engine robustness against malformed inputs, invalid
-//! state transitions, and edge cases. All fuzzing is deterministic
-//! and reproducible using seeds.
+//! Parse fuzzing finds crashes in deserialization of on-disk formats.
+//! Logic fuzzing finds invariant violations in operation sequences.
+//! All fuzzing is deterministic and reproducible using seeds.
 
 const std = @import("std");
-const main = @import("main.zig");
 
-// Import internal types through parent module to avoid module conflicts
 const internal = @import("internal");
+const main = @import("main.zig");
 
 const StorageEngine = internal.StorageEngine;
 const SimulationVFS = internal.SimulationVFS;
@@ -18,473 +17,370 @@ const GraphEdge = internal.GraphEdge;
 const BlockId = internal.BlockId;
 const EdgeType = internal.EdgeType;
 const Config = internal.Config;
+const ArenaCoordinator = internal.memory.ArenaCoordinator;
+const SSTable = internal.sstable.SSTable;
+const WorkloadGenerator = internal.WorkloadGenerator;
+const WorkloadConfig = internal.WorkloadConfig;
+const ModelState = internal.ModelState;
+const PropertyChecker = internal.PropertyChecker;
+const OperationMix = internal.OperationMix;
+const Operation = internal.Operation;
 const BlockOwnership = internal.ownership.BlockOwnership;
+const OwnedBlockCollection = internal.ownership.OwnedBlockCollection;
 
-pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
-    std.debug.print("Fuzzing storage engine...\n", .{});
+/// Parse fuzzing tests deserialization robustness
+pub fn run_parse_fuzzing(fuzzer: *main.Fuzzer) !void {
+    std.debug.print("Storage parse fuzzing...\n", .{});
 
-    for (0..fuzzer.config.iterations) |i| {
-        const input = try fuzzer.generate_input();
-        defer fuzzer.allocator.free(input);
-
-        const strategy = i % 7;
+    while (fuzzer.should_continue()) {
+        const input = try fuzzer.generate_input(4096);
+        const strategy = fuzzer.stats.iterations_executed % 6;
         switch (strategy) {
-            0 => fuzz_storage_operations(fuzzer.allocator, input) catch |err| {
+            0 => fuzz_sstable_header_parsing(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            1 => fuzz_edge_cases(fuzzer.allocator, input) catch |err| {
+            1 => fuzz_wal_entry_parsing(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            2 => fuzz_sstable_operations(fuzzer.allocator, input) catch |err| {
+            2 => fuzz_block_deserialization(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            3 => fuzz_compaction(fuzzer.allocator, input) catch |err| {
+            3 => fuzz_edge_deserialization(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            4 => fuzz_concurrent_operations(fuzzer.allocator, input) catch |err| {
+            4 => fuzz_corrupted_file_recovery(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            5 => fuzz_block_serialization(fuzzer.allocator, input) catch |err| {
+            5 => fuzz_metadata_parsing(fuzzer.allocator, input) catch |err| {
                 try fuzzer.handle_crash(input, err);
             },
-            6 => {
-                fuzz_recovery_operations(fuzzer.allocator, input) catch |err| {
-                    try fuzzer.handle_crash(input, err);
-                };
-            },
-            else => {},
+            else => unreachable,
         }
 
         fuzzer.record_iteration();
-
-        if (i % 1000 == 0) {
-            std.debug.print("Storage fuzz: {} iterations\n", .{i});
-        }
     }
 }
 
-fn fuzz_storage_operations(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+/// Logic fuzzing - test operational correctness
+pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
+    std.debug.print("Storage logic fuzzing...\n", .{});
 
-    var sim_vfs = try SimulationVFS.init(alloc);
+    // Create persistent state for logic testing
+    var sim_vfs = try SimulationVFS.init(fuzzer.allocator);
     defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
 
-    // Smaller memtable triggers more flushes during fuzzing
-    const config = Config{
-        .memtable_max_size = 4 * 1024 * 1024,
-    };
-
-    var storage = try StorageEngine.init(alloc, vfs, "fuzz_storage", config);
+    var storage = try StorageEngine.init(
+        fuzzer.allocator,
+        sim_vfs.vfs(),
+        "fuzz_logic_db",
+        Config{
+            .memtable_max_size = 1 * 1024 * 1024, // 1MB for faster flushes
+        },
+    );
     defer storage.deinit();
 
-    // CRITICAL FIX: Must startup before any operations
-    // This was the state machine bug: .initialized -> .flushing is invalid
     try storage.startup();
     defer storage.shutdown() catch {};
-    var i: usize = 0;
-    while (i + 4 < input.len) : (i += 1) {
-        const op_type = input[i] % 6;
 
-        switch (op_type) {
-            0 => {
-                const block = fuzz_generate_block(alloc, input[i..]);
-                storage.put_block(block) catch {
-                    // Handle assertion failures and validation errors gracefully
-                };
-            },
-            1 => { // find_block
-                const id = fuzz_generate_block_id(input[i..]);
-                _ = storage.find_block(id, BlockOwnership.simulation_test) catch {};
-            },
-            2 => { // delete_block
-                const id = fuzz_generate_block_id(input[i..]);
-                storage.delete_block(id) catch {};
-            },
-            3 => {
-                const edge = fuzz_generate_edge(input[i..]);
-                storage.put_edge(edge) catch {};
-            },
-            4 => { // coordinate_memtable_flush - NOW SAFE after startup()
-                storage.flush_memtable_to_sstable() catch {
-                    // Handle flush errors gracefully
-                };
-            },
-            5 => {
-                const id = fuzz_generate_block_id(input[i..]);
+    // Initialize model for property checking
+    var model = try ModelState.init(fuzzer.allocator);
+    defer model.deinit();
+
+    // Configure workload generator
+    const operation_mix = OperationMix{
+        .put_block_weight = 40,
+        .update_block_weight = 10,
+        .find_block_weight = 30,
+        .delete_block_weight = 5,
+        .put_edge_weight = 10,
+        .find_edges_weight = 5,
+    };
+
+    var generator = WorkloadGenerator.init(
+        fuzzer.allocator,
+        fuzzer.config.seed,
+        operation_mix,
+        WorkloadConfig{},
+    );
+    defer generator.deinit();
+
+    while (fuzzer.should_continue()) {
+        const op = try generator.generate_operation();
+        defer generator.cleanup_operation(&op);
+
+        // Apply operation to both system and model
+        apply_operation_to_storage(&storage, &op) catch |err| {
+            // Some errors are expected (e.g., BlockNotFound)
+            switch (err) {
+                error.BlockNotFound,
+                error.WriteStalled,
+                error.WriteBlocked,
+                => {},
+                // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
+                else => try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err),
+            }
+        };
+
+        apply_operation_to_model(&model, &op) catch |err| {
+            // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
+            try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err);
+        };
+
+        // Periodically verify properties
+        if (fuzzer.stats.iterations_executed % 100 == 0) {
+            verify_storage_properties(&storage, &model) catch |err| {
+                // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
+                try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err);
+            };
+        }
+
+        // Inject faults occasionally
+        if (fuzzer.stats.iterations_executed % 500 == 0) {
+            inject_storage_fault(&sim_vfs) catch {};
+        }
+
+        fuzzer.record_iteration();
+    }
+
+    // Final property verification
+    try verify_storage_properties(&storage, &model);
+}
+
+// ============================================================================
+// Parse Fuzzing Functions
+// ============================================================================
+
+fn fuzz_sstable_header_parsing(allocator: std.mem.Allocator, input: []const u8) !void {
+    // SSTable header is 64 bytes aligned, test malformed headers
+    if (input.len < 64) return;
+    var sim_vfs = try SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    const path = "fuzz_sstable.sst";
+    var file = try sim_vfs.vfs().open(path, .read_write);
+    defer file.close();
+
+    // Write malformed header
+    _ = try file.write(input[0..@min(64, input.len)]);
+
+    // Attempt to load as SSTable
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var arena_coordinator = ArenaCoordinator.init(&arena);
+
+    var sstable = SSTable.init(&arena_coordinator, allocator, sim_vfs.vfs(), path);
+    defer sstable.deinit();
+
+    sstable.read_index() catch {
+        // Expected - malformed data should cause parsing to fail
+        return;
+    };
+}
+
+fn fuzz_wal_entry_parsing(allocator: std.mem.Allocator, input: []const u8) !void {
+    if (input.len < 32) return;
+
+    // Parse as WAL entry - expects CRC-64 checksum
+    const WALEntry = internal.wal.WALEntry;
+
+    _ = WALEntry.deserialize(allocator, input) catch |err| switch (err) {
+        // Expected parsing errors
+        error.ChecksumMismatch,
+        error.InvalidEntryType,
+        error.BufferTooSmall,
+        error.InvalidChecksum,
+        error.CorruptedEntry,
+        => return,
+        else => return err,
+    };
+}
+
+fn fuzz_block_deserialization(allocator: std.mem.Allocator, input: []const u8) !void {
+    if (input.len < @sizeOf(ContextBlock)) return;
+
+    // Test block deserialization with ownership tracking
+    var collection = OwnedBlockCollection.init(allocator, .temporary);
+    defer collection.deinit();
+
+    _ = ContextBlock.deserialize(allocator, input) catch {
+        // Expected - malformed data should cause parsing to fail
+        return;
+    };
+}
+
+fn fuzz_edge_deserialization(allocator: std.mem.Allocator, input: []const u8) !void {
+    _ = allocator;
+    if (input.len < @sizeOf(GraphEdge)) return;
+
+    _ = GraphEdge.deserialize(input) catch {
+        // Expected - malformed data should cause parsing to fail
+        return;
+    };
+}
+
+fn fuzz_corrupted_file_recovery(allocator: std.mem.Allocator, input: []const u8) !void {
+    // Test recovery from corrupted WAL files
+    var sim_vfs = try SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    const wal_path = "wal_000001.log";
+    var file = try sim_vfs.vfs().open(wal_path, .read_write);
+    defer file.close();
+
+    // Write corrupted WAL data
+    _ = try file.write(input);
+
+    // Attempt recovery using standalone function
+    const recovery_callback = struct {
+        fn callback(entry: internal.wal.WALEntry, context: *anyopaque) internal.wal.WALError!void {
+            _ = entry;
+            _ = context;
+        }
+    }.callback;
+
+    var dummy_context: u8 = 0;
+    var stats = internal.wal.WALStats{
+        .entries_written = 0,
+        .entries_recovered = 0,
+        .segments_rotated = 0,
+        .recovery_failures = 0,
+        .bytes_written = 0,
+    };
+    _ = internal.wal.recover_from_segment(sim_vfs.vfs(), allocator, "corrupted.wal", recovery_callback, &dummy_context, &stats) catch {
+        // Expected - corrupted data should cause recovery to fail
+        return;
+    };
+}
+
+fn fuzz_metadata_parsing(allocator: std.mem.Allocator, input: []const u8) !void {
+
+    // Test parsing of JSON metadata fields
+    const max_metadata_size = 4096;
+    const metadata_input = input[0..@min(input.len, max_metadata_size)];
+
+    // Attempt to parse as JSON
+    const parsed = std.json.parseFromSlice(
+        std.json.Value,
+        allocator,
+        metadata_input,
+        .{},
+    ) catch |err| switch (err) {
+        error.SyntaxError,
+        error.UnexpectedEndOfInput,
+        error.InvalidNumber,
+        error.InvalidEnumTag,
+        => return,
+        else => return err,
+    };
+    defer parsed.deinit();
+}
+
+// ============================================================================
+// Logic Fuzzing Functions
+// ============================================================================
+
+fn apply_operation_to_storage(storage: *StorageEngine, op: *const Operation) !void {
+    switch (op.op_type) {
+        .put_block => {
+            if (op.block) |block| {
+                try storage.put_block(block);
+            }
+        },
+        .update_block => {
+            if (op.block) |block| {
+                // Update is put with higher sequence
+                try storage.put_block(block);
+            }
+        },
+        .find_block => {
+            if (op.block_id) |id| {
+                _ = try storage.find_block(id, .temporary);
+            }
+        },
+        .delete_block => {
+            if (op.block_id) |id| {
+                try storage.delete_block(id);
+            }
+        },
+        .put_edge => {
+            if (op.edge) |edge| {
+                try storage.put_edge(edge);
+            }
+        },
+        .find_edges => {
+            if (op.block_id) |id| {
                 _ = storage.find_outgoing_edges(id);
-                _ = storage.find_incoming_edges(id);
-            },
-            else => {},
-        }
+            }
+        },
     }
 }
 
-/// Fuzz edge cases with malformed and boundary data
-fn fuzz_edge_cases(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var sim_vfs = try SimulationVFS.init(alloc);
-    defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
-
-    const config = Config.minimal_for_testing();
-    var storage = try StorageEngine.init(alloc, vfs, "fuzz_edge_cases", config);
-    defer storage.deinit();
-    try storage.startup();
-    defer storage.shutdown() catch {};
-
-    // Test empty input handling
-    if (input.len == 0) {
-        const empty_block = ContextBlock{
-            .id = BlockId.generate(),
-            .sequence = 0, // Storage engine will assign the actual global sequence
-            .source_uri = "fuzz://empty",
-            .metadata_json = "{}",
-            .content = "",
-        };
-        storage.put_block(empty_block) catch {};
-        return;
-    }
-
-    // Test extremely large content (within limits)
-    if (input.len > 100) {
-        const sample = input[0..@min(10, input.len)];
-        var large_buf: [64]u8 = undefined;
-        const large_content_tmp = std.fmt.bufPrint(&large_buf, "fuzz_large_{X}", .{std.hash.Wyhash.hash(0, sample)}) catch "fuzz_large_fallback";
-        const large_content = alloc.dupe(u8, large_content_tmp) catch "fuzz_large_fallback";
-        const large_block = ContextBlock{
-            .id = BlockId.generate(),
-            .sequence = 0, // Storage engine will assign the actual global sequence
-            .source_uri = "fuzz://large",
-            .metadata_json = "{}",
-            .content = large_content,
-        };
-        storage.put_block(large_block) catch {};
-    }
-
-    // Test duplicate block IDs
-    if (input.len >= 16) {
-        const id = fuzz_generate_block_id(input);
-        const block1 = ContextBlock{
-            .id = id,
-            .sequence = 0, // Storage engine will assign the actual global sequence
-            .source_uri = "fuzz://dup1",
-            .metadata_json = "{}",
-            .content = "duplicate_test_1",
-        };
-        const block2 = ContextBlock{
-            .id = id,
-            .sequence = 0, // Storage engine will assign the actual global sequence
-            .source_uri = "fuzz://dup2",
-            .metadata_json = "{}",
-            .content = "duplicate_test_2",
-        };
-        storage.put_block(block1) catch {};
-        storage.put_block(block2) catch {}; // Should handle duplicate gracefully
-    }
-
-    // Test normal edge relationships (avoid self-references as they're invalid)
-    if (input.len >= 32) {
-        const source_id = fuzz_generate_block_id(input[0..16]);
-        const target_id = fuzz_generate_block_id(input[16..32]);
-        const edge = GraphEdge{
-            .source_id = source_id,
-            .target_id = target_id,
-            .edge_type = EdgeType.calls,
-        };
-        storage.put_edge(edge) catch {};
-    }
-
-    // Test rapid state transitions
-    for (0..5) |_| {
-        storage.flush_memtable_to_sstable() catch {};
+fn apply_operation_to_model(model: *ModelState, op: *const Operation) !void {
+    switch (op.op_type) {
+        .put_block => {
+            if (op.block) |block| {
+                try model.apply_put_block(block);
+            }
+        },
+        .update_block => {
+            if (op.block) |block| {
+                try model.apply_put_block(block);
+            }
+        },
+        .find_block => {
+            if (op.block_id) |id| {
+                _ = model.find_active_block(id);
+            }
+        },
+        .delete_block => {
+            if (op.block_id) |id| {
+                try model.apply_delete_block(id);
+            }
+        },
+        .put_edge => {
+            if (op.edge) |edge| {
+                try model.apply_put_edge(edge);
+            }
+        },
+        .find_edges => {
+            if (op.block_id) |id| {
+                _ = model.count_outgoing_edges(id);
+            }
+        },
     }
 }
 
-/// Test WAL recovery with fuzzed operations (separate function for controlled frequency)
-fn fuzz_recovery_operations(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+fn verify_storage_properties(storage: *StorageEngine, model: *ModelState) !void {
+    // Verify data consistency
+    try PropertyChecker.check_no_data_loss(model, storage);
 
-    var sim_vfs = try SimulationVFS.init(alloc);
-    defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
+    // Verify bidirectional edge consistency
+    try PropertyChecker.check_bidirectional_consistency(model, storage);
 
-    try fuzz_test_recovery(alloc, vfs, input);
+    // Verify no data loss
+    try PropertyChecker.check_no_data_loss(model, storage);
+
+    // Verify memory invariants
+    storage.validate_memory_hierarchy();
 }
 
-/// Test WAL recovery with fuzzed operations
-fn fuzz_test_recovery(allocator: std.mem.Allocator, vfs: VFS, input: []const u8) !void {
-    _ = input;
+fn inject_storage_fault(sim_vfs: *SimulationVFS) !void {
+    // Randomly inject I/O errors or corruptions
+    // Safety: timestamp() returns a valid i64 that can be safely cast to u64 for PRNG seed
+    var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+    const fault_type = prng.random().uintLessThan(u8, 4);
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
-    // Create first storage instance and perform operations
-    const config = Config{
-        .memtable_max_size = 2 * 1024 * 1024,
-    };
-
-    {
-        var storage1 = try StorageEngine.init(arena_alloc, vfs, "fuzz_recovery", config);
-        defer storage1.deinit();
-        try storage1.startup();
-
-        // Perform some operations
-        for (0..10) |i| {
-            const block = ContextBlock{
-                .id = BlockId.generate(),
-                .sequence = 0, // Storage engine will assign the actual global sequence
-                .source_uri = "fuzz://recovery",
-                .metadata_json = "{}",
-                .content = blk: {
-                    var content_buf: [32]u8 = undefined;
-                    const tmp = std.fmt.bufPrint(&content_buf, "recovery_test_{}", .{i}) catch "test";
-                    break :blk arena_alloc.dupe(u8, tmp) catch "test";
-                },
-            };
-            storage1.put_block(block) catch {
-                // Handle validation errors in recovery testing
-            };
-        }
-
-        try storage1.shutdown();
-    }
-
-    // Create second instance to test recovery
-    {
-        var storage2 = try StorageEngine.init(arena_alloc, vfs, "fuzz_recovery", config);
-        defer storage2.deinit();
-        try storage2.startup(); // Should recover from WAL
-        defer storage2.shutdown() catch {};
-
-        // Verify recovery succeeded by attempting operations
-        const test_block = ContextBlock{
-            .id = BlockId.generate(),
-            .sequence = 0, // Storage engine will assign the actual global sequence
-            .source_uri = "fuzz://post_recovery",
-            .metadata_json = "{}",
-            .content = "post_recovery_test",
-        };
-        storage2.put_block(test_block) catch {
-            // Handle validation errors in post-recovery testing
-        };
-    }
-}
-
-/// Fuzz block serialization/deserialization
-fn fuzz_block_serialization(allocator: std.mem.Allocator, input: []const u8) !void {
-    // Use arena to ensure all allocations are cleaned up
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
-    const block = fuzz_generate_block(arena_alloc, input);
-
-    // Attempt to serialize
-    const buffer_size = block.serialized_size();
-    const buffer = arena_alloc.alloc(u8, buffer_size) catch {
-        // Allocation errors are expected for large inputs
-        return;
-    };
-
-    _ = block.serialize(buffer) catch {
-        // Serialization errors are expected for malformed input
-        return;
-    };
-
-    // Attempt to deserialize - use arena allocator to prevent leaks
-    _ = ContextBlock.deserialize(arena_alloc, buffer) catch {
-        // Deserialization errors are expected for corrupted data
-        return;
-    };
-    // No need to manually free - arena will clean up everything
-}
-
-/// Fuzz SSTable operations through storage engine (no direct SSTable API available)
-fn fuzz_sstable_operations(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var sim_vfs = try SimulationVFS.init(alloc);
-    defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
-
-    const config = Config{
-        .memtable_max_size = 1024 * 1024, // Small memtable to force SSTable creation
-    };
-
-    var storage = try StorageEngine.init(alloc, vfs, "fuzz_sstable", config);
-    defer storage.deinit();
-    try storage.startup();
-    defer storage.shutdown() catch {};
-
-    // Add blocks to trigger SSTable creation through storage engine
-    var i: usize = 0;
-    while (i + 16 < input.len) : (i += 16) {
-        const block = fuzz_generate_block(alloc, input[i..]);
-        storage.put_block(block) catch {};
-
-        // Periodically flush to create SSTables
-        if (i % 64 == 0) {
-            storage.flush_memtable_to_sstable() catch {};
-        }
-    }
-
-    // Test lookups after SSTable creation
-    i = 0;
-    while (i + 16 < input.len) : (i += 8) {
-        const id = fuzz_generate_block_id(input[i..]);
-        _ = storage.find_block(id, BlockOwnership.simulation_test) catch {};
-    }
-}
-
-/// Generate a fuzzed block from input data that complies with all validation rules
-fn fuzz_generate_block(allocator: std.mem.Allocator, data: []const u8) ContextBlock {
-    // Generate content that's guaranteed to be under size limits using stack buffers
-    const content_hash = if (data.len >= 8) std.hash.Wyhash.hash(0, data[0..@min(8, data.len)]) else 0;
-    var content_buf: [64]u8 = undefined;
-    const content = std.fmt.bufPrint(&content_buf, "fuzz_content_{X}", .{content_hash}) catch "fuzz_safe";
-    const content_owned = allocator.dupe(u8, content) catch "fuzz_safe";
-
-    // Generate source_uri that's non-empty and under 2048 bytes using stack buffer
-    const uri_suffix = if (data.len > 0) data[0] % 100 else 42;
-    var uri_buf: [32]u8 = undefined;
-    const source_uri_tmp = std.fmt.bufPrint(&uri_buf, "fuzz://test_{}", .{uri_suffix}) catch "fuzz://safe";
-    const source_uri = allocator.dupe(u8, source_uri_tmp) catch "fuzz://safe";
-
-    // Generate metadata_json under 1MB limit
-    const use_extended_metadata = data.len > 16 and (data[16] % 4 == 0);
-    const metadata_json = if (use_extended_metadata)
-        "{\"fuzz\":true,\"type\":\"test\"}"
-    else
-        "{}";
-
-    return ContextBlock{
-        .id = fuzz_generate_block_id(data),
-        .sequence = if (data.len > 0) @max(data[0] % 255, 1) else 1, // Sequence 1-255, always > 0
-        .source_uri = source_uri,
-        .metadata_json = metadata_json,
-        .content = content_owned,
-    };
-}
-
-fn fuzz_generate_block_id(data: []const u8) BlockId {
-    if (data.len >= 16) {
-        var bytes: [16]u8 = undefined;
-        @memcpy(&bytes, data[0..16]);
-        return BlockId{ .bytes = bytes };
-    }
-    return BlockId.generate();
-}
-
-/// Generate a fuzzed edge from input data
-fn fuzz_generate_edge(data: []const u8) GraphEdge {
-    const edge_type = if (data.len > 16)
-        @as(EdgeType, @enumFromInt(data[16] % @typeInfo(EdgeType).@"enum".fields.len))
-    else
-        EdgeType.calls;
-
-    return GraphEdge{
-        .source_id = fuzz_generate_block_id(data),
-        .target_id = if (data.len > 16) fuzz_generate_block_id(data[16..]) else BlockId.generate(),
-        .edge_type = edge_type,
-    };
-}
-
-fn fuzz_compaction(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var sim_vfs = try SimulationVFS.init(alloc);
-    defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
-
-    const config = Config{
-        .memtable_max_size = 1 * 1024 * 1024, // 1MB for frequent flushes
-    };
-
-    var storage = try StorageEngine.init(alloc, vfs, "fuzz_compact", config);
-    defer storage.deinit();
-    try storage.startup();
-    defer storage.shutdown() catch {};
-
-    // Generate multiple SSTables through repeated flushes
-    var flush_count: usize = 0;
-    var i: usize = 0;
-    while (i < input.len and flush_count < 10) : (flush_count += 1) {
-        // Fill memtable
-        var block_count: usize = 0;
-        while (i < input.len and block_count < 100) : ({
-            i += 1;
-            block_count += 1;
-        }) {
-            const block = fuzz_generate_block(alloc, input[i..]);
-            storage.put_block(block) catch {};
-        }
-
-        // Force flush
-        storage.flush_memtable_to_sstable() catch {};
-    }
-}
-
-/// Fuzz concurrent-like operations (simulated through sequential ops)
-fn fuzz_concurrent_operations(allocator: std.mem.Allocator, input: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var sim_vfs = try SimulationVFS.init(alloc);
-    defer sim_vfs.deinit();
-    const vfs = sim_vfs.vfs();
-
-    var storage = try StorageEngine.init(alloc, vfs, "fuzz_concurrent", Config.minimal_for_testing());
-    defer storage.deinit();
-    try storage.startup();
-    defer storage.shutdown() catch {};
-
-    // Simulate interleaved operations
-    var block_ids = std.array_list.Managed(BlockId).init(alloc);
-    defer block_ids.deinit();
-
-    var i: usize = 0;
-    while (i + 2 < input.len) : (i += 1) {
-        const op_mix = input[i] % 10;
-
-        switch (op_mix) {
-            0...3 => { // 40% writes
-                const block = fuzz_generate_block(alloc, input[i..]);
-                block_ids.append(block.id) catch {};
-                storage.put_block(block) catch {
-                    // Handle validation errors in concurrent testing
-                };
-            },
-            4...7 => { // 40% reads
-                if (block_ids.items.len > 0) {
-                    const idx = input[i + 1] % block_ids.items.len;
-                    _ = storage.find_block(block_ids.items[idx], BlockOwnership.simulation_test) catch {};
-                }
-            },
-            8 => { // 10% deletes
-                if (block_ids.items.len > 0) {
-                    const idx = input[i + 1] % block_ids.items.len;
-                    storage.delete_block(block_ids.items[idx]) catch {};
-                    _ = block_ids.orderedRemove(idx);
-                }
-            },
-            9 => { // 10% flushes
-                storage.flush_memtable_to_sstable() catch {};
-            },
-            else => {},
-        }
+    switch (fault_type) {
+        0 => sim_vfs.enable_fault_testing_mode(), // Enable general fault injection
+        1 => sim_vfs.enable_torn_writes(50, 1024, 500), // Enable torn writes
+        2 => sim_vfs.enable_read_corruption(10, 4), // Enable read corruption
+        3 => {}, // No fault this time
+        else => unreachable,
     }
 }

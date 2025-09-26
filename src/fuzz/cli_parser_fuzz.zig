@@ -1,15 +1,16 @@
-//! CLI parser fuzzing - systematic input validation testing
+//! CLI parser fuzzing for input validation bugs.
 //!
 //! Tests CLI command parser robustness against malformed input, long strings,
-//! unicode characters, and edge cases. Ensures parser fails gracefully with
-//! proper error returns rather than crashes.
+//! unicode characters, and edge cases.
 
 const std = @import("std");
-const main = @import("main.zig");
-const internal = @import("internal");
 
-const CommandError = internal.CommandError;
-const parse_command = internal.parse_command;
+const internal = @import("internal");
+const main = @import("main.zig");
+
+const parser = internal.cli_parser;
+const parse_command = parser.parse_command;
+const ParseError = parser.ParseError;
 
 const log = std.log.scoped(.cli_parser_fuzz);
 
@@ -22,8 +23,8 @@ pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
     const arena_alloc = arena.allocator();
 
     for (0..fuzzer.config.iterations) |i| {
-        const input = try arena_alloc.alloc(u8, fuzzer.random.intRangeAtMost(usize, 1, 4096));
-        fuzzer.random.bytes(input);
+        const input = try arena_alloc.alloc(u8, fuzzer.prng.random().intRangeAtMost(usize, 1, 4096));
+        fuzzer.prng.random().bytes(input);
 
         // Select fuzzing strategy based on iteration
         const strategy = i % 8;
@@ -71,33 +72,32 @@ fn fuzz_malformed_arguments(allocator: std.mem.Allocator, input: []const u8) !vo
 
     // Generate random argument count and malformed arguments
     const arg_count = (input[0] % 10) + 1; // 1-10 arguments
-    const args = try allocator.alloc([:0]const u8, arg_count);
+    const args = try allocator.alloc([]const u8, arg_count);
 
     for (args, 0..) |*arg, i| {
         const start_idx = (i * input.len / args.len);
         const end_idx = @min(((i + 1) * input.len / args.len), input.len);
 
         if (start_idx >= end_idx) {
-            arg.* = try allocator.dupeZ(u8, "");
+            arg.* = try allocator.dupe(u8, "");
         } else {
             const slice = input[start_idx..end_idx];
-            arg.* = try allocator.dupeZ(u8, slice);
+            arg.* = try allocator.dupe(u8, slice);
         }
     }
 
     // This should never crash, only return errors
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_long_arguments(allocator: std.mem.Allocator, input: []const u8) !void {
     // Create arguments with excessive length
-    const base_args = [_][:0]const u8{ "kausal", "find", "function" };
-    var args = try allocator.alloc([:0]const u8, base_args.len + 1);
+    const base_args = [_][]const u8{ "kausal", "find", "function" };
+    var args = try allocator.alloc([]const u8, base_args.len + 1);
 
     // Copy base args
     for (base_args, 0..) |base_arg, i| {
-        args[i] = try allocator.dupeZ(u8, base_arg);
+        args[i] = try allocator.dupe(u8, base_arg);
     }
 
     // Create an extremely long argument
@@ -109,20 +109,19 @@ fn fuzz_long_arguments(allocator: std.mem.Allocator, input: []const u8) !void {
         try long_arg.append(input[i % input.len]);
     }
 
-    args[base_args.len] = try allocator.dupeZ(u8, long_arg.items);
+    args[base_args.len] = try allocator.dupe(u8, long_arg.items);
 
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_unicode_input(allocator: std.mem.Allocator, input: []const u8) !void {
     // Mix valid commands with unicode characters
     const unicode_chars = "🦀🔥💻🚀αβγδε测试中文العربية";
 
-    var args = try allocator.alloc([:0]const u8, 4);
+    var args = try allocator.alloc([]const u8, 4);
 
-    args[0] = try allocator.dupeZ(u8, "kausal");
-    args[1] = try allocator.dupeZ(u8, "find");
+    args[0] = try allocator.dupe(u8, "kausal");
+    args[1] = try allocator.dupe(u8, "find");
 
     // Mix input with unicode
     var mixed = std.array_list.Managed(u8).init(allocator);
@@ -136,18 +135,17 @@ fn fuzz_unicode_input(allocator: std.mem.Allocator, input: []const u8) !void {
         }
     }
 
-    args[2] = try allocator.dupeZ(u8, mixed.items);
-    args[3] = try allocator.dupeZ(u8, unicode_chars);
+    args[2] = try allocator.dupe(u8, mixed.items);
+    args[3] = try allocator.dupe(u8, unicode_chars);
 
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_control_characters(allocator: std.mem.Allocator, input: []const u8) !void {
-    var args = try allocator.alloc([:0]const u8, 3);
+    var args = try allocator.alloc([]const u8, 3);
 
-    args[0] = try allocator.dupeZ(u8, "kausal");
-    args[1] = try allocator.dupeZ(u8, "status");
+    args[0] = try allocator.dupe(u8, "kausal");
+    args[1] = try allocator.dupe(u8, "status");
 
     // Create argument with control characters
     var controlled = std.array_list.Managed(u8).init(allocator);
@@ -165,28 +163,27 @@ fn fuzz_control_characters(allocator: std.mem.Allocator, input: []const u8) !voi
         }
     }
 
-    args[2] = try allocator.dupeZ(u8, controlled.items);
+    args[2] = try allocator.dupe(u8, controlled.items);
 
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_empty_and_null_args(allocator: std.mem.Allocator, input: []const u8) !void {
     _ = input;
+    _ = allocator;
 
     // Test various empty/null argument patterns
-    const test_cases = [_][]const [:0]const u8{
-        &[_][:0]const u8{}, // No arguments at all
-        &[_][:0]const u8{""}, // Single empty argument
-        &[_][:0]const u8{ "kausal", "" }, // Empty command
-        &[_][:0]const u8{ "", "find", "function" }, // Empty program name
-        &[_][:0]const u8{ "kausal", "find", "", "test" }, // Empty middle argument
-        &[_][:0]const u8{ "kausal", "find", "function", "" }, // Empty final argument
+    const test_cases = [_][]const []const u8{
+        &[_][]const u8{}, // No arguments at all
+        &[_][]const u8{""}, // Single empty argument
+        &[_][]const u8{ "kausal", "" }, // Empty command
+        &[_][]const u8{ "", "find", "function" }, // Empty program name
+        &[_][]const u8{ "kausal", "find", "", "test" }, // Empty middle argument
+        &[_][]const u8{ "kausal", "find", "function", "" }, // Empty final argument
     };
 
     for (test_cases) |args| {
-        var result = parse_command(allocator, args) catch continue;
-        result.deinit();
+        _ = parse_command(args) catch continue;
     }
 }
 
@@ -195,7 +192,7 @@ fn fuzz_extremely_long_commands(allocator: std.mem.Allocator, input: []const u8)
 
     // Create massively long command with many arguments
     const max_args = @min(input.len, 100); // Cap at 100 args to prevent OOM
-    const args = try allocator.alloc([:0]const u8, max_args);
+    const args = try allocator.alloc([]const u8, max_args);
 
     for (args, 0..) |*arg, i| {
         // Create progressively longer arguments
@@ -206,11 +203,10 @@ fn fuzz_extremely_long_commands(allocator: std.mem.Allocator, input: []const u8)
             char.* = input[j % input.len];
         }
 
-        arg.* = try allocator.dupeZ(u8, long_arg);
+        arg.* = try allocator.dupe(u8, long_arg);
     }
 
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_mixed_valid_invalid(allocator: std.mem.Allocator, input: []const u8) !void {
@@ -220,59 +216,56 @@ fn fuzz_mixed_valid_invalid(allocator: std.mem.Allocator, input: []const u8) !vo
     const valid_commands = [_][]const u8{ "link", "find", "show", "trace", "status", "sync" };
     const valid_entities = [_][]const u8{ "function", "struct", "file", "module" };
 
-    var args = try allocator.alloc([:0]const u8, 6);
+    var args = try allocator.alloc([]const u8, 6);
 
-    args[0] = try allocator.dupeZ(u8, "kausal");
+    args[0] = try allocator.dupe(u8, "kausal");
 
     // Pick a valid command
     const cmd_idx = input[0] % valid_commands.len;
-    args[1] = try allocator.dupeZ(u8, valid_commands[cmd_idx]);
+    args[1] = try allocator.dupe(u8, valid_commands[cmd_idx]);
 
     // Mix valid entity with garbage
     const entity_idx = input[1] % valid_entities.len;
-    args[2] = try allocator.dupeZ(u8, valid_entities[entity_idx]);
+    args[2] = try allocator.dupe(u8, valid_entities[entity_idx]);
 
     // Add progressively more garbage
     for (args[3..], 0..) |*arg, i| {
         const start = 2 + i;
         const end = @min(start + (input.len / 4), input.len);
         if (start >= input.len) {
-            arg.* = try allocator.dupeZ(u8, "");
+            arg.* = try allocator.dupe(u8, "");
         } else {
-            arg.* = try allocator.dupeZ(u8, input[start..end]);
+            arg.* = try allocator.dupe(u8, input[start..end]);
         }
     }
 
-    var result = parse_command(allocator, args) catch return;
-    result.deinit();
+    _ = parse_command(args) catch return;
 }
 
 fn fuzz_boundary_conditions(allocator: std.mem.Allocator, input: []const u8) !void {
     // Test boundary conditions that might cause issues
-    const boundary_tests = [_][]const [:0]const u8{
+    const boundary_tests = [_][]const []const u8{
         // Single character arguments
-        &[_][:0]const u8{ "k", "f", "t", "x" },
+        &[_][]const u8{ "k", "f", "t", "x" },
         // Maximum reasonable argument count
-        &[_][:0]const u8{ "kausal", "find", "function", "test", "in", "workspace", "with", "extra", "args", "here" },
+        &[_][]const u8{ "kausal", "find", "function", "test", "in", "workspace", "with", "extra", "args", "here" },
         // Mixed empty and single chars
-        &[_][:0]const u8{ "kausal", "", "f", "", "x" },
+        &[_][]const u8{ "kausal", "", "f", "", "x" },
     };
 
     for (boundary_tests) |args| {
-        var result = parse_command(allocator, args) catch continue;
-        result.deinit();
+        _ = parse_command(args) catch continue;
     }
 
     // Test with input-derived boundary cases
     if (input.len > 0) {
-        const single_char_args = try allocator.alloc([:0]const u8, @min(input.len, 20));
+        const single_char_args = try allocator.alloc([]const u8, @min(input.len, 20));
 
         for (single_char_args, 0..) |*arg, i| {
             const char_slice = input[i .. i + 1];
-            arg.* = try allocator.dupeZ(u8, char_slice);
+            arg.* = try allocator.dupe(u8, char_slice);
         }
 
-        var result = parse_command(allocator, single_char_args) catch return;
-        result.deinit();
+        _ = parse_command(single_char_args) catch return;
     }
 }
