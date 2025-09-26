@@ -1,23 +1,20 @@
-//! KausalDB Performance Benchmarks
+//! KausalDB Performance Benchmarks Runner
 //!
-//! Clean component dispatcher for systematic performance testing.
-//! Delegates all benchmark implementation to component modules while
-//! providing shared harness, statistical analysis, and reporting.
+//! Main entry point for dispatching all performance tests. This module parses
+//! command-line arguments and delegates execution to the appropriate benchmark
+//! modules, using the framework defined in harness.zig.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
-const internal = @import("internal");
-const e2e_bench = @import("e2e_workload_bench.zig");
 
+const internal = @import("internal");
+const harness = @import("harness.zig");
 const output = @import("output.zig");
 
 pub const std_options: std.Options = .{
     .log_level = @enumFromInt(@intFromEnum(build_options.log_level)),
 };
-
-const Timer = std.time.Timer;
-const Allocator = std.mem.Allocator;
 
 /// Component selection for targeted benchmarking
 const Component = enum {
@@ -25,6 +22,7 @@ const Component = enum {
     query,
     ingestion,
     core,
+    network,
     e2e,
     all,
 
@@ -33,155 +31,9 @@ const Component = enum {
     }
 };
 
-/// Benchmark configuration
-const BenchConfig = struct {
-    iterations: u32 = 1000,
-    warmup_iterations: u32 = 100,
-    baseline_file: ?[]const u8 = null,
-    output_baseline_file: ?[]const u8 = null,
-    output_format: OutputFormat = .human,
-    verbose: bool = false,
-
-    const OutputFormat = enum { human, json };
-};
-
-/// Individual benchmark result
-pub const BenchmarkResult = struct {
-    name: []const u8,
-    iterations: u32,
-    mean_ns: u64,
-    median_ns: u64,
-    min_ns: u64,
-    max_ns: u64,
-    p95_ns: u64,
-    p99_ns: u64,
-    std_dev_ns: u64,
-    ops_per_second: f64,
-    baseline_mean_ns: ?u64 = null,
-    regression_percent: ?f32 = null,
-
-    fn format_time_us(ns: u64) f64 {
-        return @as(f64, @floatFromInt(ns)) / 1000.0;
-    }
-
-    fn print(self: BenchmarkResult, verbose: bool, allocator: std.mem.Allocator) void {
-        const mean_us = format_time_us(self.mean_ns);
-        const min_us = format_time_us(self.min_ns);
-        const max_us = format_time_us(self.max_ns);
-        const p95_us = format_time_us(self.p95_ns);
-        const p99_us = format_time_us(self.p99_ns);
-
-        output.print_benchmark_results(allocator, "  {s}:\n", .{self.name});
-        output.print_benchmark_results(allocator, "    Mean: {d:.2}μs  Min: {d:.2}μs  Max: {d:.2}μs\n", .{ mean_us, min_us, max_us });
-        output.print_benchmark_results(allocator, "    P95: {d:.2}μs  P99: {d:.2}μs\n", .{ p95_us, p99_us });
-        output.print_benchmark_results(allocator, "    Ops/sec: {d:.0}\n", .{self.ops_per_second});
-
-        if (self.regression_percent) |regression| {
-            if (regression > 0) {
-                output.print_benchmark_results(allocator, "    REGRESSION: {d:.1}% slower\n", .{regression});
-            } else {
-                output.print_benchmark_results(allocator, "    IMPROVEMENT: {d:.1}% faster\n", .{-regression});
-            }
-        }
-
-        if (verbose) {
-            const median_us = format_time_us(self.median_ns);
-            const std_dev_us = format_time_us(self.std_dev_ns);
-            output.print_benchmark_results(allocator, "    Median: {d:.2}μs  StdDev: {d:.2}μs\n", .{ median_us, std_dev_us });
-        }
-
-        output.write_benchmark_results("\n");
-    }
-};
-
-/// Shared benchmark harness for component modules
-pub const BenchmarkHarness = struct {
-    allocator: Allocator,
-    config: BenchConfig,
-    baseline: ?std.StringHashMap(BenchmarkResult),
-    results: std.array_list.Managed(BenchmarkResult),
-
-    pub fn init(allocator: Allocator, config: BenchConfig) !BenchmarkHarness {
-        var harness = BenchmarkHarness{
-            .allocator = allocator,
-            .config = config,
-            .baseline = null,
-            .results = std.array_list.Managed(BenchmarkResult).init(allocator),
-        };
-
-        // Load baseline if specified
-        if (config.baseline_file) |path| {
-            harness.baseline = load_baseline(allocator, path) catch |err| switch (err) {
-                error.FileNotFound => blk: {
-                    output.print_status(allocator, "Baseline file not found: {s}\n", .{path});
-                    break :blk null;
-                },
-                else => blk: {
-                    output.print_status(allocator, "Warning: Failed to load baseline file {s}: {}\n", .{ path, err });
-                    output.write_status("Continuing without baseline comparison...\n");
-                    break :blk null;
-                },
-            };
-        }
-
-        return harness;
-    }
-
-    pub fn deinit(self: *BenchmarkHarness) void {
-        self.results.deinit();
-        if (self.baseline) |*baseline| {
-            baseline.deinit();
-        }
-    }
-
-    /// Simple interface for component modules to add results
-    pub fn add_result(self: *BenchmarkHarness, result: BenchmarkResult) !void {
-        var final_result = result;
-
-        // Apply baseline comparison if available
-        if (self.baseline) |baseline| {
-            if (baseline.get(result.name)) |baseline_result| {
-                final_result.baseline_mean_ns = baseline_result.mean_ns;
-                final_result.regression_percent = calculate_regression(baseline_result.mean_ns, result.mean_ns);
-            }
-        }
-
-        try self.results.append(final_result);
-    }
-
-    /// Print all results
-    fn print_results(self: *BenchmarkHarness) void {
-        output.print_results_header();
-
-        for (self.results.items) |result| {
-            result.print(self.config.verbose, self.allocator);
-        }
-
-        // Summary statistics
-        var total_regressions: u32 = 0;
-        var total_improvements: u32 = 0;
-
-        for (self.results.items) |result| {
-            if (result.regression_percent) |regression| {
-                if (regression > 0) {
-                    total_regressions += 1;
-                } else {
-                    total_improvements += 1;
-                }
-            }
-        }
-
-        output.print_summary(self.allocator, @intCast(self.results.items.len), total_regressions, total_improvements);
-    }
-
-    /// Save baseline results if requested
-    fn save_results_as_baseline(self: *BenchmarkHarness) !void {
-        if (self.config.output_baseline_file) |path| {
-            try save_baseline(self.allocator, path, self.results.items);
-            output.print_status(self.allocator, "Baseline saved to: {s}\n", .{path});
-        }
-    }
-};
+// Re-export for backward compatibility
+pub const BenchmarkResult = harness.BenchmarkResult;
+pub const BenchmarkHarness = harness.BenchmarkHarness;
 
 /// Parse component from command line arguments
 fn parse_component_arg(args: [][:0]u8) Component {
@@ -195,8 +47,8 @@ fn parse_component_arg(args: [][:0]u8) Component {
 }
 
 /// Parse configuration from build options and command line arguments
-fn parse_config(args: [][:0]u8) BenchConfig {
-    var config = BenchConfig{
+fn parse_config(args: [][:0]u8) harness.BenchConfig {
+    var config = harness.BenchConfig{
         .iterations = build_options.bench_iterations,
         .warmup_iterations = build_options.bench_warmup,
         .baseline_file = build_options.bench_baseline,
@@ -230,58 +82,23 @@ fn parse_config(args: [][:0]u8) BenchConfig {
     return config;
 }
 
-/// Calculate performance regression percentage
-fn calculate_regression(baseline_ns: u64, current_ns: u64) f32 {
-    if (baseline_ns == 0) return 0;
-    const baseline_f = @as(f64, @floatFromInt(baseline_ns));
-    const current_f = @as(f64, @floatFromInt(current_ns));
-    return @as(f32, @floatCast(((current_f - baseline_f) / baseline_f) * 100.0));
-}
-
-/// Load baseline results from JSON file
-fn load_baseline(allocator: Allocator, path: []const u8) !std.StringHashMap(BenchmarkResult) {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const content = try file.readToEndAlloc(allocator, 16 * 1024 * 1024);
-    defer allocator.free(content);
-
-    const parsed = try std.json.parseFromSlice([]BenchmarkResult, allocator, content, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-
-    var baseline = std.StringHashMap(BenchmarkResult).init(allocator);
-    for (parsed.value) |result| {
-        const owned_name = try allocator.dupe(u8, result.name);
-        try baseline.put(owned_name, result);
-    }
-
-    return baseline;
-}
-
-/// Save baseline results to JSON file
-fn save_baseline(allocator: Allocator, path: []const u8, results: []const BenchmarkResult) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-
-    const json_string = try std.json.Stringify.valueAlloc(allocator, results, .{ .whitespace = .indent_2 });
-    defer allocator.free(json_string);
-    try file.writeAll(json_string);
-}
-
 /// Main entry point
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+    return run_benchmarks(allocator);
+}
 
+fn run_benchmarks(allocator: std.mem.Allocator) !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
     const config = parse_config(args);
     const component = parse_component_arg(args);
 
-    var harness = try BenchmarkHarness.init(allocator, config);
-    defer harness.deinit();
+    var bench_harness = try harness.BenchmarkHarness.init(allocator, config);
+    defer bench_harness.deinit();
 
     output.print_benchmark_header(allocator, "Performance Benchmarks");
 
@@ -300,29 +117,52 @@ pub fn main() !void {
     switch (component) {
         .storage => {
             const storage = @import("storage.zig");
-            try storage.run_benchmarks(&harness);
+            try storage.run_benchmarks(&bench_harness);
+        },
+        .query => {
+            const query = @import("query.zig");
+            try query.run_benchmarks(&bench_harness);
+        },
+        .ingestion => {
+            const ingestion = @import("ingestion.zig");
+            try ingestion.run_benchmarks(&bench_harness);
+        },
+        .core => {
+            const core = @import("core.zig");
+            try core.run_benchmarks(&bench_harness);
+        },
+        .network => {
+            const network = @import("network.zig");
+            try network.run_benchmarks(&bench_harness);
         },
         .e2e => {
-            output.write_status("Running realistic end-to-end workload benchmark...\n");
-            try e2e_bench.run_e2e_benchmark(allocator);
-            return; // E2E benchmark handles its own output
-        },
-        .query, .ingestion, .core => {
-            output.write_status("Component not implemented yet\n");
+            const e2e = @import("e2e.zig");
+            try e2e.run_benchmarks(&bench_harness);
         },
         .all => {
             const storage = @import("storage.zig");
-            try storage.run_benchmarks(&harness);
+            const query = @import("query.zig");
+            const ingestion = @import("ingestion.zig");
+            const core = @import("core.zig");
+            const network = @import("network.zig");
+            const e2e = @import("e2e.zig");
+
+            try storage.run_benchmarks(&bench_harness);
+            try query.run_benchmarks(&bench_harness);
+            try ingestion.run_benchmarks(&bench_harness);
+            try core.run_benchmarks(&bench_harness);
+            try network.run_benchmarks(&bench_harness);
+            try e2e.run_benchmarks(&bench_harness);
         },
     }
 
     // Results and reporting
-    harness.print_results();
-    try harness.save_results_as_baseline();
+    bench_harness.print_results();
+    try bench_harness.save_results_as_baseline();
 
     // Exit with error code if significant regressions found
     var has_major_regression = false;
-    for (harness.results.items) |result| {
+    for (bench_harness.results.items) |result| {
         if (result.regression_percent) |regression| {
             if (regression > 10.0) { // >10% regression is major
                 has_major_regression = true;
