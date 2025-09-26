@@ -394,6 +394,11 @@ pub const SSTableManager = struct {
             file_size,
             0, // Level 0 for new SSTables
         );
+
+        // Build and cache the metadata for the new SSTable immediately
+        // This makes the new SSTable discoverable by the read path
+        const new_metadata = try self.build_sstable_metadata(owned_path, file_size);
+        try self.cached_metadata.append(new_metadata);
     }
 
     /// Check if compaction is beneficial based on SSTable collection state.
@@ -653,7 +658,8 @@ pub const SSTableManager = struct {
         // Search through cached metadata first
         for (self.cached_metadata.items) |*metadata| {
             // Skip if bloom filter says block definitely not in this SSTable
-            if (!metadata.bloom_filter.might_contain(block_id)) {
+            const bloom_result = metadata.bloom_filter.might_contain(block_id);
+            if (!bloom_result) {
                 continue;
             }
 
@@ -667,10 +673,14 @@ pub const SSTableManager = struct {
             defer sstable_file.deinit();
 
             // Only read the index (bloom filter already cached)
-            sstable_file.read_index() catch continue;
+            sstable_file.read_index() catch {
+                continue;
+            };
 
             // Look for the specific block
-            if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
+            if (sstable_file.find_block_view(block_id) catch blk: {
+                break :blk null;
+            }) |parsed_block| {
                 const sequence = @as(u64, @intCast(parsed_block.sequence()));
                 if (sequence > highest_sequence) {
                     highest_sequence = sequence;
