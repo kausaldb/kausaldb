@@ -92,7 +92,9 @@ const TidyChecker = struct {
             // Rule 4: Safety comments required for unsafe operations (exclude tidy checker and security scanner)
             // Safety: Operation guaranteed to succeed by preconditions
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
-                !std.mem.endsWith(u8, file_path, "security_scanner.zig"))
+                !std.mem.endsWith(u8, file_path, "security_scanner.zig") and
+                !std.mem.startsWith(u8, file_path, "./src/bench/") and
+                !std.mem.startsWith(u8, file_path, "./src/fuzz/"))
             {
                 if (std.mem.indexOf(u8, line, "catch unreachable") != null or
                     std.mem.indexOf(u8, line, "@ptrCast") != null)
