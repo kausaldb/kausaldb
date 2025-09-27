@@ -647,10 +647,12 @@ fn daemonize() !void {
     concurrency.reset_main_thread();
 
     // Create new session to detach from terminal
-    _ = std.posix.setsid() catch |err| {
-        log.err("Failed to create new session: {}", .{err});
-        return err;
-    };
+    const sid = std.c.setsid();
+    if (sid < 0) {
+        const errno = std.c._errno().*;
+        log.err("Failed to create new session: errno {}", .{errno});
+        return std.posix.unexpectedErrno(@enumFromInt(errno));
+    }
 
     // Keep original working directory to avoid filesystem permission issues
     // when creating data files and directories

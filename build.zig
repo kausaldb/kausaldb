@@ -248,6 +248,11 @@ fn create_executable(context: BuildContext, config: ExecutableConfig) *std.Build
         exe.root_module.addImport("internal", internal_module);
     }
 
+    // Server executables need libc for system calls like setsid()
+    if (config.binary_type == .kausal) {
+        exe.linkLibC();
+    }
+
     return exe;
 }
 
