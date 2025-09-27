@@ -79,92 +79,17 @@ pub const MemoryProfiler = struct {
     }
 };
 
-/// Query current RSS memory usage across platforms
+/// Query current RSS memory usage using libc getrusage
 pub fn query_current_rss_memory() u64 {
-    switch (builtin.os.tag) {
-        .linux => return query_rss_linux() catch 0,
-        .macos => return query_rss_macos() catch 0,
-        .windows => return query_rss_windows() catch 0,
-        else => return 0,
-    }
-}
-
-// Linux RSS memory via multiple methods (robust for containers)
-fn query_rss_linux() !u64 {
-    // Method 1: Try /proc/self/status (most common)
-    if (query_rss_proc_status()) |rss| {
-        if (rss > 0) return rss;
+    var usage: std.c.rusage = undefined;
+    if (std.c.getrusage(std.c.RUSAGE.SELF, &usage) != 0) {
+        return 0; // Failed to get resource usage
     }
 
-    // Method 2: Try /proc/self/statm (alternative in containers)
-    if (query_rss_proc_statm()) |rss| {
-        if (rss > 0) return rss;
-    }
-
-    return 0;
-}
-
-fn query_rss_proc_status() ?u64 {
-    const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return null;
-    defer file.close();
-
-    var buf: [4096]u8 = undefined;
-    const bytes_read = file.readAll(&buf) catch return null;
-    const content = buf[0..bytes_read];
-
-    // Search for "VmRSS:" line in /proc/self/status
-    var lines = std.mem.splitSequence(u8, content, "\n");
-    while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "VmRSS:")) {
-            // Parse: "VmRSS:    1234 kB"
-            var parts = std.mem.splitSequence(u8, line, " ");
-            _ = parts.next(); // Skip "VmRSS:"
-            while (parts.next()) |part| {
-                if (part.len > 0 and std.ascii.isDigit(part[0])) {
-                    const kb = std.fmt.parseInt(u64, part, 10) catch return null;
-                    return kb * 1024; // Convert KB to bytes
-                }
-            }
-        }
-    }
-    return null;
-}
-
-fn query_rss_proc_statm() ?u64 {
-    const file = std.fs.openFileAbsolute("/proc/self/statm", .{}) catch return null;
-    defer file.close();
-
-    var buf: [256]u8 = undefined;
-    const bytes_read = file.readAll(&buf) catch return null;
-    const content = buf[0..bytes_read];
-
-    // /proc/self/statm format: size resident shared text lib data dt
-    var parts = std.mem.splitSequence(u8, std.mem.trim(u8, content, " \n\t"), " ");
-    _ = parts.next(); // Skip size (first field)
-
-    if (parts.next()) |resident_pages_str| {
-        const resident_pages = std.fmt.parseInt(u64, resident_pages_str, 10) catch return null;
-        // Convert pages to bytes (typically 4KB pages on most systems)
-        const page_size = 4096; // Standard page size on Linux
-        return resident_pages * page_size;
-    }
-    return null;
-}
-
-// macOS RSS memory via mach task_info
-fn query_rss_macos() !u64 {
-    // macOS: Use getrusage() via POSIX interface instead of Mach system calls
-    // This eliminates libc dependency while providing equivalent RSS measurement
-    var usage: std.posix.rusage = undefined;
-    usage = std.posix.getrusage(std.posix.rusage.SELF);
-
-    // macOS getrusage() returns ru_maxrss in bytes (unlike Linux which uses KB)
-    return @as(u64, @intCast(usage.maxrss));
-}
-
-// Windows RSS memory via GetProcessMemoryInfo
-fn query_rss_windows() !u64 {
-    // For Zig 0.13+, this would use Windows API calls
-    // For now, return 0 as fallback (Windows support can be added later)
-    return 0;
+    // Convert to bytes - ru_maxrss is in KB on Linux, bytes on macOS
+    return switch (builtin.os.tag) {
+        .linux => @as(u64, @intCast(usage.ru_maxrss)) * 1024,
+        .macos => @as(u64, @intCast(usage.ru_maxrss)),
+        else => @as(u64, @intCast(usage.ru_maxrss)) * 1024, // Assume KB like Linux
+    };
 }
