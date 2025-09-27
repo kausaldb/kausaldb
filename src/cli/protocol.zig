@@ -432,9 +432,9 @@ pub const SyncRequest = struct {
     }
 };
 
-/// Simplified block information for responses
-pub const BlockInfo = struct {
-    id: BlockId,
+/// Simplified block information for responses - extern struct for stable layout
+pub const BlockInfo = extern struct {
+    id_bytes: [16]u8,
     uri: [256]u8,
     uri_len: u16,
     content_preview: [256]u8,
@@ -444,7 +444,7 @@ pub const BlockInfo = struct {
 
     pub fn from_block(block: ContextBlock) BlockInfo {
         var info = BlockInfo{
-            .id = block.id,
+            .id_bytes = block.id.bytes,
             .uri = [_]u8{0} ** 256,
             .uri_len = @intCast(@min(block.source_uri.len, 256)),
             .content_preview = [_]u8{0} ** 256,
@@ -454,6 +454,10 @@ pub const BlockInfo = struct {
         @memcpy(info.uri[0..info.uri_len], block.source_uri[0..info.uri_len]);
         @memcpy(info.content_preview[0..info.content_preview_len], block.content[0..info.content_preview_len]);
         return info;
+    }
+
+    pub fn to_block_id(self: *const BlockInfo) BlockId {
+        return BlockId.from_bytes(self.id_bytes);
     }
 };
 
@@ -571,7 +575,7 @@ pub const WorkspaceSyncStatus = enum(u8) {
     never_synced = 3, // ⚠ Linked but never synced
 };
 
-/// Server status response
+/// Server status response - extern struct for stable cross-platform layout
 pub const WorkspaceInfo = extern struct {
     name: [MAX_NAME_LENGTH]u8,
     path: [MAX_WORKSPACE_PATH_LENGTH]u8,
@@ -664,14 +668,17 @@ pub const WorkspaceInfo = extern struct {
     }
 };
 
+/// Status response - extern struct for stable cross-platform layout
 pub const StatusResponse = extern struct {
     block_count: u64,
     edge_count: u64,
     sstable_count: u32,
+    _padding1: [4]u8 = .{0} ** 4,
     memtable_size: u64,
     total_disk_usage: u64,
     uptime_seconds: u64,
     workspace_count: u32,
+    _padding2: [4]u8 = .{0} ** 4,
     workspaces: [MAX_WORKSPACES_PER_STATUS]WorkspaceInfo,
 
     pub fn init() StatusResponse {

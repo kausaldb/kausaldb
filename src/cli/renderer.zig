@@ -369,7 +369,7 @@ fn render_find_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
         try ctx.write_colored(RenderContext.Color.blue, uri);
         try ctx.write("\n");
 
-        try ctx.writer.interface.print("    ID: {}\n", .{block.id});
+        try ctx.writer.interface.print("    ID: {}\n", .{block.to_block_id()});
 
         if (block.content_preview_len > 0) {
             try ctx.write("    Preview: ");
@@ -395,7 +395,7 @@ fn render_find_results_json(ctx: *RenderContext, blocks: []const protocol.BlockI
     try ctx.write("{\"results\":[\n");
 
     for (blocks, 0..) |*block, i| {
-        const id_hex = try block.id.to_hex(ctx.allocator);
+        const id_hex = try block.to_block_id().to_hex(ctx.allocator);
         defer ctx.allocator.free(id_hex);
 
         try ctx.write("  {\"id\":");
@@ -431,7 +431,7 @@ fn render_find_results_csv(ctx: *RenderContext, blocks: []const protocol.BlockIn
 
     for (blocks) |block| {
         try ctx.writer.interface.print("{},\"{s}\",\"{s}\",{d}\n", .{
-            block.id,
+            block.to_block_id(),
             block.uri[0..block.uri_len],
             block.content_preview[0..block.content_preview_len],
             block.metadata_size,
@@ -523,7 +523,7 @@ fn render_show_results_json(ctx: *RenderContext, blocks: []const protocol.BlockI
 
     for (blocks, 0..) |block, i| {
         try ctx.writer.interface.print("  {{\"id\":\"{}\",\"uri\":\"{s}\"}}", .{
-            block.id,
+            block.to_block_id(),
             block.uri[0..block.uri_len],
         });
 
@@ -541,7 +541,7 @@ fn render_show_results_csv(ctx: *RenderContext, blocks: []const protocol.BlockIn
 
     for (blocks) |block| {
         try ctx.writer.interface.print("{},\"{s}\",\"{s}\"\n", .{
-            block.id,
+            block.to_block_id(),
             block.uri[0..block.uri_len],
             direction,
         });

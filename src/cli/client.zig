@@ -144,30 +144,66 @@ pub const Client = struct {
 
         const response = try self.read_from_stream(T);
 
-        if (T == protocol.StatusResponse) {
-            const status_response = &response;
-            const workspaces = status_response.workspaces_slice();
-
-            fatal_assert(
-                workspaces.len <= protocol.MAX_WORKSPACES_PER_STATUS,
-                "Invalid workspace count: {}",
-                .{workspaces.len},
-            );
-
-            for (workspaces, 0..) |*workspace, i| {
-                const sync_status_raw = @intFromEnum(workspace.sync_status);
-                fatal_assert(
-                    sync_status_raw <= 3,
-                    "Client: Corrupted sync_status in workspace {}: {}",
-                    .{ i, sync_status_raw },
-                );
-
-                const name = workspace.name_text();
-                fatal_assert(name.len > 0, "Client: Empty workspace name at index {}", .{i});
-            }
+        // Validate protocol integrity for critical response types
+        switch (@TypeOf(T)) {
+            protocol.StatusResponse => validate_status_response(&response),
+            protocol.FindResponse => validate_find_response(&response),
+            else => {},
         }
 
         return response;
+    }
+
+    /// Validate StatusResponse integrity to catch protocol corruption
+    fn validate_status_response(status: *const protocol.StatusResponse) void {
+        const workspaces = status.workspaces_slice();
+
+        fatal_assert(
+            workspaces.len <= protocol.MAX_WORKSPACES_PER_STATUS,
+            "Client: Invalid workspace count: {}",
+            .{workspaces.len},
+        );
+
+        for (workspaces, 0..) |*workspace, i| {
+            const sync_status_raw = @intFromEnum(workspace.sync_status);
+            fatal_assert(
+                sync_status_raw <= 3,
+                "Client: Corrupted sync_status in workspace {}: {}",
+                .{ i, sync_status_raw },
+            );
+
+            const name = workspace.name_text();
+            fatal_assert(
+                name.len > 0,
+                "Client: Empty workspace name at index {}",
+                .{i},
+            );
+        }
+    }
+
+    /// Validate FindResponse integrity to catch protocol corruption
+    fn validate_find_response(response: *const protocol.FindResponse) void {
+        const blocks = response.blocks_slice();
+
+        fatal_assert(
+            blocks.len <= protocol.MAX_BLOCKS_PER_RESPONSE,
+            "Client: Invalid block count: {}",
+            .{blocks.len},
+        );
+
+        for (blocks, 0..) |*block, i| {
+            fatal_assert(
+                block.uri_len <= 256,
+                "Client: Corrupted uri_len in block {}: {}",
+                .{ i, block.uri_len },
+            );
+
+            fatal_assert(
+                block.content_preview_len <= 256,
+                "Client: Corrupted content_preview_len in block {}: {}",
+                .{ i, block.content_preview_len },
+            );
+        }
     }
 
     /// Find blocks matching a query
