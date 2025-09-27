@@ -549,6 +549,12 @@ pub const SSTable = struct {
         _ = try file.write(bloom_buffer);
         current_offset += bloom_filter_size;
 
+        // Verify that current_offset matches what read_index will calculate
+        const expected_offset = bloom_filter_offset + bloom_filter_size;
+        if (current_offset != expected_offset) {
+            @panic("Checksum offset mismatch in write");
+        }
+
         const file_checksum = try self.calculate_file_checksum(&file, current_offset);
 
         const file_size = try file.file_size();
@@ -583,6 +589,7 @@ pub const SSTable = struct {
         _ = try file.write(&header_buffer);
 
         try file.flush();
+
         // Safety: Block count bounded by storage format limits and fits in u32
         self.block_count = @intCast(context_blocks.len);
         self.tombstone_count = @intCast(sorted_tombstones.len);
@@ -664,10 +671,8 @@ pub const SSTable = struct {
         self.edge_count = header.edge_count;
 
         if (header.file_checksum != 0) {
-            const content_end = if (header.bloom_filter_size > 0)
-                header.bloom_filter_offset + header.bloom_filter_size
-            else
-                header.index_offset + (header.block_count * IndexEntry.SERIALIZED_SIZE);
+            // Always calculate checksum to end of bloom filter since we always write one
+            const content_end = header.bloom_filter_offset + header.bloom_filter_size;
 
             const calculated_checksum = try self.calculate_file_checksum(
                 &file,

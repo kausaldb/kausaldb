@@ -75,23 +75,19 @@ const SSTableMetadata = struct {
 /// and uses it for ALL SSTable content allocation. Stable backing allocator
 /// used for path strings and structures while content uses coordinator's arena.
 pub const SSTableManager = struct {
-    /// Arena coordinator pointer for stable allocation access (remains valid across arena resets)
-    /// CRITICAL: Must be pointer to prevent coordinator struct copying corruption
     arena_coordinator: *const ArenaCoordinator,
-    /// Stable backing allocator for path strings and data structures
     backing_allocator: std.mem.Allocator,
     vfs: VFS,
     data_dir: []const u8,
     sstable_paths: std.array_list.Managed([]const u8),
     next_sstable_id: u32,
     compaction_manager: TieredCompactionManager,
-    /// Cached metadata for all SSTables to avoid repeated disk reads
     cached_metadata: std.array_list.Managed(SSTableMetadata),
 
     /// Initialize SSTable manager following hierarchical memory model.
     /// Path ArrayList uses stable backing allocator while content uses parent's arena reference
     /// to prevent corruption from allocator conflicts during fault injection.
-    /// CRITICAL: ArenaCoordinator must be passed by pointer to prevent struct copying corruption.
+    /// ArenaCoordinator must be passed by pointer to prevent struct copying corruption.
     pub fn init(
         coordinator: *const ArenaCoordinator,
         backing: std.mem.Allocator,
@@ -121,20 +117,17 @@ pub const SSTableManager = struct {
     pub fn deinit(self: *SSTableManager) void {
         concurrency.assert_main_thread();
 
-        // Free all our copied paths before deinitializing the ArrayList
         for (self.sstable_paths.items) |path| {
             self.backing_allocator.free(path);
         }
         self.sstable_paths.deinit();
 
-        // Clean up cached metadata and bloom filters
         for (self.cached_metadata.items) |*metadata| {
             metadata.deinit();
         }
         self.cached_metadata.deinit();
 
         self.compaction_manager.deinit();
-        // Arena memory is owned by coordinator - no local cleanup needed
     }
 
     /// Find path by index for external components (read-only access).
@@ -151,9 +144,7 @@ pub const SSTableManager = struct {
     /// This is the ONLY way to add paths to the system, ensuring single ownership.
     /// Returns the index that other components can use to reference this path.
     fn register_sstable_path(self: *SSTableManager, path: []const u8) !u32 {
-        // Pre-allocate capacity for performance
         try self.sstable_paths.ensureTotalCapacity(self.sstable_paths.items.len + 1);
-        // Create our own copy to ensure single ownership
         const path_copy = try self.backing_allocator.dupe(u8, path);
         try self.sstable_paths.append(path_copy);
         return @intCast(self.sstable_paths.items.len - 1);
@@ -166,12 +157,10 @@ pub const SSTableManager = struct {
         var sst_dir_buffer: [512]u8 = undefined;
         const sst_dir = try std.fmt.bufPrint(sst_dir_buffer[0..], "{s}/sst", .{self.data_dir});
 
-        if (!self.vfs.exists(sst_dir)) {
-            self.vfs.mkdir(sst_dir) catch |err| switch (err) {
-                error.FileExists => {}, // Directory already exists, continue
-                else => return err,
-            };
-        }
+        self.vfs.mkdir(sst_dir) catch |err| switch (err) {
+            error.FileExists => {},
+            else => return err,
+        };
 
         try self.discover_existing_sstables();
     }
@@ -186,7 +175,6 @@ pub const SSTableManager = struct {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
         defer sstable_paths.deinit();
 
-        // Basic safety validation for the collected paths
         fatal_assert(
             sstable_paths.items.len < 10000,
             "Excessive SSTable count {} suggests corruption",
@@ -199,21 +187,19 @@ pub const SSTableManager = struct {
             i -= 1;
             const sstable_path = sstable_paths.items[i];
 
-            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path);
 
-            // CRITICAL: Track SSTable index loading failures,
+            // Track SSTable index loading failures,
             sstable_file.read_index() catch |err| {
                 log.warn(
                     "SSTable index loading failed for '{s}': {any} - block lookup will fail for this SSTable",
                     .{ sstable_path, err },
                 );
-                continue; // Skip this SSTable but log the failure
+                continue;
             };
             defer sstable_file.deinit();
 
             if (try sstable_file.find_block(block_id)) |block| {
-                // Clone strings using coordinator's arena allocation methods
                 const cloned_block = ContextBlock{
                     .id = block.id,
                     .sequence = block.sequence,
@@ -221,10 +207,7 @@ pub const SSTableManager = struct {
                     .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
                     .content = try self.arena_coordinator.duplicate_slice(u8, block.content),
                 };
-                // Note: OwnedBlock.init still expects arena pointer for debug tracking
-                // In hierarchical model, this is now coordinator's arena
-                const owned_block = OwnedBlock.take_ownership(&cloned_block, accessor);
-                return owned_block;
+                return OwnedBlock.take_ownership(&cloned_block, accessor);
             }
         }
 
@@ -287,10 +270,10 @@ pub const SSTableManager = struct {
 
         // SECOND PASS: Search for blocks (newest to oldest) since no tombstone found
         for (loaded_sstables.items) |*sstable_file| {
-            // Use bloom filter if available
+            // Check bloom filter
             if (sstable_file.bloom_filter) |*bloom| {
                 if (!bloom.might_contain(block_id)) {
-                    continue; // Definitely not in this SSTable
+                    continue; // Not in this SSTable
                 }
             }
 
@@ -313,14 +296,20 @@ pub const SSTableManager = struct {
     ) !void {
         concurrency.assert_main_thread();
 
-        if (owned_blocks.len == 0 and tombstones.len == 0 and edges.len == 0) return; // Nothing to flush
+        if (owned_blocks.len == 0 and tombstones.len == 0 and edges.len == 0) {
+            return; // Nothing to flush
+        }
 
-        // Validate that blocks can be read for SSTable creation from memtable
         for (owned_blocks) |*owned_block| {
             _ = owned_block.read(.memtable_manager);
         }
 
-        return self.create_new_sstable_internal(owned_blocks, tombstones, edges, .memtable_manager);
+        return self.create_new_sstable_internal(
+            owned_blocks,
+            tombstones,
+            edges,
+            .memtable_manager,
+        );
     }
 
     /// Create a new SSTable from owned blocks with explicit access validation.
@@ -331,12 +320,20 @@ pub const SSTableManager = struct {
     ) !void {
         concurrency.assert_main_thread();
 
-        if (owned_blocks.len == 0) return; // Nothing to flush
-        for (owned_blocks) |*owned_block| {
-            _ = owned_block.read(accessor); // Validates access permission
+        if (owned_blocks.len == 0) {
+            return; // Nothing to flush
         }
 
-        return self.create_new_sstable_internal(owned_blocks, &[_]TombstoneRecord{}, &[_]GraphEdge{}, accessor);
+        for (owned_blocks) |*owned_block| {
+            _ = owned_block.read(accessor);
+        }
+
+        return self.create_new_sstable_internal(
+            owned_blocks,
+            &[_]TombstoneRecord{},
+            &[_]GraphEdge{},
+            accessor,
+        );
     }
 
     fn create_new_sstable_internal(
@@ -399,10 +396,15 @@ pub const SSTableManager = struct {
             0, // Level 0 for new SSTables
         );
 
-        // Build and cache the metadata for the new SSTable immediately
-        // This makes the new SSTable discoverable by the read path
-        const new_metadata = try self.build_sstable_metadata(owned_path, file_size);
-        try self.cached_metadata.append(new_metadata);
+        // Build metadata for performance optimization - skip if corrupted
+        if (self.build_sstable_metadata(owned_path, file_size)) |new_metadata| {
+            try self.cached_metadata.append(new_metadata);
+        } else |err| {
+            log.warn(
+                "Failed to build metadata for new SSTable '{s}': {any} - continuing without cached metadata",
+                .{ owned_path, err },
+            );
+        }
     }
 
     /// Check if compaction is beneficial based on SSTable collection state.
@@ -534,13 +536,18 @@ pub const SSTableManager = struct {
         }
         offset += 2;
 
-        // Skip flags (2) + index_offset (8) + created_timestamp (8) + bloom_filter_offset (8) + tombstone_offset (8) + edge_offset (8)
+        // Skip flags          (2)+
+        // index_offset        (8)+
+        // created_timestamp   (8)+
+        // bloom_filter_offset (8)+
+        // tombstone_offset    (8)+
+        // edge_offset         (8)=42
         offset += 42;
 
         // Block count is at offset 48 in header for O(1) statistics without index loading
         const block_count = std.mem.readInt(u32, header_buffer[offset..][0..4], .little);
 
-        // Validate block count is reasonable to catch corruption
+        // Defensive: Block count is reasonable
         if (block_count > 100_000_000) return error.CorruptedBlockCount;
 
         return block_count;
@@ -603,9 +610,15 @@ pub const SSTableManager = struct {
             // TieredCompactionManager will store reference, not copy
             try self.compaction_manager.add_sstable(path_copy, file_size, 0);
 
-            // Build cached metadata for fast lookups
-            const metadata = try self.build_sstable_metadata(path_copy, file_size);
-            try self.cached_metadata.append(metadata);
+            // Build metadata for performance optimization - skip if corrupted
+            if (self.build_sstable_metadata(path_copy, file_size)) |metadata| {
+                try self.cached_metadata.append(metadata);
+            } else |err| {
+                log.warn(
+                    "Failed to build metadata for discovered SSTable '{s}': {any} - continuing without cached metadata",
+                    .{ path_copy, err },
+                );
+            }
 
             if (self.parse_sstable_id_from_path(entry.name)) |id| {
                 if (id >= self.next_sstable_id) {
@@ -627,16 +640,22 @@ pub const SSTableManager = struct {
         defer sstable_file.deinit();
 
         // Read header and index to get sequence bounds and bloom filter
-        try sstable_file.read_index();
+        // Handle corrupted SSTables gracefully like other functions in this module
+        sstable_file.read_index() catch |err| {
+            log.warn(
+                "SSTable metadata building failed for '{s}': {any} - SSTable will be scanned directly during queries",
+                .{ path, err },
+            );
+            return err;
+        };
 
-        // Clone bloom filter from SSTable to avoid ownership conflicts
         const cached_bloom_filter = blk: {
-            if (sstable_file.bloom_filter) |*bf| {
-                // Clone the bloom filter by serializing and deserializing
-                const serialized_size = bf.serialized_size();
-                const buffer = try self.backing_allocator.alloc(u8, serialized_size);
+            if (sstable_file.bloom_filter) |*filter| {
+                const size = filter.serialized_size();
+                const buffer = try self.backing_allocator.alloc(u8, size);
                 defer self.backing_allocator.free(buffer);
-                try bf.serialize(buffer);
+
+                try filter.serialize(buffer);
                 break :blk try BloomFilter.deserialize(self.backing_allocator, buffer);
             } else {
                 // Create empty bloom filter if none exists
@@ -655,19 +674,19 @@ pub const SSTableManager = struct {
 
     /// Optimized block lookup using cached metadata to avoid repeated disk I/O.
     /// Uses bloom filters for fast negative lookups and sequence bounds for optimization.
+    /// Falls back to direct SSTable scanning if cached metadata is incomplete.
     pub fn find_block_with_cached_metadata(self: *const SSTableManager, block_id: BlockId) !?ContextBlock {
         var highest_sequence: u64 = 0;
         var winning_block: ?ContextBlock = null;
 
         // Search through cached metadata first
         for (self.cached_metadata.items) |*metadata| {
-            // Skip if bloom filter says block definitely not in this SSTable
             const bloom_result = metadata.bloom_filter.might_contain(block_id);
             if (!bloom_result) {
-                continue;
+                continue; // Not in sstable
             }
 
-            // Bloom filter says it might contain the block - check the actual SSTable
+            // Bloom filter says it might contain the block
             var sstable_file = SSTable.init(
                 self.arena_coordinator,
                 self.arena_coordinator.allocator(),
@@ -677,19 +696,54 @@ pub const SSTableManager = struct {
             defer sstable_file.deinit();
 
             // Only read the index (bloom filter already cached)
-            sstable_file.read_index() catch {
-                continue;
-            };
+            sstable_file.read_index() catch continue;
 
             // Look for the specific block
-            if (sstable_file.find_block_view(block_id) catch blk: {
-                break :blk null;
-            }) |parsed_block| {
+            if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
                 const sequence = @as(u64, @intCast(parsed_block.sequence()));
                 if (sequence > highest_sequence) {
                     highest_sequence = sequence;
-                    // Convert to owned block
                     winning_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+                }
+            }
+        }
+
+        // Fallback: If cached metadata didn't find anything, scan all SSTables directly
+        // This handles cases where newly created SSTables aren't in cached metadata yet
+        if (winning_block == null) {
+            var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
+            defer sstable_paths.deinit();
+
+            for (sstable_paths.items) |sstable_path| {
+                // Skip if already checked via cached metadata
+                var already_checked = false;
+                for (self.cached_metadata.items) |metadata| {
+                    if (std.mem.eql(u8, metadata.path, sstable_path)) {
+                        already_checked = true;
+                        break;
+                    }
+                }
+                if (already_checked) continue;
+
+                const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
+                var sstable_file = SSTable.init(
+                    self.arena_coordinator,
+                    self.arena_coordinator.allocator(),
+                    self.vfs,
+                    sstable_path_copy,
+                );
+                defer sstable_file.deinit();
+
+                // Load index - skip corrupted SSTables
+                sstable_file.read_index() catch continue;
+
+                // Check for blocks in this SSTable - skip on I/O errors
+                if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
+                    const sequence = @as(u64, @intCast(parsed_block.sequence()));
+                    if (sequence > highest_sequence) {
+                        highest_sequence = sequence;
+                        winning_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
+                    }
                 }
             }
         }
@@ -699,6 +753,7 @@ pub const SSTableManager = struct {
 
     /// Optimized tombstone lookup using cached metadata to avoid repeated disk I/O.
     /// Uses sequence bounds to find the highest sequence tombstone record.
+    /// Falls back to direct SSTable scanning if cached metadata is incomplete.
     pub fn find_tombstone_with_cached_metadata(self: *const SSTableManager, block_id: BlockId) !?TombstoneRecord {
         var highest_sequence: u64 = 0;
         var winning_tombstone: ?TombstoneRecord = null;
@@ -724,6 +779,47 @@ pub const SSTableManager = struct {
                     if (tombstone_record.sequence > highest_sequence) {
                         highest_sequence = tombstone_record.sequence;
                         winning_tombstone = tombstone_record;
+                    }
+                }
+            }
+        }
+
+        // Fallback: If cached metadata didn't find anything, scan all SSTables directly
+        // This handles cases where newly created SSTables aren't in cached metadata yet
+        if (winning_tombstone == null) {
+            var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
+            defer sstable_paths.deinit();
+
+            for (sstable_paths.items) |sstable_path| {
+                // Skip if already checked via cached metadata
+                var already_checked = false;
+                for (self.cached_metadata.items) |metadata| {
+                    if (std.mem.eql(u8, metadata.path, sstable_path)) {
+                        already_checked = true;
+                        break;
+                    }
+                }
+                if (already_checked) continue;
+
+                const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
+                var sstable_file = SSTable.init(
+                    self.arena_coordinator,
+                    self.arena_coordinator.allocator(),
+                    self.vfs,
+                    sstable_path_copy,
+                );
+                defer sstable_file.deinit();
+
+                // Load index - skip corrupted SSTables
+                sstable_file.read_index() catch continue;
+
+                // Check for tombstones in this SSTable
+                for (sstable_file.tombstone_index.items) |tombstone_record| {
+                    if (tombstone_record.block_id.eql(block_id)) {
+                        if (tombstone_record.sequence > highest_sequence) {
+                            highest_sequence = tombstone_record.sequence;
+                            winning_tombstone = tombstone_record;
+                        }
                     }
                 }
             }
@@ -786,7 +882,6 @@ pub const SSTableManager = struct {
 
         // Validate individual path strings
         for (self.sstable_paths.items, 0..) |path, i| {
-            // Check for null or invalid length paths
             if (path.len == 0) {
                 log.warn("CORRUPTION WARNING [{s}]: Empty path at index {}", .{ context, i });
                 continue;
@@ -802,7 +897,7 @@ pub const SSTableManager = struct {
                 return error.CorruptedSSTablePaths;
             }
 
-            // Check for obviously corrupted path content (non-printable chars)
+            // Check for non-printable chars to detect corrupted path content
             var printable_chars: u32 = 0;
             var total_chars: u32 = 0;
             for (path[0..@min(path.len, 64)]) |char| {
@@ -916,8 +1011,7 @@ pub const SSTableManager = struct {
             i -= 1;
             const sstable_path = sstable_paths.items[i];
 
-            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path);
 
             sstable_file.read_index() catch {
                 sstable_file.deinit();
@@ -1012,8 +1106,7 @@ pub const SSTableManager = struct {
             i -= 1;
             const sstable_path = sstable_paths.items[i];
 
-            const sstable_path_copy = try temp_allocator.dupe(u8, sstable_path);
-            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path_copy);
+            var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path);
 
             sstable_file.read_index() catch {
                 sstable_file.deinit();
