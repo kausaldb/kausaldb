@@ -244,3 +244,14 @@ pub fn BitSetType(comptime size: comptime_int) type {
         }
     };
 }
+
+/// Get current process ID using OS-specific syscalls
+pub fn getpid() std.posix.pid_t {
+    const builtin = @import("builtin");
+    return switch (builtin.os.tag) {
+        .linux => std.os.linux.getpid(),
+        .macos => @intCast(std.c.getpid()),
+        .windows => std.os.windows.kernel32.GetCurrentProcessId(),
+        else => @compileError("Unsupported OS for getpid"),
+    };
+}

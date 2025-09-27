@@ -559,8 +559,8 @@ fn remove_pid_file(allocator: std.mem.Allocator, port: u16) void {
 /// Check if process with given PID is running
 fn is_process_running(pid: std.posix.pid_t) bool {
     // Check if process exists without actually sending a signal
-    const result = std.c.kill(pid, 0);
-    return result == 0;
+    std.posix.kill(pid, 0) catch return false;
+    return true;
 }
 
 /// Stop server using PID file
@@ -583,11 +583,10 @@ fn stop_server_by_port(allocator: std.mem.Allocator, port: u16) !ExitCode {
     log.info("Stopping server (PID: {}) on port {}...", .{ server_pid, port });
 
     // Send SIGTERM for graceful shutdown
-    const kill_result = std.c.kill(server_pid, std.posix.SIG.TERM);
-    if (kill_result != 0) {
-        log.err("Failed to send SIGTERM to process {}: errno {}", .{ server_pid, kill_result });
+    std.posix.kill(server_pid, std.posix.SIG.TERM) catch |err| {
+        log.err("Failed to send SIGTERM to process {}: {}", .{ server_pid, err });
         return ExitCode.general_error;
-    }
+    };
 
     // Wait up to 10 seconds for graceful shutdown
     var attempts: u32 = 0;
@@ -606,7 +605,7 @@ fn stop_server_by_port(allocator: std.mem.Allocator, port: u16) !ExitCode {
 
     // Force kill if graceful shutdown failed
     log.warn("Graceful shutdown failed, force killing process {}", .{server_pid});
-    _ = std.c.kill(server_pid, std.posix.SIG.KILL);
+    std.posix.kill(server_pid, std.posix.SIG.KILL) catch {};
     remove_pid_file(allocator, port);
 
     return ExitCode.success;
@@ -798,7 +797,7 @@ fn run_server_main(allocator: std.mem.Allocator) !ExitCode {
             }
 
             // Write PID file after daemonization
-            const current_pid = @as(std.posix.pid_t, @intCast(std.c.getpid()));
+            const current_pid = stdx.getpid();
             try write_pid_file(allocator, config.port, current_pid);
 
             var server = try KausalServer.init(allocator, config);
@@ -839,7 +838,7 @@ fn run_server_main(allocator: std.mem.Allocator) !ExitCode {
                 try daemonize();
             }
 
-            const current_pid = @as(std.posix.pid_t, @intCast(std.c.getpid()));
+            const current_pid = stdx.getpid();
             try write_pid_file(allocator, config.port, current_pid);
 
             var server = try KausalServer.init(allocator, config);
