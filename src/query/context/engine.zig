@@ -343,7 +343,6 @@ pub const ContextEngine = struct {
             .incoming => try self.query_engine.traverse_incoming(node_id, 1),
             .bidirectional => try self.query_engine.traverse_bidirectional(node_id, 1),
         };
-        defer traversal_result.deinit();
 
         for (traversal_result.blocks) |block_wrapper| {
             const block = block_wrapper.read(.query_engine);

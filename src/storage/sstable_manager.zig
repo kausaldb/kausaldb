@@ -376,9 +376,13 @@ pub const SSTableManager = struct {
             sorted_blocks[i] = owned_block.read(accessor).*;
         }
 
-        // SSTable expects to own the file path, so create a copy for it
-        const sstable_path_copy = try self.backing_allocator.dupe(u8, sstable_filename);
-        var new_sstable = SSTable.init(self.arena_coordinator, self.backing_allocator, self.vfs, sstable_path_copy);
+        const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_filename);
+        var new_sstable = SSTable.init(
+            self.arena_coordinator,
+            self.arena_coordinator.allocator(),
+            self.vfs,
+            sstable_path_copy,
+        );
         defer new_sstable.deinit();
         try new_sstable.write_blocks(sorted_blocks, tombstones, edges);
 

@@ -233,6 +233,9 @@ pub const QueryEngine = struct {
     storage_engine: *StorageEngine,
     state: QueryState,
 
+    // Arena for query results - reset after each query for O(1) cleanup
+    query_arena: std.heap.ArenaAllocator,
+
     query_cache: cache.QueryCache,
     caching_enabled: bool,
 
@@ -252,6 +255,7 @@ pub const QueryEngine = struct {
             .allocator = allocator,
             .storage_engine = storage_engine,
             .state = .initialized,
+            .query_arena = std.heap.ArenaAllocator.init(allocator),
             .query_cache = cache.QueryCache.init(
                 allocator,
                 cache.QueryCache.DEFAULT_MAX_ENTRIES,
@@ -286,6 +290,7 @@ pub const QueryEngine = struct {
             self.shutdown();
         }
         self.query_cache.deinit();
+        self.query_arena.deinit();
     }
 
     /// Generate a new unique query ID in a thread-safe manner
@@ -543,10 +548,14 @@ pub const QueryEngine = struct {
 
     /// Convenience method for outgoing traversal
     pub fn traverse_outgoing(self: *QueryEngine, start_id: BlockId, max_depth: u32) !TraversalResult {
+        // Reset arena for O(1) cleanup of previous query memory
+        _ = self.query_arena.reset(.retain_capacity);
+
         self.traversal_queries.incr();
         self.queries_executed.incr();
+
         return traversal.traverse_outgoing(
-            self.allocator,
+            self.query_arena.allocator(),
             self.storage_engine,
             start_id,
             max_depth,
@@ -555,10 +564,14 @@ pub const QueryEngine = struct {
 
     /// Convenience method for incoming traversal
     pub fn traverse_incoming(self: *QueryEngine, start_id: BlockId, max_depth: u32) !TraversalResult {
+        // Reset arena for O(1) cleanup of previous query memory
+        _ = self.query_arena.reset(.retain_capacity);
+
         self.traversal_queries.incr();
         self.queries_executed.incr();
+
         return traversal.traverse_incoming(
-            self.allocator,
+            self.query_arena.allocator(),
             self.storage_engine,
             start_id,
             max_depth,
@@ -567,10 +580,14 @@ pub const QueryEngine = struct {
 
     /// Convenience method for bidirectional traversal
     pub fn traverse_bidirectional(self: *QueryEngine, start_id: BlockId, max_depth: u32) !TraversalResult {
+        // Reset arena for O(1) cleanup of previous query memory
+        _ = self.query_arena.reset(.retain_capacity);
+
         self.traversal_queries.incr();
         self.queries_executed.incr();
+
         return traversal.traverse_bidirectional(
-            self.allocator,
+            self.query_arena.allocator(),
             self.storage_engine,
             start_id,
             max_depth,
@@ -846,7 +863,7 @@ pub const QueryEngine = struct {
         codebase: []const u8,
     ) !TraversalResult {
         // Use the existing arena from the traversal result for consistency and proper lifecycle
-        const arena_allocator = traversal_result.query_arena.allocator();
+        const arena_allocator = self.query_arena.allocator();
         var filtered_blocks = std.array_list.Managed(OwnedBlock).init(arena_allocator);
         var filtered_paths = std.array_list.Managed([]const BlockId).init(arena_allocator);
         var filtered_depths = std.array_list.Managed(u32).init(arena_allocator);
@@ -878,17 +895,13 @@ pub const QueryEngine = struct {
         const owned_depths = try filtered_depths.toOwnedSlice();
 
         // Create new result that reuses the same arena for consistent cleanup
-        var filtered_result = TraversalResult.init(
-            arena_allocator,
+        const filtered_result = TraversalResult.init(
             owned_blocks,
             owned_paths,
             owned_depths,
             @intCast(owned_blocks.len),
             if (owned_depths.len > 0) std.mem.max(u32, owned_depths) else 0,
         );
-
-        // Transfer the arena from original result to filtered result
-        filtered_result.query_arena = traversal_result.query_arena;
 
         return filtered_result;
     }
@@ -1349,13 +1362,13 @@ test "query engine traversal integration" {
     try storage_engine.put_block(test_block);
 
     const outgoing_result = try query_engine.traverse_outgoing(start_id, 2);
-    defer outgoing_result.deinit();
+    try testing.expect(outgoing_result.blocks.len >= 1); // Should find at least the start block
 
     const incoming_result = try query_engine.traverse_incoming(start_id, 2);
-    defer incoming_result.deinit();
+    try testing.expect(incoming_result.blocks.len >= 1); // Should find at least the start block
 
     const bidirectional_result = try query_engine.traverse_bidirectional(start_id, 2);
-    defer bidirectional_result.deinit();
+    try testing.expect(bidirectional_result.blocks.len >= 1); // Should find at least the start block
 
     const stats = query_engine.statistics();
     try testing.expectEqual(@as(u64, 3), stats.traversal_queries);

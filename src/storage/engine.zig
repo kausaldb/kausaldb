@@ -625,14 +625,14 @@ pub const StorageEngine = struct {
         defer sstable_paths.deinit();
 
         for (sstable_paths.items) |sstable_path| {
-            const sstable_path_copy = try self.backing_allocator.dupe(u8, sstable_path);
+            const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
             var sstable_file = SSTable.init(
                 self.arena_coordinator,
-                self.backing_allocator,
+                self.arena_coordinator.allocator(),
                 self.vfs,
                 sstable_path_copy,
             );
-            defer sstable_file.deinit(); // SSTable.deinit() will free the path
+            defer sstable_file.deinit();
 
             // Load index - skip corrupted SSTables during sequence scanning
             sstable_file.read_index() catch continue;
@@ -1393,7 +1393,7 @@ pub const StorageEngine = struct {
                         continue;
                     };
 
-                    const path_copy = self.backing_allocator.dupe(u8, sstable_path) catch {
+                    const path_copy = self.sstable_manager.arena_coordinator.allocator().dupe(u8, sstable_path) catch {
                         self.current_sstable_index += 1;
                         continue;
                     };

@@ -370,7 +370,6 @@ pub const SSTable = struct {
     /// Clean up all allocated resources including the file path and index.
     /// Safe to call multiple times - subsequent calls are no-ops.
     pub fn deinit(self: *SSTable) void {
-        self.backing_allocator.free(self.file_path);
         self.index.deinit();
         self.tombstone_index.deinit();
         self.edge_index.deinit();
@@ -1043,10 +1042,10 @@ pub const Compactor = struct {
         }
 
         for (input_paths, 0..) |path, i| {
-            const path_copy = try self.backing_allocator.dupe(u8, path);
+            const path_copy = try self.arena_coordinator.allocator().dupe(u8, path);
 
             const table = try self.backing_allocator.create(SSTable);
-            table.* = SSTable.init(self.arena_coordinator, self.backing_allocator, self.filesystem, path_copy);
+            table.* = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.filesystem, path_copy);
 
             // If read_index fails, clean up this table and return error
             table.read_index() catch |err| {
@@ -1059,8 +1058,8 @@ pub const Compactor = struct {
             tables_initialized += 1;
         }
 
-        const output_path_copy = try self.backing_allocator.dupe(u8, output_path);
-        var output_table = SSTable.init(self.arena_coordinator, self.backing_allocator, self.filesystem, output_path_copy);
+        const output_path_copy = try self.arena_coordinator.allocator().dupe(u8, output_path);
+        var output_table = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.filesystem, output_path_copy);
         defer output_table.deinit();
 
         var all_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);

@@ -150,9 +150,7 @@ pub const CacheValue = union(CacheKey.QueryType) {
                 allocator.free(block_data.metadata_json);
                 allocator.free(block_data.content);
             },
-            .traversal => |result| {
-                result.deinit();
-            },
+            .traversal => {},
             .semantic, .filtered => {},
         }
     }

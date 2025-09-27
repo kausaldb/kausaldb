@@ -330,7 +330,6 @@ fn handle_show_callers_request(ctx: HandlerContext, payload: []const u8) ![]cons
         defer ctx.allocator.free(error_msg);
         return try create_error_response(ctx, @intFromEnum(cli_protocol.ErrorCode.server_error), error_msg);
     };
-    defer callers.deinit();
 
     // Convert OwnedBlocks to ContextBlocks for response
     var context_blocks = std.array_list.Managed(ContextBlock).init(ctx.allocator);
@@ -385,7 +384,6 @@ fn handle_show_callees_request(ctx: HandlerContext, payload: []const u8) ![]cons
         defer ctx.allocator.free(error_msg);
         return try create_error_response(ctx, @intFromEnum(cli_protocol.ErrorCode.server_error), error_msg);
     };
-    defer callees.deinit();
 
     // Convert OwnedBlocks to ContextBlocks for response
     var context_blocks = std.array_list.Managed(ContextBlock).init(ctx.allocator);
@@ -450,7 +448,6 @@ fn handle_trace_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         error_context.log_server_error(err, ctx_info);
         return try serialize_empty_trace_response(ctx);
     };
-    defer path_result.deinit();
 
     return try serialize_trace_response_from_blocks(ctx, path_result.blocks);
 }

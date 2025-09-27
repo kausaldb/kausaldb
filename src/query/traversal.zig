@@ -7,6 +7,7 @@
 const std = @import("std");
 
 const context_block = @import("../core/types.zig");
+const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const storage = @import("../storage/engine.zig");
@@ -15,6 +16,7 @@ const assert_mod = @import("../core/assert.zig");
 const assert = assert_mod.assert;
 const testing = std.testing;
 
+const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
 const ContextBlock = context_block.ContextBlock;
@@ -253,14 +255,9 @@ pub const TraversalResult = struct {
     blocks_traversed: u32,
     /// Maximum depth reached during traversal
     max_depth_reached: u32,
-    /// Allocator used for result memory
-    allocator: std.mem.Allocator,
-    /// Arena allocator for O(1) cleanup of all query results
-    query_arena: std.heap.ArenaAllocator,
 
     /// Create traversal result
     pub fn init(
-        allocator: std.mem.Allocator,
         blocks: []const OwnedBlock,
         paths: []const []const BlockId,
         depths: []const u32,
@@ -273,26 +270,7 @@ pub const TraversalResult = struct {
             .depths = depths,
             .blocks_traversed = blocks_traversed,
             .max_depth_reached = max_depth_reached,
-            .allocator = allocator,
-            .query_arena = std.heap.ArenaAllocator.init(allocator), // Initialize empty arena
         };
-    }
-
-    /// Free allocated memory for traversal results
-    /// Uses O(1) arena deallocation for optimal performance
-    pub fn deinit(self: TraversalResult) void {
-        // Free directly allocated arrays first
-        self.allocator.free(self.blocks);
-        self.allocator.free(self.depths);
-
-        // Free paths array and each individual path
-        for (self.paths) |path| {
-            self.allocator.free(path);
-        }
-        self.allocator.free(self.paths);
-
-        // All other memory is managed by the arena - O(1) cleanup
-        self.query_arena.deinit();
     }
 
     /// Check if traversal result is empty
@@ -333,8 +311,6 @@ pub const TraversalResult = struct {
             .depths = cloned_depths,
             .blocks_traversed = self.blocks_traversed,
             .max_depth_reached = self.max_depth_reached,
-            .allocator = backing_allocator,
-            .query_arena = query_arena,
         };
     }
 };
@@ -343,17 +319,13 @@ pub const TraversalResult = struct {
 /// Time complexity: O(V + E) where V is vertices and E is edges traversed
 /// Space complexity: O(V) for visited tracking and result storage
 pub fn execute_traversal(
-    backing_allocator: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    // Use arena allocator for all query results - O(1) cleanup
-    var query_arena = std.heap.ArenaAllocator.init(backing_allocator);
-    errdefer query_arena.deinit();
-    const allocator = query_arena.allocator();
     try query.validate();
 
-    var result = switch (query.algorithm) {
+    const result = switch (query.algorithm) {
         .breadth_first => try traverse_breadth_first(allocator, storage_engine, query),
         .depth_first => try traverse_depth_first(allocator, storage_engine, query),
         .astar_search => try traverse_astar_search(allocator, storage_engine, query),
@@ -362,8 +334,6 @@ pub fn execute_traversal(
         .topological_sort => try traverse_topological_sort(allocator, storage_engine, query),
     };
 
-    // Transfer arena ownership to result
-    result.query_arena = query_arena;
     return result;
 }
 
@@ -463,7 +433,6 @@ fn traverse_breadth_first(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -572,7 +541,6 @@ fn traverse_depth_first(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -807,7 +775,6 @@ fn traverse_astar_search(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -986,7 +953,6 @@ fn traverse_bidirectional_search(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -1128,7 +1094,6 @@ fn traverse_topological_sort(
         const owned_depths = try result_depths.toOwnedSlice();
 
         return TraversalResult.init(
-            allocator,
             owned_blocks,
             owned_paths,
             owned_depths,
@@ -1159,7 +1124,6 @@ fn traverse_topological_sort(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -1420,7 +1384,7 @@ pub fn find_paths_between(
         const blocks = try allocator.alloc(OwnedBlock, 1);
         blocks[0] = source_block.?;
 
-        return TraversalResult.init(allocator, blocks, paths, depths, 1, 0);
+        return TraversalResult.init(blocks, paths, depths, 1, 0);
     }
 
     var visited = VisitedTracker.init(allocator);
@@ -1431,12 +1395,7 @@ pub fn find_paths_between(
     defer result_blocks.deinit();
 
     var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    defer {
-        for (result_paths.items) |path| {
-            allocator.free(path);
-        }
-        result_paths.deinit();
-    }
+    defer result_paths.deinit();
 
     var result_depths = std.array_list.Managed(u32).init(allocator);
     defer result_depths.deinit();
@@ -1511,6 +1470,7 @@ pub fn find_paths_between(
                 });
                 try visited.put(next_id);
             } else {
+                // Path not used, free it
                 allocator.free(new_path);
             }
         }
@@ -1521,7 +1481,6 @@ pub fn find_paths_between(
     const owned_depths = try result_depths.toOwnedSlice();
 
     return TraversalResult.init(
-        allocator,
         owned_blocks,
         owned_paths,
         owned_depths,
@@ -1579,7 +1538,14 @@ test "find_paths_between returns direct path for connected blocks" {
         target_block.id,
         5,
     );
-    defer result.deinit();
+    defer {
+        allocator.free(result.blocks);
+        allocator.free(result.depths);
+        for (result.paths) |path| {
+            allocator.free(path);
+        }
+        allocator.free(result.paths);
+    }
 
     // Verify results
     try testing.expect(result.paths.len >= 1);
