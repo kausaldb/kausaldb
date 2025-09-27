@@ -16,6 +16,16 @@ const harness = @import("../../testing/harness.zig");
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const storage_engine_mod = @import("../../storage/engine.zig");
 const types = @import("../../core/types.zig");
+const internal = @import("../../internal.zig");
+const memory = @import("../../core/memory.zig");
+const sstable_mod = @import("../../storage/sstable.zig");
+const bloom_filter_mod = @import("../../storage/bloom_filter.zig");
+const tombstone_mod = @import("../../storage/tombstone.zig");
+
+const ArenaCoordinator = memory.ArenaCoordinator;
+const BloomFilter = bloom_filter_mod.BloomFilter;
+const SSTable = sstable_mod.SSTable;
+const TombstoneRecord = tombstone_mod.TombstoneRecord;
 
 const OperationMix = harness.OperationMix;
 const SimulationRunner = harness.SimulationRunner;
@@ -581,6 +591,114 @@ test "regression: issue #400 - edge loss during memtable flush" {
     const outgoing_auth_after = runner.storage_engine.find_outgoing_edges(block1_id);
     try testing.expect(outgoing_auth_after.len == 1);
     try testing.expect(outgoing_auth_after[0].edge.target_id.eql(block2_id));
+}
+
+// ====================================================================
+// Regression: Bloom filter serialize/deserialize corruption
+// ====================================================================
+
+test "regression: bloom filter corruption - invalid EdgeType values" {
+    // Original bug: Bloom filter serialize/deserialize in build_sstable_metadata()
+    // caused memory corruption that manifested as invalid EdgeType values (257, 259, 43690).
+    // Root cause: Bloom filter cloning via serialize/deserialize corrupted adjacent memory.
+    // Fix: Disabled bloom filter metadata caching, reverted to direct SSTable scanning.
+    // Found: 2024 via integration test failures
+    // Fixed: commit dc650f1
+
+    const allocator = testing.allocator;
+
+    // Test 1: Bloom filter round-trip integrity
+    {
+        var original = try BloomFilter.init(allocator, BloomFilter.Params.medium);
+        defer original.deinit();
+
+        const test_blocks = [_]BlockId{
+            try BlockId.from_hex("0123456789abcdeffedcba9876543210"),
+            try BlockId.from_hex("fedcba9876543210123456789abcdef0"),
+            try BlockId.from_hex("deadbeefdeadbeefdeadbeefdeadbeef"),
+        };
+
+        for (test_blocks) |block_id| {
+            original.add(block_id);
+        }
+
+        // Reproduce the cloning pattern that caused corruption
+        for (0..10) |_| {
+            const serialized_size = original.serialized_size();
+            const buffer = try allocator.alloc(u8, serialized_size);
+            defer allocator.free(buffer);
+
+            try original.serialize(buffer);
+            var cloned = try BloomFilter.deserialize(allocator, buffer);
+            defer cloned.deinit();
+
+            // Verify integrity
+            for (test_blocks) |block_id| {
+                try testing.expect(original.might_contain(block_id));
+                try testing.expect(cloned.might_contain(block_id));
+            }
+        }
+    }
+
+    // Test 2: SSTable edge data integrity with bloom filters
+    {
+        var vfs = try simulation_vfs.SimulationVFS.init(allocator);
+        defer vfs.deinit();
+
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        var arena_coordinator = ArenaCoordinator.init(&arena);
+
+        const blocks = [_]ContextBlock{
+            ContextBlock{
+                .id = try BlockId.from_hex("11111111111111111111111111111111"),
+                .sequence = 1,
+                .content = "test block one",
+                .source_uri = "test://file1",
+                .metadata_json = "{}",
+            },
+            ContextBlock{
+                .id = try BlockId.from_hex("22222222222222222222222222222222"),
+                .sequence = 2,
+                .content = "test block two",
+                .source_uri = "test://file2",
+                .metadata_json = "{}",
+            },
+        };
+
+        // Create edges with all valid EdgeType values
+        const edges = [_]GraphEdge{
+            GraphEdge{ .source_id = blocks[0].id, .target_id = blocks[1].id, .edge_type = .imports },
+            GraphEdge{ .source_id = blocks[1].id, .target_id = blocks[0].id, .edge_type = .calls },
+            GraphEdge{ .source_id = blocks[0].id, .target_id = blocks[1].id, .edge_type = .references },
+        };
+
+        var sstable = SSTable.init(&arena_coordinator, allocator, vfs.vfs(), "bloom_test.sst");
+        defer sstable.deinit();
+
+        const blocks_slice: []const ContextBlock = blocks[0..];
+        const edges_slice: []const GraphEdge = edges[0..];
+        try sstable.write_blocks(blocks_slice, &[_]TombstoneRecord{}, edges_slice);
+        try sstable.read_index();
+
+        // Verify edge types are not corrupted
+        for (sstable.edge_index.items) |edge_entry| {
+            const edge_value = @intFromEnum(edge_entry.edge_type);
+            // Bug manifested as values like 257, 259, 43690
+            try testing.expect(edge_value >= 1 and edge_value <= 11);
+        }
+    }
+
+    // Test 3: Verify edge type corruption detection
+    {
+        const corrupted_values = [_]u16{ 257, 259, 43690, 65535, 0, 12, 255 };
+        for (corrupted_values) |corrupted| {
+            const result = std.meta.intToEnum(EdgeType, corrupted);
+            try testing.expectError(error.InvalidEnumTag, result);
+        }
+    }
+
+    log.info("Bloom filter corruption regression test passed - EdgeType values remain valid", .{});
 }
 
 // ====================================================================

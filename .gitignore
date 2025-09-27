@@ -12,6 +12,7 @@ performance-baseline.json
 fuzz_reports/
 fuzz-corpus/
 .fuzzing_monitoring
+.working/
 
 # Data directories (runtime generated)
 .kausaldb-data
