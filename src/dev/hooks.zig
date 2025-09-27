@@ -37,12 +37,9 @@ const Hook = enum {
             \\echo "Checking style rules..."
             \\./zig/zig build tidy
             \\
-            \\# Verify core binaries compile
+            \\# Verify all binaries compile
             \\echo "Verifying binary compilation..."
             \\./zig/zig build
-            \\./zig/zig build bench-compile
-            \\./zig/zig build fuzz-compile
-            \\./zig/zig build fuzz-quick-compile
             \\
             \\# Run tests
             \\echo "Running tests..."
