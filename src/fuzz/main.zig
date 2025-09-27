@@ -305,7 +305,7 @@ pub const Fuzzer = struct {
                 },
                 3 => {
                     const delta = self.prng.random().intRangeAtMost(i8, -10, 10);
-                    input[pos] = @intCast(@as(i16, input[pos]) + delta);
+                    input[pos] = @truncate(@as(u16, @bitCast(@as(i16, input[pos]) + delta)));
                 },
                 4 => {
                     if (input.len > 16) {
