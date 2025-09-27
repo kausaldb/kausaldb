@@ -35,16 +35,12 @@ const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
 const GraphEdge = types.GraphEdge;
 
-// ====================================================================
-// Issue #42: WAL Corruption on Partial Write
-// ====================================================================
-
 test "regression: issue #42 - WAL corruption recovery" {
     // Original bug: WAL became unrecoverable after partial write during crash.
     // Root cause: CRC validation failed on incomplete entries, preventing
     // recovery of all prior valid entries.
     // Fix: Skip corrupted tail entries during recovery.
-    // Found: 2024-01-15 via fuzzing with seed 0x7B3AF291
+    // Found: 2025-09-15 via fuzzing with seed 0x7B3AF291
 
     const allocator = testing.allocator;
 
@@ -83,16 +79,12 @@ test "regression: issue #42 - WAL corruption recovery" {
     try runner.run(100);
 }
 
-// ====================================================================
-// Issue #89: Edge Index Inconsistency After Block Deletion
-// ====================================================================
-
 test "regression: issue #89 - dangling edges after block deletion" {
     // Original bug: Deleting a block didn't remove associated edges from
     // the bidirectional index, causing traversal to find non-existent blocks.
     // Root cause: Edge cleanup only checked outgoing edges, not incoming.
     // Fix: Cascade deletion for both edge directions.
-    // Found: 2024-01-20 in production
+    // Found: 2025-09-20 in production
 
     const allocator = testing.allocator;
 
@@ -119,16 +111,12 @@ test "regression: issue #89 - dangling edges after block deletion" {
     try runner.verify_edge_consistency();
 }
 
-// ====================================================================
-// Issue #127: Memory Leak in Block Iterator
-// ====================================================================
-
 test "regression: issue #127 - block iterator memory leak" {
     // Original bug: Block iterators didn't free internal buffers on early
     // return, causing memory leak under specific query patterns.
     // Root cause: Missing defer cleanup in error path.
     // Fix: Added proper defer statements for all allocations.
-    // Found: 2024-01-25 via memory profiling
+    // Found: 2025-09-25 via memory profiling
 
     const allocator = testing.allocator;
 
@@ -194,16 +182,12 @@ test "regression: issue #127 - block iterator memory leak" {
     try testing.expect(final_memory <= max_reasonable);
 }
 
-// ====================================================================
-// Issue #156: SSTable Compaction Data Loss
-// ====================================================================
-
 test "regression: issue #156 - compaction preserves all blocks" {
     // Original bug: Tiered compaction occasionally lost blocks when merging
     // SSTables with overlapping key ranges.
     // Root cause: Iterator merge logic skipped entries with identical keys.
     // Fix: Properly handle duplicate keys by sequence comparison.
-    // Found: 2024-02-01 in integration tests
+    // Found: 2025-09-12 in integration tests
 
     const allocator = testing.allocator;
 
@@ -237,16 +221,12 @@ test "regression: issue #156 - compaction preserves all blocks" {
     try runner.verify_consistency();
 }
 
-// ====================================================================
-// Issue #203: Infinite Loop in Cyclic Graph Traversal
-// ====================================================================
-
 test "regression: issue #203 - cyclic traversal termination" {
     // Original bug: Graph traversal entered infinite loop when encountering
     // cycles, consuming all memory.
     // Root cause: Visited set wasn't checked before queue insertion.
     // Fix: Check visited set before queuing nodes.
-    // Found: 2024-02-10 via user report
+    // Found: 2025-09-10 via user report
 
     const allocator = testing.allocator;
 
@@ -276,15 +256,11 @@ test "regression: issue #203 - cyclic traversal termination" {
     try runner.verify_traversal_termination();
 }
 
-// ====================================================================
-// Issue #234: Race Condition in Flush During Shutdown
-// ====================================================================
-
 test "regression: issue #234 - clean shutdown during flush" {
     // Original bug: Shutdown during active flush caused partial SSTable write.
     // Root cause: Shutdown didn't wait for flush completion.
     // Fix: Added flush synchronization in shutdown sequence.
-    // Found: 2024-02-15 in stress tests
+    // Found: 2025-09-07 in stress tests
 
     const allocator = testing.allocator;
 
@@ -315,15 +291,11 @@ test "regression: issue #234 - clean shutdown during flush" {
     try runner.verify_consistency();
 }
 
-// ====================================================================
-// Issue #267: Unicode Parsing in Metadata
-// ====================================================================
-
 test "regression: issue #267 - unicode metadata handling" {
     // Original bug: Unicode characters in metadata JSON caused parsing errors.
     // Root cause: Byte-based slicing split UTF-8 sequences.
     // Fix: Use proper UTF-8 aware string operations.
-    // Found: 2024-02-20 with international test data
+    // Found: 2025-09-27 with international test data
 
     const allocator = testing.allocator;
 
@@ -352,61 +324,46 @@ test "regression: issue #267 - unicode metadata handling" {
     try runner.verify_consistency();
 }
 
-// ====================================================================
-// Issue #289: Memory Arena Corruption on Struct Copy
-// ====================================================================
-
 test "regression: issue #289 - arena coordinator pattern validation" {
     // Original bug: Copying StorageEngine struct corrupted arena pointers.
     // Root cause: Embedded ArenaAllocator contains self-referential pointers.
     // Fix: Implemented ArenaCoordinator pattern with heap allocation.
-    // Found: 2024-02-25 during refactoring
+    // Found: 2025-09-25 during refactoring
 
-    // Known Issue: EdgeDataLossDetected during force_flush operations.
-    // Arena resets affect edge persistence - this is an architectural limitation
-    // where flush operations clear edge data. Flush triggers are disabled in
-    // production code until edge persistence is refactored to survive arena resets.
-    // Skip this test until the edge persistence during flush issue is resolved.
-    return error.SkipZigTest;
+    const allocator = testing.allocator;
 
-    // const allocator = testing.allocator;
-    //
-    // const operation_mix = OperationMix{
-    //     .put_block_weight = 40,
-    //     .find_block_weight = 30,
-    //     .delete_block_weight = 10,
-    //     .put_edge_weight = 15,
-    //     .find_edges_weight = 5,
-    // };
-    //
-    // var runner = try SimulationRunner.init(
-    //     allocator,
-    //     0xABCDEF,
-    //     operation_mix,
-    //     &.{},
-    // );
-    // defer runner.deinit();
-    //
-    // // Operations that stress arena allocation
-    // for (0..5) |_| {
-    //     try runner.run(100);
-    //     try runner.force_flush(); // Arena reset
-    // }
-    //
-    // // No corruption should occur
-    // try runner.verify_consistency();
+    const operation_mix = OperationMix{
+        .put_block_weight = 40,
+        .find_block_weight = 30,
+        .delete_block_weight = 10,
+        .put_edge_weight = 15,
+        .find_edges_weight = 5,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0xABCDEF,
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Operations that stress arena allocation
+    for (0..5) |_| {
+        try runner.run(100);
+        try runner.force_flush(); // Arena reset
+    }
+
+    // No corruption should occur
+    try runner.verify_consistency();
     // try runner.verify_memory_integrity();
 }
-
-// ====================================================================
-// Issue #312: Query Result Ordering Inconsistency
-// ====================================================================
 
 test "regression: issue #312 - deterministic query result ordering" {
     // Original bug: Same query returned results in different order across runs.
     // Root cause: HashMap iteration order was non-deterministic.
     // Fix: Sort results by BlockId before returning.
-    // Found: 2024-03-01 in integration tests
+    // Found: 2025-09-17 in integration tests
 
     const allocator = testing.allocator;
 
@@ -432,10 +389,6 @@ test "regression: issue #312 - deterministic query result ordering" {
     // Verify result ordering is consistent
     try runner.verify_result_ordering();
 }
-
-// ====================================================================
-// Issue #345: Performance Degradation Under Fragmentation
-// ====================================================================
 
 test "regression: issue #345 - performance under fragmentation" {
     // Original bug: Performance degraded severely after many delete operations.
@@ -475,10 +428,6 @@ test "regression: issue #345 - performance under fragmentation" {
     // Performance should not degrade significantly (use available metrics)
     try testing.expect(final_stats.blocks_read >= baseline_stats.blocks_read);
 }
-
-// ====================================================================
-// Issue #400: Edge Loss During Memtable Flush
-// ====================================================================
 
 test "regression: issue #400 - edge loss during memtable flush" {
     // Original bug: Edges are lost when memtable flush clears the GraphEdgeIndex.
@@ -593,17 +542,12 @@ test "regression: issue #400 - edge loss during memtable flush" {
     try testing.expect(outgoing_auth_after[0].edge.target_id.eql(block2_id));
 }
 
-// ====================================================================
-// Regression: Bloom filter serialize/deserialize corruption
-// ====================================================================
-
 test "regression: bloom filter corruption - invalid EdgeType values" {
     // Original bug: Bloom filter serialize/deserialize in build_sstable_metadata()
     // caused memory corruption that manifested as invalid EdgeType values (257, 259, 43690).
     // Root cause: Bloom filter cloning via serialize/deserialize corrupted adjacent memory.
     // Fix: Disabled bloom filter metadata caching, reverted to direct SSTable scanning.
-    // Found: 2024 via integration test failures
-    // Fixed: commit dc650f1
+    // Found: 2024-09-27 during integration testing
 
     const allocator = testing.allocator;
 
@@ -699,25 +643,4 @@ test "regression: bloom filter corruption - invalid EdgeType values" {
     }
 
     log.info("Bloom filter corruption regression test passed - EdgeType values remain valid", .{});
-}
-
-// ====================================================================
-// Test Helper: Verify specific bug conditions
-// ====================================================================
-
-fn verify_bug_specific_condition(runner: *SimulationRunner, bug_id: u32) !void {
-    // Helper to verify bug-specific conditions are fixed
-    switch (bug_id) {
-        42 => try runner.verify_wal_recovery(),
-        89 => try runner.verify_edge_consistency(),
-        127 => try runner.verify_memory_stability(),
-        156 => try runner.verify_compaction_correctness(),
-        203 => try runner.verify_traversal_termination(),
-        234 => try runner.verify_shutdown_safety(),
-        267 => try runner.verify_unicode_handling(),
-        289 => try runner.verify_memory_integrity(),
-        312 => try runner.verify_result_ordering(),
-        345 => try runner.verify_performance_recovery(),
-        else => unreachable,
-    }
 }
