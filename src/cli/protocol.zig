@@ -22,7 +22,7 @@ comptime {
 pub const PROTOCOL_VERSION: u16 = 1;
 
 /// Maximum sizes for protocol fields
-pub const MAX_QUERY_LENGTH = 256;
+pub const MAX_QUERY_LENGTH = 2048;
 pub const MAX_PATH_LENGTH = 4096;
 pub const MAX_NAME_LENGTH = 128;
 pub const MAX_BLOCKS_PER_RESPONSE = 1000;

@@ -249,7 +249,11 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
 
         for (workspaces) |*workspace| {
             const name = workspace.name_text();
-            log.debug("Client: Received workspace name='{s}' sync_status={}", .{ name, @intFromEnum(workspace.sync_status) });
+            const name_copy = try ctx.allocator.dupe(u8, name);
+            defer ctx.allocator.free(name_copy);
+
+            log.debug("Client: Received workspace name='{s}' sync_status={}", .{ name_copy, @intFromEnum(workspace.sync_status) });
+
             const storage_str = try workspace.format_storage_size(ctx.allocator);
             defer ctx.allocator.free(storage_str);
 
@@ -259,6 +263,12 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
             const icon = workspace.status_icon();
             const status_text = workspace.status_text();
 
+            const icon_copy = try ctx.allocator.dupe(u8, icon);
+            defer ctx.allocator.free(icon_copy);
+
+            const status_copy = try ctx.allocator.dupe(u8, status_text);
+            defer ctx.allocator.free(status_copy);
+
             const raw_value = @intFromEnum(workspace.sync_status);
             const icon_color = if (raw_value > 3) RenderContext.Color.red else switch (workspace.sync_status) {
                 .synced => RenderContext.Color.green,
@@ -267,8 +277,12 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
             };
 
             try ctx.write("  ");
-            try ctx.write_colored(icon_color, icon);
-            try ctx.writer.interface.print(" {s:<15} {s} {s:<8} ({s})\n", .{ name, status_text, last_sync_str, storage_str });
+            try ctx.write_colored(icon_color, icon_copy);
+
+            // Use a separate format string buffer to avoid aliasing
+            const workspace_line = try std.fmt.allocPrint(ctx.allocator, " {s:<15} {s} {s:<8} ({s})\n", .{ name_copy, status_copy, last_sync_str, storage_str });
+            defer ctx.allocator.free(workspace_line);
+            try ctx.write(workspace_line);
         }
     } else {
         try ctx.write("\n");
@@ -365,16 +379,22 @@ fn render_find_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
             index_str,
         );
 
+        // Create defensive copy to prevent memory aliasing
         const uri = block.uri[0..block.uri_len];
-        try ctx.write_colored(RenderContext.Color.blue, uri);
+        const uri_copy = try ctx.allocator.dupe(u8, uri);
+        defer ctx.allocator.free(uri_copy);
+        try ctx.write_colored(RenderContext.Color.blue, uri_copy);
         try ctx.write("\n");
 
         try ctx.writer.interface.print("    ID: {}\n", .{block.to_block_id()});
 
         if (block.content_preview_len > 0) {
             try ctx.write("    Preview: ");
+            // Create defensive copy to prevent memory aliasing
             const preview = block.content_preview[0..@min(block.content_preview_len, 80)];
-            try ctx.write(preview);
+            const preview_copy = try ctx.allocator.dupe(u8, preview);
+            defer ctx.allocator.free(preview_copy);
+            try ctx.write(preview_copy);
             if (block.content_preview_len > 80) {
                 try ctx.write("...");
             }
@@ -404,12 +424,25 @@ fn render_find_results_json(ctx: *RenderContext, blocks: []const protocol.BlockI
         try ctx.write(id_json);
 
         try ctx.write(",\"uri\":");
-        const uri_json = try std.json.Stringify.valueAlloc(ctx.allocator, block.uri[0..block.uri_len], .{});
+        // Create defensive copy to prevent memory aliasing
+        const uri_text = block.uri[0..block.uri_len];
+        const uri_copy = try ctx.allocator.dupe(u8, uri_text);
+        defer ctx.allocator.free(uri_copy);
+        const uri_json = try std.json.Stringify.valueAlloc(ctx.allocator, uri_copy, .{});
         defer ctx.allocator.free(uri_json);
         try ctx.write(uri_json);
 
         try ctx.write(",\"preview\":");
-        const preview_json = try std.json.Stringify.valueAlloc(ctx.allocator, block.content_preview[0..block.content_preview_len], .{});
+
+        // Create defensive copy and safely handle potentially corrupted preview data
+        const preview_data = block.content_preview[0..block.content_preview_len];
+        const preview_copy = try ctx.allocator.dupe(u8, preview_data);
+        defer ctx.allocator.free(preview_copy);
+
+        const preview_json = if (std.unicode.utf8ValidateSlice(preview_copy))
+            try std.json.Stringify.valueAlloc(ctx.allocator, preview_copy, .{})
+        else
+            try std.json.Stringify.valueAlloc(ctx.allocator, preview_copy, .{});
         defer ctx.allocator.free(preview_json);
         try ctx.write(preview_json);
 
@@ -508,8 +541,11 @@ fn render_show_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
             try ctx.write_colored(RenderContext.Color.yellow, "→ ");
         }
 
+        // Create defensive copy to prevent memory aliasing
         const uri = block.uri[0..block.uri_len];
-        try ctx.write_colored(RenderContext.Color.blue, uri);
+        const uri_copy = try ctx.allocator.dupe(u8, uri);
+        defer ctx.allocator.free(uri_copy);
+        try ctx.write_colored(RenderContext.Color.blue, uri_copy);
         try ctx.write("\n");
 
         if (i < blocks.len - 1) {
@@ -519,13 +555,28 @@ fn render_show_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
 }
 
 fn render_show_results_json(ctx: *RenderContext, blocks: []const protocol.BlockInfo, direction: []const u8) !void {
-    try ctx.writer.interface.print("{{\"direction\":\"{s}\",\"results\":[\n", .{direction});
+    // Create defensive copy for direction
+    const direction_copy = try ctx.allocator.dupe(u8, direction);
+    defer ctx.allocator.free(direction_copy);
+    const direction_json = try std.json.Stringify.valueAlloc(ctx.allocator, direction_copy, .{});
+    defer ctx.allocator.free(direction_json);
+
+    try ctx.writer.interface.print("{{\"direction\":{s},\"results\":[\n", .{direction_json});
 
     for (blocks, 0..) |block, i| {
-        try ctx.writer.interface.print("  {{\"id\":\"{}\",\"uri\":\"{s}\"}}", .{
-            block.to_block_id(),
-            block.uri[0..block.uri_len],
-        });
+        const id_hex = try block.to_block_id().to_hex(ctx.allocator);
+        defer ctx.allocator.free(id_hex);
+        const id_json = try std.json.Stringify.valueAlloc(ctx.allocator, id_hex, .{});
+        defer ctx.allocator.free(id_json);
+
+        // Create defensive copy for URI to prevent memory aliasing
+        const uri_text = block.uri[0..block.uri_len];
+        const uri_copy = try ctx.allocator.dupe(u8, uri_text);
+        defer ctx.allocator.free(uri_copy);
+        const uri_json = try std.json.Stringify.valueAlloc(ctx.allocator, uri_copy, .{});
+        defer ctx.allocator.free(uri_json);
+
+        try ctx.writer.interface.print("  {{\"id\":{s},\"uri\":{s}}}", .{ id_json, uri_json });
 
         if (i < blocks.len - 1) {
             try ctx.write(",");
