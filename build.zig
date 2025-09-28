@@ -291,15 +291,17 @@ fn create_test_runner(context: BuildContext, test_exe: *std.Build.Step.Compile) 
     return run_test;
 }
 
+const E2E_PORT: u16 = 3839;
+const E2E_DATA_DIR = ".kausaldb_data/e2e";
+const E2E_PID_FILE = ".kausaldb_data/e2e/server.pid";
+const E2E_TIMEOUT_MS: u32 = 10000;
+const E2E_STDOUT_PATH = 10000;
+
 const E2EServerStep = struct {
     step: std.Build.Step,
     b: *std.Build,
     allocator: std.mem.Allocator,
     server_exe: *std.Build.Step.Compile,
-
-    const E2E_PORT: u16 = 3839;
-    const E2E_DATA_DIR = ".kausaldb_data/e2e";
-    const E2E_TIMEOUT_MS: u32 = 10000;
 
     const Self = @This();
 
@@ -326,11 +328,16 @@ const E2EServerStep = struct {
     fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
         const self: *Self = @fieldParentPtr("step", step);
 
+        // Kill any existing processes on the port first
+        self.kill_port_processes(E2E_PORT) catch {};
+
         // Clean test environment and stray log files
         std.fs.cwd().deleteTree(E2E_DATA_DIR) catch {};
-        std.fs.cwd().deleteFile("e2e-server-stdout.log") catch {};
-        std.fs.cwd().deleteFile("e2e-server-stderr.log") catch {};
+        std.fs.cwd().deleteFile(E2E_PID_FILE) catch {};
         try std.fs.cwd().makePath(E2E_DATA_DIR);
+
+        // Wait a bit to ensure port is free
+        std.Thread.sleep(200 * std.time.ns_per_ms);
 
         // Start server in background
         const server_path = self.server_exe.getEmittedBin().getPath(self.b);
@@ -356,7 +363,7 @@ const E2EServerStep = struct {
         try server_process.spawn();
 
         // Write PID to file for cleanup
-        const pid_file = try std.fs.cwd().createFile(".kausaldb_data/e2e/server.pid", .{});
+        const pid_file = try std.fs.cwd().createFile(E2E_PID_FILE, .{});
         defer pid_file.close();
         const pid_str = try std.fmt.allocPrint(self.allocator, "{}\n", .{server_process.id});
         defer self.allocator.free(pid_str);
@@ -364,6 +371,31 @@ const E2EServerStep = struct {
 
         // Wait for server readiness
         try self.wait_for_server();
+    }
+
+    fn kill_port_processes(self: *Self, port: u16) !void {
+        const port_str = try std.fmt.allocPrint(self.allocator, "{d}", .{port});
+        defer self.allocator.free(port_str);
+
+        const lsof_arg = try std.fmt.allocPrint(self.allocator, ":{s}", .{port_str});
+        defer self.allocator.free(lsof_arg);
+
+        const lsof_result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "lsof", "-t", "-i", lsof_arg },
+        }) catch return;
+        defer {
+            self.allocator.free(lsof_result.stdout);
+            self.allocator.free(lsof_result.stderr);
+        }
+
+        if (lsof_result.stdout.len > 0) {
+            var pid_iter = std.mem.tokenizeAny(u8, lsof_result.stdout, " \n\r\t");
+            while (pid_iter.next()) |pid_str_raw| {
+                const pid = std.fmt.parseInt(std.posix.pid_t, pid_str_raw, 10) catch continue;
+                std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+            }
+        }
     }
 
     fn wait_for_server(self: *Self) !void {
@@ -412,8 +444,11 @@ const E2ECleanupStep = struct {
     fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
         const self: *Self = @fieldParentPtr("step", step);
 
+        // Kill any process using the E2E port first
+        self.kill_port_processes(E2E_PORT) catch {};
+
         // Kill server using PID file
-        const pid_file = std.fs.cwd().openFile(".kausaldb_data/e2e/server.pid", .{}) catch return;
+        const pid_file = std.fs.cwd().openFile(E2E_PID_FILE, .{}) catch return;
         defer pid_file.close();
 
         const pid_str = try pid_file.readToEndAlloc(self.allocator, 32);
@@ -423,11 +458,37 @@ const E2ECleanupStep = struct {
 
         // Try graceful shutdown first, then force kill
         std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-        std.Thread.sleep(100 * std.time.ns_per_ms); // Give it time to shutdown
+        std.Thread.sleep(500 * std.time.ns_per_ms); // Give it time to shutdown
         std.posix.kill(pid, std.posix.SIG.KILL) catch {};
 
-        // Clean up PID file
-        std.fs.cwd().deleteFile(".kausaldb_data/e2e/server.pid") catch {};
+        std.fs.cwd().deleteFile(E2E_PID_FILE) catch {};
+    }
+
+    fn kill_port_processes(self: *Self, port: u16) !void {
+        // Kill any processes using the port (macOS/Linux)
+        const port_str = try std.fmt.allocPrint(self.allocator, "{d}", .{port});
+        defer self.allocator.free(port_str);
+
+        const lsof_arg = try std.fmt.allocPrint(self.allocator, ":{s}", .{port_str});
+        defer self.allocator.free(lsof_arg);
+
+        // Try lsof approach for finding port users
+        const lsof_result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "lsof", "-t", "-i", lsof_arg },
+        }) catch return;
+        defer {
+            self.allocator.free(lsof_result.stdout);
+            self.allocator.free(lsof_result.stderr);
+        }
+
+        if (lsof_result.stdout.len > 0) {
+            var pid_iter = std.mem.tokenizeAny(u8, lsof_result.stdout, " \n\r\t");
+            while (pid_iter.next()) |pid_str_raw| {
+                const pid = std.fmt.parseInt(std.posix.pid_t, pid_str_raw, 10) catch continue;
+                std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+            }
+        }
     }
 };
 

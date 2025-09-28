@@ -62,7 +62,17 @@ pub fn safe_exit_code(term: std.process.Child.Term) u8 {
     return switch (term) {
         .Exited => |code| @intCast(code),
         .Signal => |sig| blk: {
-            std.debug.print("Process terminated with signal: {}\n", .{sig});
+            std.debug.print("Process terminated with signal: {}", .{sig});
+            if (sig == 6) {
+                std.debug.print(" (SIGABRT - likely panic or abort)", .{});
+            } else if (sig == 11) {
+                std.debug.print(" (SIGSEGV - segmentation fault)", .{});
+            } else if (sig == 9) {
+                std.debug.print(" (SIGKILL - forcefully killed)", .{});
+            } else if (sig == 15) {
+                std.debug.print(" (SIGTERM - graceful termination)", .{});
+            }
+            std.debug.print("\n", .{});
             break :blk @as(u8, 255);
         },
         .Stopped => |sig| blk: {
