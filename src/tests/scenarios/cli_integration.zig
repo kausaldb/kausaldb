@@ -139,9 +139,18 @@ const MockServer = struct {
     fn serve_loop(self: *MockServer) void {
         log.debug("MockServer: starting serve loop", .{});
         while (self.running.load(.monotonic)) {
+            if (self.socket_closed) {
+                // Socket closed while we were running
+                break;
+            }
+
             const connection = self.server.accept() catch |err| switch (err) {
                 error.SocketNotListening => {
                     log.debug("MockServer: socket not listening, breaking", .{});
+                    break;
+                },
+                error.FileDescriptorNotASocket, error.ConnectionAborted, error.NetworkSubsystemFailed => {
+                    log.debug("MockServer: socket closed or connection aborted: {}, breaking", .{err});
                     break;
                 },
                 error.WouldBlock => {
@@ -150,7 +159,7 @@ const MockServer = struct {
                     continue;
                 },
                 else => {
-                    log.debug("MockServer: accept error: {}", .{err});
+                    log.debug("MockServer: accept error: {}, continuing", .{err});
                     // Other errors, sleep briefly to avoid busy loop
                     std.Thread.sleep(1 * std.time.ns_per_ms);
                     continue;
