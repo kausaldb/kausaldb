@@ -213,13 +213,11 @@ pub const ConnectionManager = struct {
     /// Handles timeouts and error conditions internally.
     pub fn poll_for_ready_connections(self: *ConnectionManager, listener: *std.net.Server) ![]const *ClientConnection {
         const poll_count = self.build_poll_fds(listener);
-        log.debug("Poll setup: {} fds to monitor ({} connections)", .{ poll_count, self.connections.items.len });
 
-        log.debug("About to poll {} file descriptors with timeout {}ms", .{ poll_count, self.config.poll_timeout_ms });
         const ready_count = std.posix.poll(self.poll_fds[0..poll_count], self.config.poll_timeout_ms) catch |err| switch (err) {
             error.Unexpected => {
-                log.debug("Poll interrupted by signal", .{});
-                return &[_]*ClientConnection{}; // Signal interruption
+                // Signal interruption is normal during shutdown
+                return &[_]*ClientConnection{};
             },
             else => {
                 log.err("Poll failed with error: {}", .{err});
@@ -228,11 +226,6 @@ pub const ConnectionManager = struct {
         };
 
         self.stats.poll_cycles_completed += 1;
-        log.debug("Poll result: {} fds ready out of {} (timeout: {}ms)", .{ ready_count, poll_count, self.config.poll_timeout_ms });
-
-        if (ready_count == 0) {
-            log.debug("Poll timeout - no file descriptors ready", .{});
-        }
 
         if (ready_count == 0) {
             // Poll timeout - run maintenance operations on idle connections
@@ -306,6 +299,7 @@ pub const ConnectionManager = struct {
 
     /// Check if connection should be closed due to client hangup
     fn should_close_for_hangup(poll_fd: std.posix.pollfd, connection_id: u32) bool {
+        _ = connection_id; // Unused in production, kept for debugging context
         const has_hangup = (poll_fd.revents & std.posix.POLL.HUP) != 0;
         const has_data = (poll_fd.revents & std.posix.POLL.IN) != 0;
 
@@ -314,11 +308,7 @@ pub const ConnectionManager = struct {
             return true;
         }
 
-        if (has_hangup and has_data) {
-            // Client closed but data available - process data first
-            log.debug("Connection {}: processing final data before closure", .{connection_id});
-        }
-
+        // If hangup with data, we'll process the data first in normal flow
         return false;
     }
 

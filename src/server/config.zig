@@ -27,6 +27,19 @@ pub const ServerConfig = struct {
     /// Operational configuration
     enable_logging: bool = false,
 
+    // Production operational paths
+    log_dir: []const u8 = "/var/log/kausaldb",
+    pid_dir: []const u8 = "/var/run/kausaldb", 
+    
+    // Production logging configuration  
+    log_rotation_size_mb: u32 = 100,        // Rotate logs at 100MB
+    log_retention_days: u32 = 30,           // Keep logs for 30 days
+    structured_logging: bool = false,        // JSON format vs text
+    enable_hot_path_logging: bool = false,   // Debug logging in critical paths
+    
+    // Performance tuning
+    stats_update_interval_sec: u32 = 10,     // Statistics update frequency
+
     /// Validate configuration for consistency and safety
     pub fn validate(self: ServerConfig) !void {
         if (self.port == 0) return error.InvalidPort;
@@ -106,6 +119,14 @@ pub fn parse_server_args(_: std.mem.Allocator, args: []const []const u8) !Server
             };
         } else if (std.mem.eql(u8, arg, "--enable-logging")) {
             config.enable_logging = true;
+        } else if (std.mem.eql(u8, arg, "--enable-hot-path-logging")) {
+            config.enable_hot_path_logging = true;
+        } else if (std.mem.eql(u8, arg, "--structured-logging")) {
+            config.structured_logging = true;
+        } else if (std.mem.eql(u8, arg, "--log-dir")) {
+            config.log_dir = try consume_flag_value(args, &i, "--log-dir");
+        } else if (std.mem.eql(u8, arg, "--pid-dir")) {
+            config.pid_dir = try consume_flag_value(args, &i, "--pid-dir");
         } else {
             std.debug.print("Error: Unknown argument: {s}\n", .{arg});
             return error.InvalidArgs;

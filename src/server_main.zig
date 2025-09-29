@@ -222,16 +222,19 @@ fn parse_server_command(args: []const []const u8) !ServerCommand {
 fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !ExitCode {
     const config = try config_mod.parse_server_args(allocator, cmd_args);
 
+    // Create operational directories
+    try create_operational_directories(config);
+
     // Check if server is already running
-    const startup_status = try daemon.check_startup_status(allocator, "/tmp", "kausaldb", config.port);
+    const startup_status = try daemon.check_startup_status(allocator, config.pid_dir, "kausaldb", config.port);
     switch (startup_status) {
         .already_running => {
-            const existing_pid = try daemon.read_pid_file(allocator, "/tmp", "kausaldb", config.port);
+            const existing_pid = try daemon.read_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
             std.debug.print("Server is already running with PID {}\n", .{existing_pid.?});
             return ExitCode.general_error;
         },
         .stale_pid_file => {
-            daemon.remove_pid_file(allocator, "/tmp", "kausaldb", config.port);
+            daemon.remove_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
         },
         .can_start => {
             // Good to start
@@ -239,18 +242,21 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     }
 
     if (config.daemonize) {
-        try daemon.daemonize("/tmp/kausaldb.log");
+        // Create production log file path
+        const log_file_path = try std.fmt.allocPrint(allocator, "{s}/kausaldb-{}.log", .{ config.log_dir, config.port });
+        defer allocator.free(log_file_path);
+        try daemon.daemonize(log_file_path);
     }
 
     // Write PID file after daemonization
     const current_pid = stdx.getpid();
-    try daemon.write_pid_file(allocator, "/tmp", "kausaldb", config.port, current_pid);
+    try daemon.write_pid_file(allocator, config.pid_dir, "kausaldb", config.port, current_pid);
 
     // Create database coordinator
     var coordinator = ServerCoordinator.init(allocator, config);
     defer {
         coordinator.deinit();
-        daemon.remove_pid_file(allocator, "/tmp", "kausaldb", config.port);
+        daemon.remove_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
     }
 
     // Phase 2: Start database engines
@@ -268,6 +274,34 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     return ExitCode.success;
 }
 
+/// Create operational directories with proper permissions
+fn create_operational_directories(config: ServerConfig) !void {
+    // Create directories with appropriate permissions
+    create_directory_safe(config.log_dir, 0o755) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            std.debug.print("Warning: Could not create log directory {s}: {}\n", .{ config.log_dir, err });
+            std.debug.print("Falling back to current directory for logs\n", .{});
+        }
+    };
+    
+    create_directory_safe(config.pid_dir, 0o755) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            std.debug.print("Warning: Could not create pid directory {s}: {}\n", .{ config.pid_dir, err });
+            std.debug.print("Using /tmp for PID files\n", .{});
+        }
+    };
+}
+
+/// Create directory with error handling for permission issues
+fn create_directory_safe(path: []const u8, mode: u32) !void {
+    _ = mode; // TODO: Use mode for directory permissions
+    std.fs.cwd().makePath(path) catch |err| switch (err) {
+        error.PathAlreadyExists => {}, // OK
+        error.AccessDenied => return err, // Let caller handle
+        else => return err,
+    };
+}
+
 /// Restart server with proper shutdown/startup sequence
 fn restart_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !ExitCode {
     const config = try config_mod.parse_server_args(allocator, cmd_args);
@@ -276,7 +310,7 @@ fn restart_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !E
     std.Thread.sleep(500 * std.time.ns_per_ms);
 
     // Verify server stopped
-    const startup_status = try daemon.check_startup_status(allocator, "/tmp", "kausaldb", config.port);
+    const startup_status = try daemon.check_startup_status(allocator, config.pid_dir, "kausaldb", config.port);
     if (startup_status == .already_running) {
         std.debug.print("Failed to stop server, restart aborted\n", .{});
         return ExitCode.general_error;

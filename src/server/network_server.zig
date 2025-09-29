@@ -97,6 +97,8 @@ pub const NetworkServer = struct {
     stats: NetworkStats,
     /// Server running state for graceful shutdown
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Last statistics update timestamp for rate limiting
+    last_stats_update: i64 = 0,
 
     // Network components
     listener: ?std.net.Server = null,
@@ -242,10 +244,17 @@ pub const NetworkServer = struct {
     }
 
     /// Update server statistics by aggregating from ConnectionManager.
-    /// Server owns no connection state, delegates to manager for statistics.
+    /// Only update periodically to avoid unnecessary computation
     fn update_aggregated_statistics(self: *NetworkServer) void {
+        // Rate limit statistics updates to reduce CPU overhead
+        const current_time = std.time.timestamp();
+        
+        if (current_time - self.last_stats_update < self.config.stats_update_interval_sec) {
+            return; // Update based on configured interval
+        }
+        
+        self.last_stats_update = current_time;
         const conn_stats = self.connection_manager.stats;
-
         self.stats.connections_accepted = conn_stats.connections_accepted;
         self.stats.connections_active = conn_stats.connections_active;
     }
@@ -279,11 +288,9 @@ pub const NetworkServer = struct {
         self.stats.requests_processed += 1;
         self.stats.bytes_received += payload.len + @sizeOf(MessageHeader);
 
-        if (self.config.enable_logging) {
-            log.debug(
-                "Connection {d}: processed message type {} successfully",
-                .{ connection.connection_id, header.message_type },
-            );
+        // Only log request processing in development mode with rate limiting
+        if (self.config.enable_logging and self.stats.requests_processed % 1000 == 0) {
+            log.info("Processed {} requests, connection {}", .{ self.stats.requests_processed, connection.connection_id });
         }
     }
 
