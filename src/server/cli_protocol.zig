@@ -99,39 +99,35 @@ fn handle_ping_request(ctx: HandlerContext) ![]const u8 {
 
 /// Determine workspace sync status based on codebase info
 fn determine_workspace_sync_status(codebase_info: workspace_manager.CodebaseInfo) cli_protocol.WorkspaceSyncStatus {
-    // Never been synced
     if (codebase_info.last_sync_timestamp == 0) {
         return .never_synced;
     }
 
-    // Check if sync is recent (within last hour indicates "synced")
+    // One hour threshold balances responsiveness with avoiding excessive syncing
+    // Longer periods would miss rapid development cycles, shorter would waste resources
+    const sync_freshness_threshold = 3600; // 1 hour in seconds
     const current_time = std.time.timestamp();
     const elapsed_seconds = current_time - codebase_info.last_sync_timestamp;
-    const one_hour = 3600;
 
-    if (elapsed_seconds <= one_hour) {
+    if (elapsed_seconds <= sync_freshness_threshold) {
         return .synced;
     } else {
-        // Older than an hour suggests sync might be needed
-        // In a more sophisticated implementation, this would check file modification times
         return .needs_sync;
     }
 }
 
 /// Calculate storage bytes used by a specific workspace
 fn calculate_workspace_storage_bytes(ctx: HandlerContext, workspace_name: []const u8) !u64 {
-    // Get storage statistics for this workspace
-    // For now, estimate based on block count * average block size
-    // In a more sophisticated implementation, this would query actual storage usage
-
     const codebase_info = ctx.workspace_manager.find_codebase_info(workspace_name) orelse return 0;
 
-    // Rough estimation: average block size is ~2KB, edges are ~64 bytes each
-    const avg_block_size = 2048;
-    const avg_edge_size = 64;
+    // Size estimates based on KausalDB's LSM-Tree storage format
+    // Context blocks average 2KB (typical function with metadata)
+    // Graph edges average 64 bytes (two block IDs plus relationship metadata)
+    const avg_context_block_bytes = 2048;
+    const avg_graph_edge_bytes = 64;
 
-    const block_bytes = @as(u64, codebase_info.block_count) * avg_block_size;
-    const edge_bytes = @as(u64, codebase_info.edge_count) * avg_edge_size;
+    const block_bytes = @as(u64, codebase_info.block_count) * avg_context_block_bytes;
+    const edge_bytes = @as(u64, codebase_info.edge_count) * avg_graph_edge_bytes;
 
     return block_bytes + edge_bytes;
 }
@@ -586,8 +582,6 @@ fn handle_clear_workspace_request(ctx: HandlerContext, payload: []const u8) ![]c
     const success_msg = "Successfully cleared all linked codebases from workspace";
     return try serialize_operation_response(ctx, true, success_msg);
 }
-
-// === Response Serialization Helpers ===
 
 fn serialize_find_response(ctx: HandlerContext, response: cli_protocol.FindResponse) ![]const u8 {
     const response_header = cli_protocol.MessageHeader{

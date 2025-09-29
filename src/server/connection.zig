@@ -44,15 +44,9 @@ pub const ConnectionState = enum {
     closed,
 };
 
-/// Server configuration needed by connections
-pub const ServerConfig = struct {
-    /// Maximum request size in bytes
-    max_request_size: u32 = 64 * 1024, // 64KB
-    /// Maximum response size in bytes
-    max_response_size: u32 = 16 * 1024 * 1024, // 16MB
-    /// Enable request/response logging
-    enable_logging: bool = false,
-};
+// Import connection configuration from centralized config module
+const config_mod = @import("config.zig");
+pub const ConnectionConfig = config_mod.ConnectionConfig;
 
 /// Connection errors
 pub const ConnectionError = error{
@@ -120,7 +114,7 @@ pub const ClientConnection = struct {
 
     /// Process non-blocking I/O for this connection
     /// Returns true if the connection should remain active, false if it should be closed
-    pub fn process_io(self: *ClientConnection, config: ServerConfig) !bool {
+    pub fn process_io(self: *ClientConnection, config: ConnectionConfig) !bool {
         switch (self.state) {
             .reading_header => return self.try_read_header(config),
             .reading_payload => return self.try_read_payload(config),
@@ -134,7 +128,7 @@ pub const ClientConnection = struct {
     }
 
     /// Attempt to read message header non-blockingly
-    fn try_read_header(self: *ClientConnection, config: ServerConfig) !bool {
+    fn try_read_header(self: *ClientConnection, config: ConnectionConfig) !bool {
         const header_size = @sizeOf(MessageHeader);
         const header_remaining = header_size - self.header_bytes_read;
 
@@ -208,7 +202,7 @@ pub const ClientConnection = struct {
     }
 
     /// Attempt to read message payload non-blockingly
-    fn try_read_payload(self: *ClientConnection, config: ServerConfig) !bool {
+    fn try_read_payload(self: *ClientConnection, config: ConnectionConfig) !bool {
         _ = config;
 
         const payload = self.current_payload orelse return false;
@@ -432,8 +426,12 @@ test "MessageHeader validation rejects invalid version" {
     try testing.expectError(error.VersionMismatch, invalid_header.validate());
 }
 
-test "ServerConfig default values are reasonable for development" {
-    const config = ServerConfig{};
+test "ConnectionConfig default values are reasonable for development" {
+    const config = ConnectionConfig{
+        .max_request_size = 64 * 1024,
+        .max_response_size = 16 * 1024 * 1024,
+        .enable_logging = false,
+    };
     try testing.expect(config.max_request_size > 0);
     try testing.expect(config.max_request_size <= 1024 * 1024 * 16); // Should be reasonable limit
 }

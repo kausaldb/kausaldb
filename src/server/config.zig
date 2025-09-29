@@ -1,0 +1,216 @@
+//! Server configuration management for KausalDB.
+//!
+//! Centralizes all server configuration with type-safe validation and defaults.
+//! Follows KausalDB philosophy of explicit configuration over magic values.
+
+const std = @import("std");
+
+/// Server configuration for both daemon and network operations
+pub const ServerConfig = struct {
+    /// Network binding configuration
+    host: []const u8 = "127.0.0.1",
+    port: u16 = 3838,
+
+    /// Database configuration
+    data_dir: []const u8 = ".kausaldb_data",
+
+    /// Connection management configuration
+    max_connections: u32 = 100,
+    connection_timeout_sec: u32 = 300,
+    max_request_size: u32 = 64 * 1024, // 64KB
+    max_response_size: u32 = 16 * 1024 * 1024, // 16MB
+
+    /// Daemon configuration
+    daemonize: bool = true,
+    log_level: std.log.Level = .info,
+
+    /// Operational configuration
+    enable_logging: bool = false,
+
+    /// Validate configuration for consistency and safety
+    pub fn validate(self: ServerConfig) !void {
+        if (self.port == 0) return error.InvalidPort;
+        if (self.max_connections == 0) return error.InvalidMaxConnections;
+        if (self.connection_timeout_sec == 0) return error.InvalidTimeout;
+        if (self.max_request_size == 0) return error.InvalidRequestSize;
+        if (self.max_response_size == 0) return error.InvalidResponseSize;
+        if (self.data_dir.len == 0) return error.InvalidDataDir;
+    }
+
+    /// Convert to connection-level configuration for NetworkServer
+    pub fn to_connection_config(self: ServerConfig) ConnectionConfig {
+        return ConnectionConfig{
+            .max_request_size = self.max_request_size,
+            .max_response_size = self.max_response_size,
+            .enable_logging = self.enable_logging,
+        };
+    }
+
+    /// Convert to connection manager configuration
+    pub fn to_connection_manager_config(self: ServerConfig) ConnectionManagerConfig {
+        return ConnectionManagerConfig{
+            .max_connections = self.max_connections,
+            .connection_timeout_sec = self.connection_timeout_sec,
+            .poll_timeout_ms = 1000, // Standard poll timeout
+        };
+    }
+};
+
+/// Connection-specific configuration passed to individual connections
+pub const ConnectionConfig = struct {
+    max_request_size: u32,
+    max_response_size: u32,
+    enable_logging: bool,
+};
+
+/// Connection manager configuration for I/O operations
+pub const ConnectionManagerConfig = struct {
+    max_connections: u32,
+    connection_timeout_sec: u32,
+    poll_timeout_ms: i32,
+};
+
+/// Parse command-line arguments into ServerConfig
+pub fn parse_server_args(_: std.mem.Allocator, args: []const []const u8) !ServerConfig {
+    var config = ServerConfig{};
+
+    // Skip first argument if it's a known command
+    var i: usize = if (args.len > 0 and is_server_command(args[0])) 1 else 0;
+
+    while (i < args.len) {
+        const arg = args[i];
+
+        if (std.mem.eql(u8, arg, "--host")) {
+            config.host = try consume_flag_value(args, &i, "--host");
+        } else if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
+            const port_str = try consume_flag_value(args, &i, "--port");
+            config.port = std.fmt.parseInt(u16, port_str, 10) catch {
+                std.debug.print("Error: Invalid port number: {s}\n", .{port_str});
+                return error.InvalidArgs;
+            };
+        } else if (std.mem.eql(u8, arg, "--data-dir")) {
+            config.data_dir = try consume_flag_value(args, &i, "--data-dir");
+        } else if (std.mem.eql(u8, arg, "--max-connections")) {
+            const conn_str = try consume_flag_value(args, &i, "--max-connections");
+            config.max_connections = std.fmt.parseInt(u32, conn_str, 10) catch {
+                std.debug.print("Error: Invalid max connections: {s}\n", .{conn_str});
+                return error.InvalidArgs;
+            };
+        } else if (std.mem.eql(u8, arg, "--foreground") or std.mem.eql(u8, arg, "--no-daemonize")) {
+            config.daemonize = false;
+        } else if (std.mem.eql(u8, arg, "--log-level")) {
+            const level_str = try consume_flag_value(args, &i, "--log-level");
+            config.log_level = std.meta.stringToEnum(std.log.Level, level_str) orelse {
+                std.debug.print("Error: Invalid log level: {s}\n", .{level_str});
+                return error.InvalidArgs;
+            };
+        } else if (std.mem.eql(u8, arg, "--enable-logging")) {
+            config.enable_logging = true;
+        } else {
+            std.debug.print("Error: Unknown argument: {s}\n", .{arg});
+            return error.InvalidArgs;
+        }
+
+        i += 1;
+    }
+
+    try config.validate();
+    return config;
+}
+
+fn is_server_command(arg: []const u8) bool {
+    const server_commands = [_][]const u8{
+        "start",
+        "stop",
+        "status",
+        "restart",
+        "help",
+        "version",
+    };
+    for (server_commands) |cmd| {
+        if (std.mem.eql(u8, arg, cmd)) return true;
+    }
+    return false;
+}
+
+fn consume_flag_value(args: []const []const u8, i: *usize, flag_name: []const u8) ![]const u8 {
+    i.* += 1;
+    if (i.* >= args.len) {
+        std.debug.print("Error: {s} requires a value\n", .{flag_name});
+        return error.InvalidArgs;
+    }
+    return args[i.*];
+}
+
+// === Tests ===
+
+const testing = std.testing;
+
+test "ServerConfig default values are valid" {
+    const config = ServerConfig{};
+    try config.validate();
+
+    try testing.expectEqualStrings("127.0.0.1", config.host);
+    try testing.expectEqual(@as(u16, 3838), config.port);
+    try testing.expectEqual(@as(u32, 100), config.max_connections);
+    try testing.expect(config.daemonize);
+}
+
+test "ServerConfig validation catches invalid values" {
+    var config = ServerConfig{};
+
+    // Invalid port
+    config.port = 0;
+    try testing.expectError(error.InvalidPort, config.validate());
+
+    // Reset and test max_connections
+    config = ServerConfig{};
+    config.max_connections = 0;
+    try testing.expectError(error.InvalidMaxConnections, config.validate());
+
+    // Reset and test timeout
+    config = ServerConfig{};
+    config.connection_timeout_sec = 0;
+    try testing.expectError(error.InvalidTimeout, config.validate());
+}
+
+test "parse_server_args handles basic flags" {
+    const args = [_][]const u8{ "--port", "8080", "--host", "0.0.0.0" };
+    const config = try parse_server_args(testing.allocator, &args);
+
+    try testing.expectEqual(@as(u16, 8080), config.port);
+    try testing.expectEqualStrings("0.0.0.0", config.host);
+}
+
+test "parse_server_args skips server commands" {
+    const args = [_][]const u8{ "start", "--port", "9000" };
+    const config = try parse_server_args(testing.allocator, &args);
+
+    try testing.expectEqual(@as(u16, 9000), config.port);
+}
+
+test "parse_server_args handles foreground flag" {
+    const args = [_][]const u8{"--foreground"};
+    const config = try parse_server_args(testing.allocator, &args);
+
+    try testing.expect(!config.daemonize);
+}
+
+test "config conversion functions work correctly" {
+    const server_config = ServerConfig{
+        .max_request_size = 128 * 1024,
+        .max_response_size = 32 * 1024 * 1024,
+        .enable_logging = true,
+        .max_connections = 50,
+        .connection_timeout_sec = 120,
+    };
+
+    const conn_config = server_config.to_connection_config();
+    try testing.expectEqual(server_config.max_request_size, conn_config.max_request_size);
+    try testing.expectEqual(server_config.max_response_size, conn_config.max_response_size);
+    try testing.expectEqual(server_config.enable_logging, conn_config.enable_logging);
+
+    const mgr_config = server_config.to_connection_manager_config();
+    try testing.expectEqual(server_config.max_connections, mgr_config.max_connections);
+    try testing.expectEqual(server_config.connection_timeout_sec, mgr_config.connection_timeout_sec);
+}

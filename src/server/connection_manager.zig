@@ -22,15 +22,9 @@ const testing = std.testing;
 pub const ClientConnection = conn.ClientConnection;
 const ConnectionState = conn.ConnectionState;
 
-/// Configuration parameters for connection management behavior
-pub const ConnectionManagerConfig = struct {
-    /// Maximum concurrent connections before rejecting new ones
-    max_connections: u32 = 100,
-    /// Seconds before idle connections are closed
-    connection_timeout_sec: u32 = 300,
-    /// Milliseconds to wait in poll() before checking timeouts
-    poll_timeout_ms: i32 = 1000,
-};
+const config_mod = @import("config.zig");
+
+pub const ConnectionManagerConfig = config_mod.ConnectionManagerConfig;
 
 /// Statistics for connection management operations and health monitoring
 pub const ConnectionManagerStats = struct {
@@ -241,125 +235,134 @@ pub const ConnectionManager = struct {
         }
 
         if (ready_count == 0) {
-            // Timeout occurred, perform maintenance operations
-            log.debug("Poll timeout, performing maintenance", .{});
+            // Poll timeout - run maintenance operations on idle connections
             try self.cleanup_timed_out_connections();
             return &[_]*ClientConnection{};
         }
 
-        // Process listener socket first for new connections
-        var newly_accepted_count: u32 = 0;
-        if (self.poll_fds[0].revents & std.posix.POLL.IN != 0) {
-            log.debug("New connections available, accepting", .{});
-            newly_accepted_count = self.accept_connections(listener) catch |err| blk: {
-                log.err("Failed to accept connections: {}", .{err});
-                break :blk 0;
-            };
-            log.debug("Accepted {} new connections", .{newly_accepted_count});
-        }
+        // Accept new connections first to prevent queue overflow
+        _ = try self.process_listener_socket(listener);
 
-        // Collect connections with ready I/O events and connections to close
+        // Process existing connections for I/O readiness
         var ready_connections = try self.arena.allocator().alloc(*ClientConnection, ready_count);
         var ready_index: usize = 0;
         var connections_to_close: [64]usize = undefined;
         var close_count: usize = 0;
-        log.debug("Collecting ready connections from {} existing connections", .{self.connections.items.len});
 
-        var poll_index: usize = 1; // Skip listener at index 0
-        var conn_index: usize = 0;
+        // Match poll results to connections and collect ready/closed lists
+        var poll_index: usize = 1; // Listener at index 0
+        for (self.connections.items, 0..) |connection, conn_index| {
+            if (poll_index >= self.poll_fds.len) break;
 
-        while (poll_index < poll_count and conn_index < self.connections.items.len) {
             const poll_fd = self.poll_fds[poll_index];
-            const connection = self.connections.items[conn_index];
+            if (poll_fd.fd != connection.stream.handle) continue;
 
-            // Match poll_fd to connection by file descriptor
-            if (poll_fd.fd != connection.stream.handle) {
-                conn_index += 1;
-                continue;
-            }
+            const should_close = self.process_connection_poll_events(
+                poll_fd,
+                connection,
+                ready_connections,
+                &ready_index,
+            );
 
-            // Handle connection errors and disconnections
-            // Log detailed poll event information for debugging
-            log.debug("Connection {}: poll events - requested: 0x{X}, returned: 0x{X}", .{ connection.connection_id, poll_fd.events, poll_fd.revents });
-
-            // Handle critical errors that require immediate closure
-            if (poll_fd.revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) {
-                var error_msg: [64]u8 = undefined;
-                var error_len: usize = 0;
-
-                if (poll_fd.revents & std.posix.POLL.ERR != 0) {
-                    @memcpy(error_msg[error_len .. error_len + 8], " POLLERR");
-                    error_len += 8;
-                }
-                if (poll_fd.revents & std.posix.POLL.NVAL != 0) {
-                    @memcpy(error_msg[error_len .. error_len + 9], " POLLNVAL");
-                    error_len += 9;
-                }
-
-                log.info("Connection {}: critical socket error detected ({s}), closing", .{ connection.connection_id, error_msg[0..error_len] });
-                if (close_count < connections_to_close.len) {
-                    connections_to_close[close_count] = conn_index;
-                    close_count += 1;
-                }
-                poll_index += 1;
-                conn_index += 1;
-                continue;
-            }
-
-            // Handle POLLHUP: client closed connection, but check for data first
-            const has_hangup = (poll_fd.revents & std.posix.POLL.HUP) != 0;
-            const has_data = (poll_fd.revents & std.posix.POLL.IN) != 0;
-
-            if (has_hangup and !has_data) {
-                // Client closed and no data available - close connection
-                log.debug("Connection {}: Client closed connection (POLLHUP), no data available", .{connection.connection_id});
-                if (close_count < connections_to_close.len) {
-                    connections_to_close[close_count] = conn_index;
-                    close_count += 1;
-                }
-                poll_index += 1;
-                conn_index += 1;
-                continue;
-            }
-
-            if (has_hangup and has_data) {
-                // Client closed but data is available - process data first, mark for closure after
-                log.debug("Connection {}: Client closed connection but data available - will read data first", .{connection.connection_id});
-            }
-
-            if (poll_fd.revents & (std.posix.POLL.IN | std.posix.POLL.OUT) != 0) {
-                // Check if data is available for reading
-                if (poll_fd.revents & std.posix.POLL.IN != 0) {
-                    log.debug("Connection {}: Data available for reading (POLLIN)", .{connection.connection_id});
-                }
-                if (poll_fd.revents & std.posix.POLL.OUT != 0) {
-                    log.debug("Connection {}: Ready for writing (POLLOUT)", .{connection.connection_id});
-                }
-                if (ready_index < ready_connections.len) {
-                    log.debug("Connection {} ready for I/O (state: {}, events: 0x{X})", .{ connection.connection_id, connection.state, poll_fd.revents });
-                    ready_connections[ready_index] = connection;
-                    ready_index += 1;
-                }
-                conn_index += 1;
-            } else {
-                conn_index += 1;
+            if (should_close and close_count < connections_to_close.len) {
+                connections_to_close[close_count] = conn_index;
+                close_count += 1;
             }
 
             poll_index += 1;
         }
 
-        // Close connections marked for closure (in reverse order to maintain indices)
-        var close_idx: usize = close_count;
-        while (close_idx > 0) {
-            close_idx -= 1;
-            const conn_idx = connections_to_close[close_idx];
+        // Close connections marked for closure
+        self.close_marked_connections(connections_to_close[0..close_count], close_count);
+
+        return ready_connections[0..ready_index];
+    }
+
+    /// Accept new connections from listener socket if available
+    fn process_listener_socket(self: *ConnectionManager, listener: *std.net.Server) !u32 {
+        if (self.poll_fds[0].revents & std.posix.POLL.IN == 0) {
+            return 0; // No new connections
+        }
+
+        return self.accept_connections(listener) catch |err| blk: {
+            log.err("Failed to accept connections: {}", .{err});
+            break :blk 0;
+        };
+    }
+
+    /// Check if connection has critical poll errors that require immediate closure
+    fn has_critical_poll_errors(poll_fd: std.posix.pollfd, connection_id: u32) bool {
+        if (poll_fd.revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) {
+            // Socket errors are unrecoverable - log and mark for closure
+            log.info("Connection {}: socket error (POLLERR={} POLLNVAL={})", .{
+                connection_id,
+                poll_fd.revents & std.posix.POLL.ERR != 0,
+                poll_fd.revents & std.posix.POLL.NVAL != 0,
+            });
+            return true;
+        }
+        return false;
+    }
+
+    /// Check if connection should be closed due to client hangup
+    fn should_close_for_hangup(poll_fd: std.posix.pollfd, connection_id: u32) bool {
+        const has_hangup = (poll_fd.revents & std.posix.POLL.HUP) != 0;
+        const has_data = (poll_fd.revents & std.posix.POLL.IN) != 0;
+
+        if (has_hangup and !has_data) {
+            // Client closed connection and no pending data - safe to close
+            return true;
+        }
+
+        if (has_hangup and has_data) {
+            // Client closed but data available - process data first
+            log.debug("Connection {}: processing final data before closure", .{connection_id});
+        }
+
+        return false;
+    }
+
+    /// Process poll events for a single connection and determine if it should be added to ready list
+    fn process_connection_poll_events(
+        self: *ConnectionManager,
+        poll_fd: std.posix.pollfd,
+        connection: *ClientConnection,
+        ready_connections: []*ClientConnection,
+        ready_index: *usize,
+    ) bool {
+        _ = self; // We don't actually need self for this method
+        // Returns true if connection should be marked for closure
+
+        if (has_critical_poll_errors(poll_fd, connection.connection_id)) {
+            return true;
+        }
+
+        if (should_close_for_hangup(poll_fd, connection.connection_id)) {
+            return true;
+        }
+
+        // Check for I/O readiness
+        if (poll_fd.revents & (std.posix.POLL.IN | std.posix.POLL.OUT) != 0) {
+            if (ready_index.* < ready_connections.len) {
+                ready_connections[ready_index.*] = connection;
+                ready_index.* += 1;
+            }
+        }
+
+        return false;
+    }
+
+    /// Close connections marked for closure during poll processing
+    fn close_marked_connections(self: *ConnectionManager, connections_to_close: []const usize, close_count: usize) void {
+        // Close in reverse order to maintain array indices validity
+        var i = close_count;
+        while (i > 0) {
+            i -= 1;
+            const conn_idx = connections_to_close[i];
             if (conn_idx < self.connections.items.len) {
                 self.close_connection_by_index(conn_idx);
             }
         }
-
-        log.debug("Returning {} ready connections", .{ready_index});
-        return ready_connections[0..ready_index];
     }
 
     /// Close connection by pointer reference and update statistics.
@@ -491,6 +494,7 @@ test "connection statistics track operations correctly" {
     var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 3,
         .connection_timeout_sec = 60,
+        .poll_timeout_ms = 1000,
     });
     defer manager.deinit();
     try manager.startup();
@@ -508,6 +512,8 @@ test "connection statistics track operations correctly" {
 test "arena cleanup handles connection memory automatically" {
     var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 2,
+        .connection_timeout_sec = 60,
+        .poll_timeout_ms = 1000,
     });
     defer manager.deinit();
     try manager.startup();
@@ -525,9 +531,9 @@ test "arena cleanup handles connection memory automatically" {
 
 test "poll_fds array sizing respects max_connections limit" {
     const configs = [_]ConnectionManagerConfig{
-        .{ .max_connections = 1 },
-        .{ .max_connections = 10 },
-        .{ .max_connections = 100 },
+        .{ .max_connections = 1, .connection_timeout_sec = 60, .poll_timeout_ms = 1000 },
+        .{ .max_connections = 10, .connection_timeout_sec = 60, .poll_timeout_ms = 1000 },
+        .{ .max_connections = 100, .connection_timeout_sec = 60, .poll_timeout_ms = 1000 },
     };
 
     for (configs) |config| {
@@ -557,7 +563,11 @@ test "connection manager configuration validation" {
 }
 
 test "connection ID assignment is monotonic" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{});
+    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+        .max_connections = 10,
+        .connection_timeout_sec = 60,
+        .poll_timeout_ms = 1000,
+    });
     defer manager.deinit();
 
     const initial_id = manager.next_connection_id;
@@ -575,6 +585,7 @@ test "connection manager enforces resource limits" {
     const config = ConnectionManagerConfig{
         .max_connections = 2, // Very small limit for testing
         .connection_timeout_sec = 30,
+        .poll_timeout_ms = 1000,
     };
 
     var manager = ConnectionManager.init(testing.allocator, config);
@@ -590,6 +601,7 @@ test "timeout configuration affects cleanup behavior" {
     const short_timeout_config = ConnectionManagerConfig{
         .connection_timeout_sec = 1, // 1 second timeout
         .max_connections = 5,
+        .poll_timeout_ms = 1000,
     };
 
     var manager = ConnectionManager.init(testing.allocator, short_timeout_config);
@@ -604,6 +616,8 @@ test "timeout configuration affects cleanup behavior" {
 
 test "poll timeout affects blocking behavior" {
     const config = ConnectionManagerConfig{
+        .max_connections = 10,
+        .connection_timeout_sec = 60,
         .poll_timeout_ms = 50, // Short timeout for testing
     };
 
@@ -615,7 +629,11 @@ test "poll timeout affects blocking behavior" {
 }
 
 test "backing allocator vs arena allocator usage" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{});
+    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+        .max_connections = 10,
+        .connection_timeout_sec = 60,
+        .poll_timeout_ms = 1000,
+    });
     defer manager.deinit();
     try manager.startup();
 
@@ -634,6 +652,8 @@ test "backing allocator vs arena allocator usage" {
 test "deinit cleans up all resources properly" {
     var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 5,
+        .connection_timeout_sec = 60,
+        .poll_timeout_ms = 1000,
     });
 
     try manager.startup();
