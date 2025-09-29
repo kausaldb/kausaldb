@@ -14,6 +14,7 @@ const concurrency = @import("../core/concurrency.zig");
 const conn = @import("connection.zig");
 const connection_manager = @import("connection_manager.zig");
 const ctx_block = @import("../core/types.zig");
+const cli_protocol = @import("../cli/protocol.zig");
 const assert_mod = @import("../core/assert.zig");
 const error_context = @import("../core/error_context.zig");
 const ownership = @import("../core/ownership.zig");
@@ -306,7 +307,7 @@ test "message header validation" {
     const testing = std.testing;
 
     const valid_header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = 1,
         .message_type = .ping_request,
         .payload_size = 1024,

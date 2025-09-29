@@ -400,7 +400,7 @@ test "send_response sets correct state and data" {
 
 test "MessageHeader validation accepts valid headers" {
     const valid_header = MessageHeader{
-        .magic = 0x4B41554C, // 'KAUL'
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = 1,
         .message_type = .ping_request,
         .payload_size = 0,
@@ -423,7 +423,7 @@ test "MessageHeader validation rejects invalid magic" {
 
 test "MessageHeader validation rejects invalid version" {
     var invalid_header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = 999, // Unsupported version
         .message_type = .ping_request,
         .payload_size = 0,

@@ -86,7 +86,7 @@ pub fn handle_cli_message(
 
 fn handle_ping_request(ctx: HandlerContext) ![]const u8 {
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .pong_response,
         .payload_size = 0,
@@ -207,7 +207,7 @@ fn handle_status_request(ctx: HandlerContext) ![]const u8 {
     }
 
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .status_response,
         .payload_size = @sizeOf(cli_protocol.StatusResponse),
@@ -591,7 +591,7 @@ fn handle_clear_workspace_request(ctx: HandlerContext, payload: []const u8) ![]c
 
 fn serialize_find_response(ctx: HandlerContext, response: cli_protocol.FindResponse) ![]const u8 {
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .find_response,
         .payload_size = @sizeOf(cli_protocol.FindResponse),
@@ -620,7 +620,7 @@ fn serialize_show_response(ctx: HandlerContext, blocks: []const ContextBlock, ed
     }
 
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
@@ -639,7 +639,7 @@ fn serialize_empty_show_response(ctx: HandlerContext) ![]const u8 {
     const response = cli_protocol.ShowResponse.init();
 
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
@@ -673,7 +673,7 @@ fn serialize_trace_response_from_blocks(ctx: HandlerContext, blocks: []const Own
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -704,7 +704,7 @@ fn serialize_trace_response(ctx: HandlerContext, path_result: TraversalResult) !
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -723,7 +723,7 @@ fn serialize_empty_trace_response(ctx: HandlerContext) ![]const u8 {
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = cli_protocol.MessageType.trace_response,
         .payload_size = @intCast(@sizeOf(cli_protocol.TraceResponse)),
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
     };
 
     const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.TraceResponse);
@@ -739,7 +739,7 @@ fn serialize_operation_response(ctx: HandlerContext, success: bool, message: []c
     const response = cli_protocol.OperationResponse.init(success, message);
 
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .operation_response,
         .payload_size = @sizeOf(cli_protocol.OperationResponse),
@@ -758,7 +758,7 @@ fn create_error_response(ctx: HandlerContext, error_code: u32, message: []const 
     const error_resp = cli_protocol.ErrorResponse.init(error_code, message);
 
     const response_header = cli_protocol.MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .error_response,
         .payload_size = @sizeOf(cli_protocol.ErrorResponse),

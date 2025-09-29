@@ -18,6 +18,7 @@ const HandlerContext = internal.cli_protocol.HandlerContext;
 const PROTOCOL_VERSION = internal.cli_protocol.PROTOCOL_VERSION;
 const MAX_QUERY_LENGTH = internal.cli_protocol.MAX_QUERY_LENGTH;
 const MAX_PATH_LENGTH = internal.cli_protocol.MAX_PATH_LENGTH;
+const PROTOCOL_MAGIC = internal.cli_protocol.PROTOCOL_MAGIC;
 
 pub fn run_fuzzing(fuzzer: *main.Fuzzer) !void {
     std.debug.print("Fuzzing network protocol...\n", .{});
@@ -135,7 +136,7 @@ fn fuzz_integer_overflows(allocator: std.mem.Allocator, input: []const u8) !void
     for (evil_values) |evil_value| {
         // Test payload length overflow
         var header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = .find_request,
             .payload_size = evil_value, // This could cause allocation failures
@@ -190,7 +191,7 @@ fn fuzz_invalid_protocol_versions(_: std.mem.Allocator, input: []const u8) !void
 
     for (evil_versions) |version| {
         var header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = version,
             .message_type = .ping_request,
             .payload_size = 0,
@@ -207,7 +208,7 @@ fn fuzz_truncated_messages(allocator: std.mem.Allocator, input: []const u8) !voi
 
     // Create a valid message first
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         // Safety: input.len is valid usize and fits within u32 range for protocol
@@ -244,7 +245,7 @@ fn fuzz_oversized_payloads(allocator: std.mem.Allocator, input: []const u8) !voi
 
     for (oversized_lengths) |claimed_size| {
         var header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = .find_request,
             .payload_size = claimed_size,
@@ -271,7 +272,7 @@ fn fuzz_message_injection(allocator: std.mem.Allocator, input: []const u8) !void
 
     // Create a message that contains embedded message headers
     var primary_header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         .payload_size = @intCast(input.len),
@@ -287,7 +288,7 @@ fn fuzz_message_injection(allocator: std.mem.Allocator, input: []const u8) !void
     // Embed fake headers in the payload
     if (input.len >= @sizeOf(MessageHeader) * 2) {
         var fake_header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = .status_request,
             .payload_size = 0,
@@ -319,7 +320,7 @@ fn fuzz_state_corruption(_: std.mem.Allocator, input: []const u8) !void {
         const chunk = input[chunk_start..chunk_end];
 
         var header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = msg_type,
             // Safety: chunk.len is valid usize derived from input bounds and fits within u32 range
@@ -344,7 +345,7 @@ fn fuzz_concurrent_connections(_: std.mem.Allocator, input: []const u8) !void {
 
         // Simulate connection-specific message
         var header = MessageHeader{
-            .magic = 0x4B41554C,
+            .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = .find_request,
             // Safety: conn_data.len is 50 bytes max and fits within u32 range
@@ -364,7 +365,7 @@ fn parse_message_header(buffer: []const u8) !MessageHeader {
     const header = @as(*const MessageHeader, @ptrCast(@alignCast(buffer.ptr))).*;
 
     // Validate magic number
-    if (header.magic != 0x4B41554C) return error.InvalidMagic;
+    if (header.magic != PROTOCOL_MAGIC) return error.InvalidMagic;
 
     // Validate version
     if (header.version > PROTOCOL_VERSION + 100) return error.UnsupportedVersion;
@@ -377,7 +378,7 @@ fn parse_message_header(buffer: []const u8) !MessageHeader {
 
 fn create_negative_length_message(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         // Safety: Intentional bitcast of negative value to test protocol robustness
@@ -395,7 +396,7 @@ fn create_negative_length_message(allocator: std.mem.Allocator, input: []const u
 
 fn create_huge_length_message(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         .payload_size = std.math.maxInt(u32) - 1000,
@@ -418,7 +419,7 @@ fn create_misaligned_message(allocator: std.mem.Allocator, input: []const u8) ![
     // Write header at odd offset to test alignment handling
     const offset = 3;
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         // Safety: Value is bounded by min(input.len, 100) so fits within u32 range
@@ -438,7 +439,7 @@ fn create_misaligned_message(allocator: std.mem.Allocator, input: []const u8) ![
 
 fn create_invalid_utf8_message(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         .payload_size = @intCast(input.len),
@@ -457,7 +458,7 @@ fn create_invalid_utf8_message(allocator: std.mem.Allocator, input: []const u8) 
 fn create_recursive_message(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     // Create a message that references itself (simulated)
     var header = MessageHeader{
-        .magic = 0x4B41554C,
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
         // Safety: MessageHeader size plus input.len fits within u32 range for typical inputs

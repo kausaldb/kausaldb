@@ -21,6 +21,9 @@ comptime {
 /// Protocol version for compatibility checking
 pub const PROTOCOL_VERSION: u16 = 1;
 
+/// Protocol magic number ('KAUL' in ASCII)
+pub const PROTOCOL_MAGIC: u32 = 0x4B41554C;
+
 /// Maximum sizes for protocol fields
 pub const MAX_QUERY_LENGTH = 2048;
 pub const MAX_PATH_LENGTH = 4096;
@@ -130,13 +133,13 @@ pub const MessageType = enum(u16) {
 
 /// Common message header for all protocol messages
 pub const MessageHeader = struct {
-    magic: u32 = 0x4B41554C, // 'KAUL'
+    magic: u32 = PROTOCOL_MAGIC,
     version: u16 = PROTOCOL_VERSION,
     message_type: MessageType,
     payload_size: u64,
 
     pub fn validate(self: MessageHeader) !void {
-        if (self.magic != 0x4B41554C) {
+        if (self.magic != PROTOCOL_MAGIC) {
             return error.InvalidMagic;
         }
         if (self.version != PROTOCOL_VERSION) {
@@ -235,7 +238,7 @@ test "format_uptime produces human-readable output" {
 
 test "MessageHeader validates correctly" {
     var header = MessageHeader{
-        .magic = 0x4B41554C, // Correct magic
+        .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .ping_request,
         .payload_size = 0,
