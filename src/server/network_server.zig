@@ -248,11 +248,11 @@ pub const NetworkServer = struct {
     fn update_aggregated_statistics(self: *NetworkServer) void {
         // Rate limit statistics updates to reduce CPU overhead
         const current_time = std.time.timestamp();
-        
+
         if (current_time - self.last_stats_update < self.config.stats_update_interval_sec) {
             return; // Update based on configured interval
         }
-        
+
         self.last_stats_update = current_time;
         const conn_stats = self.connection_manager.stats;
         self.stats.connections_accepted = conn_stats.connections_accepted;

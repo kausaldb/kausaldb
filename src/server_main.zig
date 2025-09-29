@@ -4,6 +4,7 @@
 //! Follows KausalDB coordinator pattern with proper component lifecycle.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 const stdx = @import("core/stdx.zig");
@@ -283,7 +284,7 @@ fn create_operational_directories(config: ServerConfig) !void {
             std.debug.print("Falling back to current directory for logs\n", .{});
         }
     };
-    
+
     create_directory_safe(config.pid_dir, 0o755) catch |err| {
         if (err != error.PathAlreadyExists) {
             std.debug.print("Warning: Could not create pid directory {s}: {}\n", .{ config.pid_dir, err });
@@ -292,14 +293,44 @@ fn create_operational_directories(config: ServerConfig) !void {
     };
 }
 
-/// Create directory with error handling for permission issues
+/// Create directory with explicit permissions, handling platform differences  
 fn create_directory_safe(path: []const u8, mode: u32) !void {
-    _ = mode; // TODO: Use mode for directory permissions
+    // First, try to create the path using the standard library (which handles recursion)
     std.fs.cwd().makePath(path) catch |err| switch (err) {
-        error.PathAlreadyExists => {}, // OK
-        error.AccessDenied => return err, // Let caller handle
+        error.PathAlreadyExists => {}, // Directory exists, that's fine
+        error.AccessDenied => return err, // Let caller handle permission issues
         else => return err,
     };
+    
+    // Then set proper permissions using chmod (Unix-like systems only)
+    if (comptime builtin.os.tag != .windows) {
+        set_directory_permissions(path, mode) catch |err| {
+            // Log warning but don't fail - directory creation succeeded
+            std.debug.print("Warning: Could not set permissions {} on {s}: {}\n", .{ mode, path, err });
+        };
+    }
+}
+
+/// Set directory permissions using chmod (Unix-like systems only)
+fn set_directory_permissions(path: []const u8, mode: u32) !void {
+    if (comptime builtin.os.tag == .windows) {
+        return; // Windows doesn't use Unix permissions
+    }
+    
+    // Convert path to null-terminated for system call
+    var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.PathTooLong;
+    
+    // Use chmod system call to set permissions
+    const result = std.c.chmod(path_z.ptr, mode);
+    if (result != 0) {
+        return switch (std.c._errno().*) {
+            std.c.E.ACCES => error.AccessDenied,
+            std.c.E.NOENT => error.FileNotFound,
+            std.c.E.PERM => error.PermissionDenied,
+            else => error.UnexpectedError,
+        };
+    }
 }
 
 /// Restart server with proper shutdown/startup sequence
