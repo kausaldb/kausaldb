@@ -47,6 +47,14 @@ pub fn log_runtime(
 
 const log = std.log.scoped(.kausaldb_server);
 
+/// Check if a string matches any in a list of alternatives
+inline fn matches(str: []const u8, alternatives: []const []const u8) bool {
+    for (alternatives) |alt| {
+        if (std.mem.eql(u8, str, alt)) return true;
+    }
+    return false;
+}
+
 /// Server daemon commands
 const ServerCommand = enum {
     start,
@@ -57,12 +65,12 @@ const ServerCommand = enum {
     version,
 
     fn from_string(cmd: []const u8) ?ServerCommand {
-        if (std.mem.eql(u8, cmd, "start")) return .start;
-        if (std.mem.eql(u8, cmd, "stop")) return .stop;
-        if (std.mem.eql(u8, cmd, "status")) return .status;
-        if (std.mem.eql(u8, cmd, "restart")) return .restart;
-        if (std.mem.eql(u8, cmd, "help")) return .help;
-        if (std.mem.eql(u8, cmd, "version")) return .version;
+        if (matches(cmd, &.{"start"})) return .start;
+        if (matches(cmd, &.{"stop"})) return .stop;
+        if (matches(cmd, &.{"status"})) return .status;
+        if (matches(cmd, &.{"restart"})) return .restart;
+        if (matches(cmd, &.{ "help", "--help", "-h" })) return .help;
+        if (matches(cmd, &.{ "version", "--version", "-v" })) return .version;
         return null;
     }
 };
