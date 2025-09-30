@@ -261,7 +261,7 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
 
     // Write PID file after daemonization
     const current_pid = stdx.getpid();
-    try daemon.write_pid_file(allocator, pid_dir, "kausaldb", config.port, current_pid);
+    try daemon.write_pid_file(pid_dir, "kausaldb", config.port, current_pid);
 
     // Create database coordinator
     var coordinator = ServerCoordinator.init(allocator, config);

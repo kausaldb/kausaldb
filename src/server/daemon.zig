@@ -18,15 +18,16 @@ pub const StartupStatus = enum {
 };
 
 /// Write process ID to PID file
-pub fn write_pid_file(allocator: std.mem.Allocator, pid_dir: []const u8, process_name: []const u8, port: u16, pid: std.posix.pid_t) !void {
-    const pid_file_path = try std.fmt.allocPrint(allocator, "{s}/{s}-{}.pid", .{ pid_dir, process_name, port });
-    defer allocator.free(pid_file_path);
+pub fn write_pid_file(pid_dir: []const u8, process_name: []const u8, port: u16, pid: std.posix.pid_t) !void {
+    // Use stack buffers to avoid allocator issues after fork
+    var pid_file_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const pid_file_path = try std.fmt.bufPrint(&pid_file_path_buf, "{s}/{s}-{}.pid", .{ pid_dir, process_name, port });
 
     const file = try std.fs.cwd().createFile(pid_file_path, .{});
     defer file.close();
 
-    const pid_str = try std.fmt.allocPrint(allocator, "{}\n", .{pid});
-    defer allocator.free(pid_str);
+    var pid_str_buf: [32]u8 = undefined;
+    const pid_str = try std.fmt.bufPrint(&pid_str_buf, "{}\n", .{pid});
 
     try file.writeAll(pid_str);
     log.info("Process PID {} written to {s}", .{ pid, pid_file_path });
