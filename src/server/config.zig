@@ -4,6 +4,7 @@
 //! Follows KausalDB philosophy of explicit configuration over magic values.
 
 const std = @import("std");
+const stdx = @import("../core/stdx.zig");
 
 /// Server configuration for both daemon and network operations
 pub const ServerConfig = struct {
@@ -25,17 +26,16 @@ pub const ServerConfig = struct {
     log_level: std.log.Level = .info,
 
     /// Operational configuration
+    /// Platform-appropriate defaults should be computed
     enable_logging: bool = false,
-
-    // Production operational paths
-    log_dir: []const u8 = "/var/log/kausaldb",
-    pid_dir: []const u8 = "/var/run/kausaldb",
+    log_dir: ?[]const u8 = null,
+    pid_dir: ?[]const u8 = null,
 
     // Production logging configuration
-    log_rotation_size_mb: u32 = 100, // Rotate logs at 100MB
-    log_retention_days: u32 = 30, // Keep logs for 30 days
-    structured_logging: bool = false, // JSON format vs text
-    enable_hot_path_logging: bool = false, // Debug logging in critical paths
+    log_rotation_size_mb: u32 = 100,
+    log_retention_days: u32 = 30,
+    structured_logging: bool = false, // JSON format
+    enable_hot_path_logging: bool = false,
 
     // Performance tuning
     stats_update_interval_sec: u32 = 10, // Statistics update frequency
@@ -66,6 +66,24 @@ pub const ServerConfig = struct {
             .connection_timeout_sec = self.connection_timeout_sec,
             .poll_timeout_ms = 1000, // Standard poll timeout
         };
+    }
+
+    /// Resolve log directory path using platform-appropriate defaults
+    /// Caller owns returned memory and must free it
+    pub fn resolve_log_dir(self: ServerConfig, allocator: std.mem.Allocator) ![]u8 {
+        if (self.log_dir) |dir| {
+            return allocator.dupe(u8, dir);
+        }
+        return stdx.resolve_user_data_dir(allocator, "kausaldb");
+    }
+
+    /// Resolve PID directory path using platform-appropriate defaults
+    /// Caller owns returned memory and must free it
+    pub fn resolve_pid_dir(self: ServerConfig, allocator: std.mem.Allocator) ![]u8 {
+        if (self.pid_dir) |dir| {
+            return allocator.dupe(u8, dir);
+        }
+        return stdx.resolve_user_runtime_dir(allocator, "kausaldb");
     }
 };
 

@@ -617,6 +617,7 @@ fn serialize_show_response(ctx: HandlerContext, blocks: []const ContextBlock, ed
     @memset(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], 0);
 
     // 3. Cast to struct pointer and populate directly
+    // Safety: response_bytes is correctly sized and aligned for ShowResponse struct
     const response_ptr: *cli_protocol.ShowResponse = @ptrCast(@alignCast(&response_bytes[@sizeOf(cli_protocol.MessageHeader)]));
 
     // 4. Populate fields

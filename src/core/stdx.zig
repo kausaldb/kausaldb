@@ -255,3 +255,66 @@ pub fn getpid() std.posix.pid_t {
         else => @compileError("Unsupported OS for getpid"),
     };
 }
+
+/// Resolve user-specific data directory following platform conventions
+/// Returns appropriate directory for logs, config files, etc.
+/// Caller owns returned memory and must free it.
+pub fn resolve_user_data_dir(allocator: std.mem.Allocator, app_name: []const u8) ![]u8 {
+    const builtin = @import("builtin");
+
+    // Try XDG_DATA_HOME first on Unix-like systems
+    if (builtin.os.tag != .windows) {
+        if (std.posix.getenv("XDG_DATA_HOME")) |xdg_data| {
+            return std.fmt.allocPrint(allocator, "{s}/{s}", .{ xdg_data, app_name });
+        }
+    }
+
+    // Fall back to platform-specific defaults
+    const home_dir = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
+
+    return switch (builtin.os.tag) {
+        .linux, .freebsd, .openbsd, .netbsd => std.fmt.allocPrint(allocator, "{s}/.local/share/{s}", .{ home_dir, app_name }),
+        .macos => std.fmt.allocPrint(allocator, "{s}/Library/Application Support/{s}", .{ home_dir, app_name }),
+        .windows => blk: {
+            // On Windows, use APPDATA if available, otherwise fall back to user profile
+            const app_data = std.posix.getenv("APPDATA") orelse home_dir;
+            break :blk std.fmt.allocPrint(allocator, "{s}\\{s}", .{ app_data, app_name });
+        },
+        else => std.fmt.allocPrint(allocator, "{s}/.{s}", .{ home_dir, app_name }),
+    };
+}
+
+/// Resolve user-specific runtime directory for PID files, sockets, etc.
+/// Returns appropriate directory for temporary runtime files.
+/// Caller owns returned memory and must free it.
+pub fn resolve_user_runtime_dir(allocator: std.mem.Allocator, app_name: []const u8) ![]u8 {
+    const builtin = @import("builtin");
+
+    // Try XDG_RUNTIME_DIR first on Unix-like systems
+    if (builtin.os.tag != .windows) {
+        if (std.posix.getenv("XDG_RUNTIME_DIR")) |xdg_runtime| {
+            return std.fmt.allocPrint(allocator, "{s}/{s}", .{ xdg_runtime, app_name });
+        }
+    }
+
+    // Fall back to platform-specific defaults
+    return switch (builtin.os.tag) {
+        .linux, .freebsd, .openbsd, .netbsd => blk: {
+            // Use /tmp/username-appname for runtime files
+            const uid = std.posix.getuid();
+            break :blk std.fmt.allocPrint(allocator, "/tmp/{s}-{d}", .{ app_name, uid });
+        },
+        .macos => blk: {
+            const home_dir = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
+            break :blk std.fmt.allocPrint(allocator, "{s}/Library/Application Support/{s}/runtime", .{ home_dir, app_name });
+        },
+        .windows => blk: {
+            const temp_dir = std.posix.getenv("TEMP") orelse "C:\\Temp";
+            break :blk std.fmt.allocPrint(allocator, "{s}\\{s}", .{ temp_dir, app_name });
+        },
+        else => blk: {
+            const home_dir = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
+            break :blk std.fmt.allocPrint(allocator, "{s}/.{s}/runtime", .{ home_dir, app_name });
+        },
+    };
+}

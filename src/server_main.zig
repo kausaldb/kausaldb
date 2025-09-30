@@ -89,22 +89,25 @@ fn stop_server_by_port(allocator: std.mem.Allocator, pid_dir: []const u8, port: 
 }
 
 /// Check server status using PID file
-fn check_server_status(allocator: std.mem.Allocator, port: u16) !ExitCode {
-    const status = try daemon.check_startup_status(allocator, "/tmp", "kausaldb", port);
+fn check_server_status(allocator: std.mem.Allocator, config: ServerConfig) !ExitCode {
+    const pid_dir = try config.resolve_pid_dir(allocator);
+    defer allocator.free(pid_dir);
+
+    const status = try daemon.check_startup_status(allocator, pid_dir, "kausaldb", config.port);
 
     switch (status) {
         .can_start => {
-            std.debug.print("Server on port {} is not running (no PID file)\n", .{port});
+            std.debug.print("Server on port {} is not running (no PID file)\n", .{config.port});
             return ExitCode.general_error;
         },
         .already_running => {
-            const pid = try daemon.read_pid_file(allocator, "/tmp", "kausaldb", port);
-            std.debug.print("Server is running (PID: {}) on port {}\n", .{ pid.?, port });
+            const pid = try daemon.read_pid_file(allocator, pid_dir, "kausaldb", config.port);
+            std.debug.print("Server is running (PID: {}) on port {}\n", .{ pid.?, config.port });
             return ExitCode.success;
         },
         .stale_pid_file => {
-            std.debug.print("Server on port {} is not running (stale PID file)\n", .{port});
-            daemon.remove_pid_file(allocator, "/tmp", "kausaldb", port);
+            std.debug.print("Server on port {} is not running (stale PID file)\n", .{config.port});
+            daemon.remove_pid_file(allocator, pid_dir, "kausaldb", config.port);
             return ExitCode.general_error;
         },
     }
@@ -195,11 +198,13 @@ fn run_server_main(allocator: std.mem.Allocator) !ExitCode {
         },
         .stop => {
             const config = try config_mod.parse_server_args(allocator, cmd_args);
-            return try stop_server_by_port(allocator, config.pid_dir, config.port);
+            const pid_dir = try config.resolve_pid_dir(allocator);
+            defer allocator.free(pid_dir);
+            return try stop_server_by_port(allocator, pid_dir, config.port);
         },
         .status => {
             const config = try config_mod.parse_server_args(allocator, cmd_args);
-            return try check_server_status(allocator, config.port);
+            return try check_server_status(allocator, config);
         },
         .restart => {
             return try restart_server(allocator, cmd_args);
@@ -224,18 +229,21 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     const config = try config_mod.parse_server_args(allocator, cmd_args);
 
     // Create operational directories
-    try create_operational_directories(config);
+    try create_operational_directories(allocator, config);
+
+    const pid_dir = try config.resolve_pid_dir(allocator);
+    defer allocator.free(pid_dir);
 
     // Check if server is already running
-    const startup_status = try daemon.check_startup_status(allocator, config.pid_dir, "kausaldb", config.port);
+    const startup_status = try daemon.check_startup_status(allocator, pid_dir, "kausaldb", config.port);
     switch (startup_status) {
         .already_running => {
-            const existing_pid = try daemon.read_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
+            const existing_pid = try daemon.read_pid_file(allocator, pid_dir, "kausaldb", config.port);
             std.debug.print("Server is already running with PID {}\n", .{existing_pid.?});
             return ExitCode.general_error;
         },
         .stale_pid_file => {
-            daemon.remove_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
+            daemon.remove_pid_file(allocator, pid_dir, "kausaldb", config.port);
         },
         .can_start => {
             // Good to start
@@ -243,21 +251,23 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     }
 
     if (config.daemonize) {
+        const log_dir = try config.resolve_log_dir(allocator);
+        defer allocator.free(log_dir);
         // Create production log file path
-        const log_file_path = try std.fmt.allocPrint(allocator, "{s}/kausaldb-{}.log", .{ config.log_dir, config.port });
+        const log_file_path = try std.fmt.allocPrint(allocator, "{s}/kausaldb-{}.log", .{ log_dir, config.port });
         defer allocator.free(log_file_path);
         try daemon.daemonize(log_file_path);
     }
 
     // Write PID file after daemonization
     const current_pid = stdx.getpid();
-    try daemon.write_pid_file(allocator, config.pid_dir, "kausaldb", config.port, current_pid);
+    try daemon.write_pid_file(allocator, pid_dir, "kausaldb", config.port, current_pid);
 
     // Create database coordinator
     var coordinator = ServerCoordinator.init(allocator, config);
     defer {
         coordinator.deinit();
-        daemon.remove_pid_file(allocator, config.pid_dir, "kausaldb", config.port);
+        daemon.remove_pid_file(allocator, pid_dir, "kausaldb", config.port);
     }
 
     // Phase 2: Start database engines
@@ -277,18 +287,24 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
 }
 
 /// Create operational directories with proper permissions
-fn create_operational_directories(config: ServerConfig) !void {
+fn create_operational_directories(allocator: std.mem.Allocator, config: ServerConfig) !void {
+    const log_dir = try config.resolve_log_dir(allocator);
+    defer allocator.free(log_dir);
+
+    const pid_dir = try config.resolve_pid_dir(allocator);
+    defer allocator.free(pid_dir);
+
     // Create directories with appropriate permissions
-    create_directory_safe(config.log_dir, 0o755) catch |err| {
+    create_directory_safe(log_dir, 0o755) catch |err| {
         if (err != error.PathAlreadyExists) {
-            std.debug.print("Warning: Could not create log directory {s}: {}\n", .{ config.log_dir, err });
+            std.debug.print("Warning: Could not create log directory {s}: {}\n", .{ log_dir, err });
             std.debug.print("Falling back to current directory for logs\n", .{});
         }
     };
 
-    create_directory_safe(config.pid_dir, 0o755) catch |err| {
+    create_directory_safe(pid_dir, 0o755) catch |err| {
         if (err != error.PathAlreadyExists) {
-            std.debug.print("Warning: Could not create pid directory {s}: {}\n", .{ config.pid_dir, err });
+            std.debug.print("Warning: Could not create pid directory {s}: {}\n", .{ pid_dir, err });
             std.debug.print("Using /tmp for PID files\n", .{});
         }
     };
@@ -305,15 +321,15 @@ fn create_directory_safe(path: []const u8, mode: u32) !void {
 
     // Then set proper permissions using chmod (Unix-like systems only)
     if (comptime builtin.os.tag != .windows) {
-        set_directory_permissions(path, mode) catch |err| {
+        apply_directory_permissions(path, mode) catch |err| {
             // Log warning but don't fail - directory creation succeeded
             std.debug.print("Warning: Could not set permissions {} on {s}: {}\n", .{ mode, path, err });
         };
     }
 }
 
-/// Set directory permissions using chmod (Unix-like systems only)
-fn set_directory_permissions(path: []const u8, mode: u32) !void {
+/// Apply directory permissions using chmod (Unix-like systems only)
+fn apply_directory_permissions(path: []const u8, mode: u32) !void {
     if (comptime builtin.os.tag == .windows) {
         return; // Windows doesn't use Unix permissions
     }
@@ -337,12 +353,15 @@ fn set_directory_permissions(path: []const u8, mode: u32) !void {
 /// Restart server with proper shutdown/startup sequence
 fn restart_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !ExitCode {
     const config = try config_mod.parse_server_args(allocator, cmd_args);
-    _ = try stop_server_by_port(allocator, config.pid_dir, config.port);
+    const pid_dir = try config.resolve_pid_dir(allocator);
+    defer allocator.free(pid_dir);
+
+    _ = try stop_server_by_port(allocator, pid_dir, config.port);
 
     std.Thread.sleep(500 * std.time.ns_per_ms);
 
     // Verify server stopped
-    const startup_status = try daemon.check_startup_status(allocator, config.pid_dir, "kausaldb", config.port);
+    const startup_status = try daemon.check_startup_status(allocator, pid_dir, "kausaldb", config.port);
     if (startup_status == .already_running) {
         std.debug.print("Failed to stop server, restart aborted\n", .{});
         return ExitCode.general_error;
