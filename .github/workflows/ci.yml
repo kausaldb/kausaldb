@@ -125,11 +125,12 @@ jobs:
 
       - name: Build KausalDB Binary
         run: |
-          echo "Building KausalDB binary..."
+          echo "Building KausalDB binaries..."
           ./zig/zig build --release=fast
 
-          echo "Verifying binary was created and works..."
-          ./zig-out/bin/kausaldb --version
+          echo "Verifying binaries were created and work..."
+          ./zig-out/bin/kausal --version
+          ./zig-out/bin/kausal-server --version
 
       - name: Run Benchmarks
         timeout-minutes: 10
@@ -267,12 +268,14 @@ jobs:
 
       - name: Test Release Binary
         run: |
-          ./zig-out/bin/kausaldb --version
-          ./zig-out/bin/kausaldb --help
+          ./zig-out/bin/kausal --version
+          ./zig-out/bin/kausal --help
+          ./zig-out/bin/kausal-server --version
+          ./zig-out/bin/kausal-server --help
 
       - name: Package Release
         run: |
-          tar -czf kausaldb-${{ matrix.os }}.tar.gz -C zig-out/bin kausaldb
+          tar -czf kausaldb-${{ matrix.os }}.tar.gz -C zig-out/bin kausal kausal-server
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
