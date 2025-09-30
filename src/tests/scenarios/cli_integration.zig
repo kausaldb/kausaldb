@@ -93,8 +93,9 @@ const MockServer = struct {
 
         // Make socket non-blocking to prevent hanging in accept()
         const server_flags = try std.posix.fcntl(server.stream.handle, std.posix.F.GETFL, 0);
-        const nonblock_flag = 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
-        _ = try std.posix.fcntl(server.stream.handle, std.posix.F.SETFL, server_flags | nonblock_flag);
+        // Use numeric constant to avoid @bitOffsetOf LLVM optimization hang
+        const O_NONBLOCK: c_int = 0x00000004; // From sys/fcntl.h on macOS
+        _ = try std.posix.fcntl(server.stream.handle, std.posix.F.SETFL, server_flags | O_NONBLOCK);
 
         return MockServer{
             .allocator = allocator,

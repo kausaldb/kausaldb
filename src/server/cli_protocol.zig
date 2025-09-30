@@ -601,49 +601,53 @@ fn serialize_find_response(ctx: HandlerContext, response: cli_protocol.FindRespo
 }
 
 fn serialize_show_response(ctx: HandlerContext, blocks: []const ContextBlock, edges: []const GraphEdge) ![]const u8 {
-    var response = cli_protocol.ShowResponse.init();
+    const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.ShowResponse);
+    const response_bytes = try ctx.allocator.alloc(u8, total_size);
 
-    for (blocks) |block| {
-        if (response.block_count >= cli_protocol.MAX_BLOCKS_PER_RESPONSE) break;
-        response.add_block(block);
-    }
-
-    for (edges) |edge| {
-        if (response.edge_count >= cli_protocol.MAX_EDGES_PER_RESPONSE) break;
-        response.add_edge(edge);
-    }
-
+    // 1. Write header
     const response_header = cli_protocol.MessageHeader{
         .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
     };
-
-    const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.ShowResponse);
-    const response_bytes = try ctx.allocator.alloc(u8, total_size);
-
     @memcpy(response_bytes[0..@sizeOf(cli_protocol.MessageHeader)], std.mem.asBytes(&response_header));
-    @memcpy(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], std.mem.asBytes(&response));
+
+    // 2. Zero out the response payload section
+    @memset(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], 0);
+
+    // 3. Cast to struct pointer and populate directly
+    const response_ptr: *cli_protocol.ShowResponse = @ptrCast(@alignCast(&response_bytes[@sizeOf(cli_protocol.MessageHeader)]));
+
+    // 4. Populate fields
+    for (blocks, 0..) |block, i| {
+        if (i >= cli_protocol.MAX_BLOCKS_PER_RESPONSE) break;
+        response_ptr.add_block(block);
+    }
+
+    for (edges, 0..) |edge, i| {
+        if (i >= cli_protocol.MAX_EDGES_PER_RESPONSE) break;
+        response_ptr.add_edge(edge);
+    }
 
     return response_bytes;
 }
 
 fn serialize_empty_show_response(ctx: HandlerContext) ![]const u8 {
-    const response = cli_protocol.ShowResponse.init();
+    const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.ShowResponse);
+    const response_bytes = try ctx.allocator.alloc(u8, total_size);
 
+    // Write header
     const response_header = cli_protocol.MessageHeader{
         .magic = cli_protocol.PROTOCOL_MAGIC,
         .version = cli_protocol.PROTOCOL_VERSION,
         .message_type = .show_response,
         .payload_size = @sizeOf(cli_protocol.ShowResponse),
     };
-
-    const total_size = @sizeOf(cli_protocol.MessageHeader) + @sizeOf(cli_protocol.ShowResponse);
-    const response_bytes = try ctx.allocator.alloc(u8, total_size);
-
     @memcpy(response_bytes[0..@sizeOf(cli_protocol.MessageHeader)], std.mem.asBytes(&response_header));
-    @memcpy(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], std.mem.asBytes(&response));
+
+    // Zero out payload (empty response)
+    @memset(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], 0);
 
     return response_bytes;
 }

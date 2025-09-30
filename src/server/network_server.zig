@@ -51,21 +51,13 @@ pub const NetworkStats = struct {
 
 /// Network server error types
 pub const NetworkServerError = error{
-    /// Address already in use
     AddressInUse,
-    /// Too many connections
     TooManyConnections,
-    /// Connection timeout
     ConnectionTimeout,
-    /// Invalid request format
     InvalidRequest,
-    /// Request too large
     RequestTooLarge,
-    /// Response too large
     ResponseTooLarge,
-    /// Client disconnected unexpectedly
     ClientDisconnected,
-    /// End of stream
     EndOfStream,
 } || std.mem.Allocator.Error || std.net.Stream.ReadError || std.net.Stream.WriteError;
 
@@ -181,15 +173,16 @@ pub const NetworkServer = struct {
     }
 
     /// Bind to socket and prepare for connections (non-blocking)
-    fn bind(self: *NetworkServer) !void {
+    pub fn bind(self: *NetworkServer) !void {
         concurrency.assert_main_thread();
 
         const address = try std.net.Address.parseIp4(self.config.host, self.config.port);
         self.listener = try address.listen(.{ .reuse_address = true });
 
         const flags = try std.posix.fcntl(self.listener.?.stream.handle, std.posix.F.GETFL, 0);
-        const nonblock_flag = 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
-        _ = try std.posix.fcntl(self.listener.?.stream.handle, std.posix.F.SETFL, flags | nonblock_flag);
+        // Use numeric constant to avoid @bitOffsetOf and @bitCast LLVM optimization hangs
+        const O_NONBLOCK: c_int = 0x00000004; // From sys/fcntl.h on macOS
+        _ = try std.posix.fcntl(self.listener.?.stream.handle, std.posix.F.SETFL, flags | O_NONBLOCK);
 
         log.info("Network server bound to {s}:{d}", .{ self.config.host, self.bound_port() });
         log.info("Network config: max_connections={d}, timeout={d}s", .{
@@ -209,35 +202,50 @@ pub const NetworkServer = struct {
     /// Main coordination loop: delegate I/O to ConnectionManager, handle requests.
     /// Checks for shutdown signals to enable graceful termination.
     /// Pure coordinator: polls for ready connections, processes requests.
-    fn run(self: *NetworkServer) !void {
+    pub fn run(self: *NetworkServer) !void {
         concurrency.assert_main_thread();
 
         const listener = &self.listener.?;
 
+        // LLVM-friendly approach: bounded iterations to avoid infinite loop optimization hang
+        var batch_count: u64 = 0;
         while (self.running.load(.monotonic)) {
-            const ready_connections = self.connection_manager.poll_for_ready_connections(listener) catch |err| {
-                const ctx = error_context.ServerContext{ .operation = "poll_connections" };
-                error_context.log_server_error(err, ctx);
-                continue; // Server must remain available despite I/O errors
-            };
+            // Process in small batches to make LLVM optimization tractable
+            for (0..100) |_| {
+                if (!self.running.load(.monotonic)) break;
 
-            for (ready_connections) |connection| {
-                const keep_alive = self.connection_manager.process_connection_io(
-                    connection,
-                    self.config.to_connection_config(),
-                ) catch |err| {
-                    const ctx = error_context.connection_context("process_io", connection.connection_id);
+                const ready_connections = self.connection_manager.poll_for_ready_connections(listener) catch |err| {
+                    const ctx = error_context.ServerContext{ .operation = "poll_connections" };
                     error_context.log_server_error(err, ctx);
-                    continue; // Individual connection errors don't stop server
+                    continue;
                 };
-                _ = keep_alive;
+
+                for (ready_connections) |connection| {
+                    const config = self.config.to_connection_config();
+                    const keep_alive = self.connection_manager.process_connection_io(connection, config) catch |err| {
+                        const ctx = error_context.connection_context("process_io", connection.connection_id);
+                        error_context.log_server_error(err, ctx);
+                        continue;
+                    };
+                    _ = keep_alive;
+                }
+
+                while (self.connection_manager.find_connection_with_ready_request()) |connection| {
+                    try self.process_connection_request(connection);
+                }
+
+                self.update_aggregated_statistics();
             }
 
-            while (self.connection_manager.find_connection_with_ready_request()) |connection| {
-                try self.process_connection_request(connection);
-            }
+            batch_count +%= 1;
 
-            self.update_aggregated_statistics();
+            // Yield between batches to prevent LLVM optimization hang
+            std.Thread.yield() catch {};
+
+            // Minimal debug logging for monitoring
+            if (batch_count % 1000 == 0) {
+                log.debug("Server processed {} batches", .{batch_count});
+            }
         }
 
         log.info("Network server coordination loop exiting due to shutdown signal", .{});

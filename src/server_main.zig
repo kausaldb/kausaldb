@@ -80,8 +80,8 @@ const ExitCode = enum(u8) {
 };
 
 /// Stop server using PID file
-fn stop_server_by_port(allocator: std.mem.Allocator, port: u16) !ExitCode {
-    daemon.stop_process(allocator, "/tmp", "kausaldb", port, 10) catch |err| {
+fn stop_server_by_port(allocator: std.mem.Allocator, pid_dir: []const u8, port: u16) !ExitCode {
+    daemon.stop_process(allocator, pid_dir, "kausaldb", port, 10) catch |err| {
         log.err("Failed to stop server: {}", .{err});
         return ExitCode.general_error;
     };
@@ -195,7 +195,7 @@ fn run_server_main(allocator: std.mem.Allocator) !ExitCode {
         },
         .stop => {
             const config = try config_mod.parse_server_args(allocator, cmd_args);
-            return try stop_server_by_port(allocator, config.port);
+            return try stop_server_by_port(allocator, config.pid_dir, config.port);
         },
         .status => {
             const config = try config_mod.parse_server_args(allocator, cmd_args);
@@ -271,6 +271,7 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     // Phase 2: Start network server
     try network_server.startup();
     defer network_server.shutdown();
+    try network_server.run();
 
     return ExitCode.success;
 }
@@ -293,7 +294,7 @@ fn create_operational_directories(config: ServerConfig) !void {
     };
 }
 
-/// Create directory with explicit permissions, handling platform differences  
+/// Create directory with explicit permissions, handling platform differences
 fn create_directory_safe(path: []const u8, mode: u32) !void {
     // First, try to create the path using the standard library (which handles recursion)
     std.fs.cwd().makePath(path) catch |err| switch (err) {
@@ -301,7 +302,7 @@ fn create_directory_safe(path: []const u8, mode: u32) !void {
         error.AccessDenied => return err, // Let caller handle permission issues
         else => return err,
     };
-    
+
     // Then set proper permissions using chmod (Unix-like systems only)
     if (comptime builtin.os.tag != .windows) {
         set_directory_permissions(path, mode) catch |err| {
@@ -316,18 +317,18 @@ fn set_directory_permissions(path: []const u8, mode: u32) !void {
     if (comptime builtin.os.tag == .windows) {
         return; // Windows doesn't use Unix permissions
     }
-    
+
     // Convert path to null-terminated for system call
-    var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.PathTooLong;
-    
+
     // Use chmod system call to set permissions
-    const result = std.c.chmod(path_z.ptr, mode);
+    const result = std.c.chmod(path_z.ptr, @intCast(mode));
     if (result != 0) {
         return switch (std.c._errno().*) {
-            std.c.E.ACCES => error.AccessDenied,
-            std.c.E.NOENT => error.FileNotFound,
-            std.c.E.PERM => error.PermissionDenied,
+            @intFromEnum(std.c.E.ACCES) => error.AccessDenied,
+            @intFromEnum(std.c.E.NOENT) => error.FileNotFound,
+            @intFromEnum(std.c.E.PERM) => error.PermissionDenied,
             else => error.UnexpectedError,
         };
     }
@@ -336,7 +337,7 @@ fn set_directory_permissions(path: []const u8, mode: u32) !void {
 /// Restart server with proper shutdown/startup sequence
 fn restart_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !ExitCode {
     const config = try config_mod.parse_server_args(allocator, cmd_args);
-    _ = try stop_server_by_port(allocator, config.port);
+    _ = try stop_server_by_port(allocator, config.pid_dir, config.port);
 
     std.Thread.sleep(500 * std.time.ns_per_ms);
 

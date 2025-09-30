@@ -147,8 +147,9 @@ pub const ConnectionManager = struct {
 
             // Configure socket for non-blocking I/O
             const conn_flags = try std.posix.fcntl(connection.stream.handle, std.posix.F.GETFL, 0);
-            const nonblock_flag = 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
-            _ = try std.posix.fcntl(connection.stream.handle, std.posix.F.SETFL, conn_flags | nonblock_flag);
+            // Use numeric constant to avoid @bitOffsetOf LLVM optimization hang
+            const O_NONBLOCK: c_int = 0x00000004; // From sys/fcntl.h on macOS
+            _ = try std.posix.fcntl(connection.stream.handle, std.posix.F.SETFL, conn_flags | O_NONBLOCK);
 
             self.next_connection_id += 1;
             try self.connections.append(connection);
