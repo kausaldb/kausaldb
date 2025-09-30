@@ -94,7 +94,13 @@ const MockServer = struct {
         // Make socket non-blocking to prevent hanging in accept()
         const server_flags = try std.posix.fcntl(server.stream.handle, std.posix.F.GETFL, 0);
         // Use numeric constant to avoid @bitOffsetOf LLVM optimization hang
-        const O_NONBLOCK: c_int = 0x00000004; // From sys/fcntl.h on macOS
+        // Platform-specific O_NONBLOCK values from sys/fcntl.h
+        const builtin = @import("builtin");
+        const O_NONBLOCK: c_int = switch (builtin.os.tag) {
+            .linux => 0x00000800, // O_NONBLOCK on Linux
+            .macos => 0x00000004, // O_NONBLOCK on macOS
+            else => 0x00000004, // Default to macOS value
+        };
         _ = try std.posix.fcntl(server.stream.handle, std.posix.F.SETFL, server_flags | O_NONBLOCK);
 
         return MockServer{
