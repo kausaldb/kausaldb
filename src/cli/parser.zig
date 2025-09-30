@@ -161,6 +161,14 @@ pub const ParseResult = struct {
     global_options: GlobalOptions,
 };
 
+/// Check if a string matches any in a list of alternatives
+inline fn matches(str: []const u8, alternatives: []const []const u8) bool {
+    for (alternatives) |alt| {
+        if (std.mem.eql(u8, str, alt)) return true;
+    }
+    return false;
+}
+
 /// Parse command-line arguments into structured commands
 pub fn parse_command(args: []const []const u8) ParseError!Command {
     const result = try parse_command_with_globals(args);
@@ -206,30 +214,43 @@ pub fn parse_command_with_globals(args: []const []const u8) ParseError!ParseResu
     const command_str = args[command_start];
     const remaining_args = args[command_start + 1 ..];
 
-    const command = if (std.mem.eql(u8, command_str, "help"))
-        Command{ .help = try parse_help(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "version"))
-        Command{ .version = try parse_version(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "server"))
-        Command{ .server = try parse_server(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "status"))
-        Command{ .status = try parse_status(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "ping"))
-        Command{ .ping = try parse_ping(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "find"))
-        Command{ .find = try parse_find(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "show"))
-        Command{ .show = try parse_show(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "trace"))
-        Command{ .trace = try parse_trace(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "link"))
-        Command{ .link = try parse_link(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "unlink"))
-        Command{ .unlink = try parse_unlink(remaining_args) }
-    else if (std.mem.eql(u8, command_str, "sync"))
-        Command{ .sync = try parse_sync(remaining_args) }
-    else
+    // Command dispatch: maps command strings to their parser functions
+    const command = blk: {
+        if (matches(command_str, &.{ "help", "--help", "-h" })) {
+            break :blk Command{ .help = try parse_help(remaining_args) };
+        }
+        if (matches(command_str, &.{ "version", "--version", "-v" })) {
+            break :blk Command{ .version = try parse_version(remaining_args) };
+        }
+        if (matches(command_str, &.{"server"})) {
+            break :blk Command{ .server = try parse_server(remaining_args) };
+        }
+        if (matches(command_str, &.{"status"})) {
+            break :blk Command{ .status = try parse_status(remaining_args) };
+        }
+        if (matches(command_str, &.{"ping"})) {
+            break :blk Command{ .ping = try parse_ping(remaining_args) };
+        }
+        if (matches(command_str, &.{"find"})) {
+            break :blk Command{ .find = try parse_find(remaining_args) };
+        }
+        if (matches(command_str, &.{"show"})) {
+            break :blk Command{ .show = try parse_show(remaining_args) };
+        }
+        if (matches(command_str, &.{"trace"})) {
+            break :blk Command{ .trace = try parse_trace(remaining_args) };
+        }
+        if (matches(command_str, &.{"link"})) {
+            break :blk Command{ .link = try parse_link(remaining_args) };
+        }
+        if (matches(command_str, &.{"unlink"})) {
+            break :blk Command{ .unlink = try parse_unlink(remaining_args) };
+        }
+        if (matches(command_str, &.{"sync"})) {
+            break :blk Command{ .sync = try parse_sync(remaining_args) };
+        }
         return ParseError.UnknownCommand;
+    };
 
     return ParseResult{
         .command = command,

@@ -6,6 +6,14 @@
 const std = @import("std");
 const stdx = @import("../core/stdx.zig");
 
+/// Check if a string matches any in a list of alternatives
+inline fn matches(str: []const u8, alternatives: []const []const u8) bool {
+    for (alternatives) |alt| {
+        if (std.mem.eql(u8, str, alt)) return true;
+    }
+    return false;
+}
+
 /// Server configuration for both daemon and network operations
 pub const ServerConfig = struct {
     /// Network binding configuration
@@ -111,39 +119,39 @@ pub fn parse_server_args(_: std.mem.Allocator, args: []const []const u8) !Server
     while (i < args.len) {
         const arg = args[i];
 
-        if (std.mem.eql(u8, arg, "--host")) {
+        if (matches(arg, &.{"--host"})) {
             config.host = try consume_flag_value(args, &i, "--host");
-        } else if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
+        } else if (matches(arg, &.{ "--port", "-p" })) {
             const port_str = try consume_flag_value(args, &i, "--port");
             config.port = std.fmt.parseInt(u16, port_str, 10) catch {
                 std.debug.print("Error: Invalid port number: {s}\n", .{port_str});
                 return error.InvalidArgs;
             };
-        } else if (std.mem.eql(u8, arg, "--data-dir")) {
+        } else if (matches(arg, &.{"--data-dir"})) {
             config.data_dir = try consume_flag_value(args, &i, "--data-dir");
-        } else if (std.mem.eql(u8, arg, "--max-connections")) {
+        } else if (matches(arg, &.{"--max-connections"})) {
             const conn_str = try consume_flag_value(args, &i, "--max-connections");
             config.max_connections = std.fmt.parseInt(u32, conn_str, 10) catch {
                 std.debug.print("Error: Invalid max connections: {s}\n", .{conn_str});
                 return error.InvalidArgs;
             };
-        } else if (std.mem.eql(u8, arg, "--foreground") or std.mem.eql(u8, arg, "--no-daemonize")) {
+        } else if (matches(arg, &.{ "--foreground", "--no-daemonize" })) {
             config.daemonize = false;
-        } else if (std.mem.eql(u8, arg, "--log-level")) {
+        } else if (matches(arg, &.{"--log-level"})) {
             const level_str = try consume_flag_value(args, &i, "--log-level");
             config.log_level = std.meta.stringToEnum(std.log.Level, level_str) orelse {
                 std.debug.print("Error: Invalid log level: {s}\n", .{level_str});
                 return error.InvalidArgs;
             };
-        } else if (std.mem.eql(u8, arg, "--enable-logging")) {
+        } else if (matches(arg, &.{"--enable-logging"})) {
             config.enable_logging = true;
-        } else if (std.mem.eql(u8, arg, "--enable-hot-path-logging")) {
+        } else if (matches(arg, &.{"--enable-hot-path-logging"})) {
             config.enable_hot_path_logging = true;
-        } else if (std.mem.eql(u8, arg, "--structured-logging")) {
+        } else if (matches(arg, &.{"--structured-logging"})) {
             config.structured_logging = true;
-        } else if (std.mem.eql(u8, arg, "--log-dir")) {
+        } else if (matches(arg, &.{"--log-dir"})) {
             config.log_dir = try consume_flag_value(args, &i, "--log-dir");
-        } else if (std.mem.eql(u8, arg, "--pid-dir")) {
+        } else if (matches(arg, &.{"--pid-dir"})) {
             config.pid_dir = try consume_flag_value(args, &i, "--pid-dir");
         } else {
             std.debug.print("Error: Unknown argument: {s}\n", .{arg});
