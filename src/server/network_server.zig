@@ -181,7 +181,12 @@ pub const NetworkServer = struct {
 
         const flags = try std.posix.fcntl(self.listener.?.stream.handle, std.posix.F.GETFL, 0);
         // Use numeric constant to avoid @bitOffsetOf and @bitCast LLVM optimization hangs
-        const O_NONBLOCK: c_int = 0x00000004; // From sys/fcntl.h on macOS
+        // Platform-specific O_NONBLOCK values from sys/fcntl.h
+        const O_NONBLOCK: c_int = switch (builtin.os.tag) {
+            .linux => 0x00000800, // O_NONBLOCK on Linux
+            .macos => 0x00000004, // O_NONBLOCK on macOS
+            else => 0x00000004, // Default to macOS value
+        };
         _ = try std.posix.fcntl(self.listener.?.stream.handle, std.posix.F.SETFL, flags | O_NONBLOCK);
 
         log.info("Network server bound to {s}:{d}", .{ self.config.host, self.bound_port() });
