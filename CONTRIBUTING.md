@@ -1,171 +1,88 @@
-# Contributing
+# CONTRIBUTING
 
-Quick start guide for KausalDB contributors.
+This guide provides everything you need to get started.
 
-## Setup
+## 1. Setup
+
+Get the repository and install the required Zig toolchain with a single script.
 
 ```bash
-# Clone and setup
+# Clone and enter the repository
 git clone https://github.com/kausaldb/kausaldb
 cd kausaldb
 
-# Install toolchain
+# Install the correct Zig version into ./zig/
 ./scripts/install_zig.sh
 ```
+The project uses pre-commit hooks to automate formatting and testing.
 
-## Development Workflow
+## 2. Development Workflow
 
-### Fast Iteration
+The development cycle is designed to be fast and reliable.
 
-```bash
-./zig/zig build test           # Unit tests (~5 seconds)
-./zig/zig build ci-smoke       # Format, tidy, tests (~30 seconds)
-```
+1.  **Format your code:**
+    ```bash
+    ./zig/zig build fmt
+    ```
 
-### Before Submitting
+2.  **Run the fast test suite:** This is your primary command for quick validation.
+    ```bash
+    ./zig/zig build test
+    ```
+3.  **Run code quality checks:** Before committing, ensure your code aligns with project conventions.
+    ```bash
+    ./zig/zig build tidy
+    ```
+4.  **Run the complete test suite:** Before submitting a pull request, run the full validation suite.
+    ```bash
+    ./zig/zig build test-all
+    ```
 
-```bash
-./zig/zig build ci-full        # Full validation (~5 minutes)
-```
+## Guiding Principles
 
-Pre-commit hooks automatically run formatting, tidy checks, and fast tests.
+To maintain simplicity and correctness, we follow a few guiding principles:
+
+*   **Correctness over Features:** Stability and data integrity are non-negotiable.
+*   **Simplicity over Complexity:** If a simpler path exists, it is the correct one.
+*   **Deterministic Testing over Mocking:** Every test failure must be reproducible. We use a simulation framework to test real code under hostile conditions, not mocks.
 
 ## Code Standards
 
-### Naming
+We rely on `zig fmt` for formatting. Our main code standards are simple:
 
-**Functions are verbs**:
+*   **Functions are Verbs:** Name functions to describe the action they perform.
+    ```zig
+    // GOOD
+    fn find_block(id: BlockId) !?ContextBlock;
 
-```zig
-pub fn find_block(id: BlockId) !?ContextBlock     // GOOD
-pub fn block_finder(id: BlockId) !?ContextBlock   // BAD
-```
+    // BAD
+    fn block_finder(id: BlockId) !?ContextBlock;
+    ```
+*   **Comments Explain *Why*, Not *What*:** Code should explain itself. Comments should provide context that the code cannot.
+    ```zig
+    // BAD:
+    // Increment the counter
+    counter += 1;
 
-**Special prefixes**:
+    // GOOD:
+    // WAL requires sequential entry numbers for recovery
+    counter += 1;
+    ```
 
-- `try_*` for error unions: `try_parse_header()`
-- `maybe_*` for optionals: `maybe_find_cached()`
+## Submitting Changes
 
-### Memory
+1.  **Commit Messages:** Please follow the [Conventional Commits](https://www.conventionalcommits.org/) format.
 
-Use arena coordinator pattern:
+    ```
+    type(scope): brief summary
+    ```
+    **Example:** `feat(storage): add checksum validation to sstable headers`
 
-```zig
-// Coordinator survives struct copies
-pub const Engine = struct {
-    arena: *ArenaAllocator,
-    coordinator: *ArenaCoordinator,
-};
-```
+2.  **Pull Requests:** Before submitting a pull request, please ensure:
+    *   The full test suite passes (`./zig/zig build test-all`).
+    *   New functionality is covered by new tests.
+    *   The changes align with our guiding principles.
 
-### Comments
+## Further Reading
 
-Explain **why**, not what:
-
-```zig
-// BAD: Increment counter
-counter += 1;
-
-// GOOD: WAL requires sequential entry numbers for recovery
-counter += 1;
-```
-
-### Testing
-
-Use harnesses, not manual setup:
-
-```zig
-// Standard pattern
-var harness = try StorageHarness.init(allocator, "test_db");
-defer harness.deinit();
-```
-
-Manual setup only with justification:
-
-```zig
-// Manual setup required because: Recovery testing needs two separate
-// StorageEngine instances sharing the same VFS
-```
-
-## Testing Requirements
-
-All changes must include:
-
-- [ ] Unit tests (if adding new functions)
-- [ ] Integration tests (if changing module interactions)
-- [ ] Deterministic reproduction (tests must be reproducible with seeds)
-
-## Debugging
-
-Memory issues use tiered approach:
-
-1. **Quick**: `./zig/zig build test -Denable-memory-guard=true`
-2. **Deep**: `./zig/zig build test -fsanitize-address`
-3. **Interactive**: `lldb ./zig-out/bin/test`
-
-## Commit Guidelines
-
-Format:
-
-```
-type(scope): brief summary
-
-Optional: Context and rationale.
-
-- Specific change 1
-- Specific change 2
-
-Optional: Impact, result achieved.
-```
-
-**Types**: `feat`, `fix`, `refactor`, `test`, `docs`, `perf`, `chore`
-
-**Example**:
-
-```
-feat(storage): implement arena coordinator pattern
-
-Prevents struct copying corruption in Zig by using heap-allocated
-arenas with stable coordinator interfaces.
-
-- Add ArenaCoordinator with pointer-based interface
-- Replace embedded ArenaAllocator with coordinator pattern
-- Update StorageEngine to use coordinator for O(1) cleanup
-
-Impact: Eliminates segmentation faults from arena corruption.
-```
-
-## Pull Requests
-
-**Before submitting**:
-
-- [ ] `./zig/zig build ci-full` passes
-- [ ] Performance targets still met
-- [ ] Documentation updated (if changing APIs)
-- [ ] Tests added for new functionality
-
-**Review focuses on**:
-
-- Correctness and safety
-- Performance impact
-- Code clarity and maintainability
-- Test coverage
-- Alignment with architectural principles
-
-## Getting Help
-
-- **Setup issues**: Check [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- **Architecture questions**: Read [docs/DESIGN.md](docs/DESIGN.md)
-- **Testing patterns**: See [docs/TESTING.md](docs/TESTING.md)
-- **Code style**: Review [docs/STYLE.md](docs/STYLE.md)
-
-## Philosophy
-
-KausalDB prioritizes:
-
-1. **Correctness over features**
-2. **Explicit over magical**
-3. **Simple over clever**
-4. **Deterministic testing over mocking**
-
-Every line of code should be obviously correct or comprehensively tested.
+For a deeper understanding of our architecture, testing philosophy, and code style, please see the documents in the **[`docs/`](docs/)** directory.

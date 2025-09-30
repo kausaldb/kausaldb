@@ -1,321 +1,65 @@
-# Testing
+# TESTING
 
-KausalDB uses deterministic simulation and property-based testing to catch bugs that traditional unit tests miss. Every test failure can be reproduced exactly using a seed.
+The testing philosophy is built on a single, non-negotiable principle: **every test failure must be reproducible**. We achieve this through a "simulation-first" approach that allows us to test the real production code under deterministic, hostile conditions.
 
-## Test Architecture
+The test suite is structured to provide fast feedback during development and comprehensive validation in CI.
 
-### Three-Tier Structure
+1.  **Unit Tests (`./zig/zig build test`):**
+    *   **Location:** Embedded directly within the source files they test (e.g., `src/core/types.zig`).
+    *   **Purpose:** Fast, isolated checks for individual functions and data structures. They run in seconds and should be executed frequently.
 
-**Unit Tests** (in source files):
+2.  **Scenario & Integration Tests (`./zig/zig build test-all`):**
+    *   **Location:** `src/tests/scenarios/`
+    *   **Purpose:** These are property-based tests that run the entire storage engine within a deterministic simulation framework. They verify that the system's high-level properties (like durability) hold true across thousands of operations and failure scenarios.
 
-- Test individual functions in isolation
-- No I/O operations, pure computation
-- Run in <1 second total
-- Located alongside implementation code
+3.  **End-to-End (E2E) Tests (`./zig/zig build test-e2e`):**
+    *   **Location:** `tests/`
+    *   **Purpose:** These tests validate the final compiled binary, including the CLI interface and client-server communication. They are the slowest and run as part of the full test suite.
 
-**Integration Tests** (`src/tests/`):
+## Deterministic Simulation Testing
 
-- Test interactions between modules
-- Use standardized test harnesses
-- Access to internal APIs
-- Deterministic via SimulationVFS
+The core of the testing strategy is the **Virtual File System (VFS)** and the **SimulationRunner**.
 
-**End-to-End Tests** (`tests/`):
+*   **Virtual File System (VFS):** All I/O is performed through the VFS abstraction. In tests, we use `SimulationVFS`, an in-memory filesystem that gives us complete control over I/O behavior.
+*   **Fault Injection:** The `SimulationVFS` can be configured to simulate I/O errors, disk corruption, and torn writes at specific, deterministic points during a test run.
+*   **SimulationRunner:** This test harness (`src/testing/harness.zig`) orchestrates the tests. It generates a deterministic sequence of operations (writes, reads, deletes) based on a seed and applies them to both the real storage engine and a simple, correct `ModelState`.
 
-- Test binary interface only
-- Subprocess execution with real CLI
-- Real-world usage scenarios
+## Property-Based Testing
 
-## Test Harnesses
+Instead of testing for specific outcomes, we test for **properties** that must always be true. The primary property checker is in `src/testing/properties.zig`.
 
-All integration tests use standardized harnesses from `src/tests/harness.
-zig`:
+The most important property is **durability:** *all data acknowledged as written must be retrievable with its content intact, even after simulated crashes.*
 
-### StorageHarness
+During a test run, the `SimulationRunner` continuously compares the state of the real `StorageEngine` against the `ModelState`. Any divergence between the two indicates a correctness bug.
 
-For testing storage operations with simulation:
+## How to Write a Test
 
+1.  **Unit Tests:** For new functions or data structures, add a `test "..." { ... }` block directly in the source file. Use `std.testing` to make assertions.
+2.  **Scenario Tests:** For new features or bug fixes that affect the storage engine, add a new test to a file in `src/tests/scenarios/`.
+    *   Use the `SimulationRunner` to define a workload (`OperationMix`).
+    *   Provide a deterministic seed.
+    *   Configure fault injection if testing failure recovery.
+    *   Run a sequence of operations.
+    *   Call `runner.verify_consistency()` to validate the system against the model.
+
+**Example Scenario Test:**
 ```zig
-test "storage operations" {
-    var harness = try StorageHarness.init(allocator, "test_db");
-    defer harness.deinit();
+test "scenario: data survives a crash" {
+    var runner = try SimulationRunner.init(
+        allocator,
+        0xDEADBEEF, // Deterministic seed
+        operation_mix,
+        &.{}, // No fault injection
+    );
+    defer runner.deinit();
 
-    try harness.startup();
-    defer harness.shutdown();
+    // Run 100 operations to build up state
+    try runner.run(100);
 
-    const block = try TestData.create_test_block(allocator, 1);
-    try harness.write_and_verify_block(&block);
+    // Simulate a hard crash and recovery
+    try runner.simulate_crash_recovery();
+
+    // Verify all data was recovered correctly
+    try runner.verify_consistency();
 }
 ```
-
-### QueryHarness
-
-For testing query operations with storage backend:
-
-```zig
-test "graph traversal" {
-    var harness = try QueryHarness.init(allocator, "test_db");
-    defer harness.deinit();
-
-    try harness.startup();
-    // Query testing with full storage stack
-}
-```
-
-### ProductionHarness
-
-For performance testing with real filesystem:
-
-```zig
-var harness = try ProductionHarness.init(allocator, "perf_test");
-// Real I/O for accurate performance measurements
-```
-
-## Deterministic Simulation
-
-### Virtual File System
-
-All I/O goes through VFS abstraction enabling deterministic testing:
-
-```zig
-pub const VFS = union(enum) {
-    real: ProductionVFS,       // Production
-    simulation: SimulationVFS, // Testing
-};
-```
-
-SimulationVFS provides:
-
-- In-memory filesystem
-- Deterministic failure injection
-- 100x faster test execution
-- Perfect reproducibility
-
-### Property-Based Testing
-
-Located in `src/sim/deterministic_test.zig`, tests system properties rather than specific examples:
-
-```zig
-// WorkloadGenerator creates deterministic operation sequences
-var generator = WorkloadGenerator.init(allocator, seed, operation_mix);
-
-// PropertyChecker validates system invariants
-try PropertyChecker.check_no_data_loss(&model, &system);
-try PropertyChecker.check_graph_consistency(&model);
-```
-
-**Operation Types Tested**:
-
-- `put_block` - Block storage operations
-- `find_block` - Block retrieval operations
-- `put_edge` - Graph edge creation
-- `find_edges` - Graph traversal
-- `delete_block` - Block removal
-
-### Fault Injection
-
-Realistic failure scenarios via `SimulationVFS`:
-
-- I/O errors at specific operation counts
-- Partial writes (simulating power loss)
-- File corruption with checksum validation
-- Disk full scenarios
-- Process crashes during operations
-
-## Deterministic Reproduction
-
-Every test uses seeded random generation:
-
-```zig
-test "crash recovery" {
-    const seed = std.testing.random_seed;
-    var sim = try SimulationRunner.init(allocator, seed);
-
-    // On failure, outputs:
-    // Test failed with seed: 0xDEADBEEF
-    // Reproduce: ./zig/zig build test -Dseed=0xDEADBEEF
-}
-```
-
-Build system supports seed parameter:
-
-```bash
-# Reproduce exact failure
-./zig/zig build test -Dseed=0xDEADBEEF
-
-# Run with specific seed
-./zig/zig build test -Dseed=0x12345
-```
-
-## Memory Safety Testing
-
-### Arena Validation
-
-Tests verify arena memory patterns work correctly:
-
-```zig
-test "arena cleanup" {
-    var arena = ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    // Operations that allocate memory
-    var storage = try StorageEngine.init(arena.allocator(), vfs, "test");
-
-    // Verify no leaks after cleanup
-    storage.deinit();
-}
-```
-
-### Memory Guard (Debug Builds)
-
-Debug builds include comprehensive memory protection:
-
-- Canary values detect buffer overflows
-- Poison patterns catch use-after-free
-- Allocation tracking finds leaks
-- Zero overhead in release builds
-
-## Running Tests
-
-### Local Development
-
-```bash
-# Fast unit tests (~5 seconds)
-./zig/zig build test
-
-# Integration tests with simulation
-./zig/zig build test-integration
-
-# Full test suite including stress tests
-./zig/zig build test-all
-
-# Specific component
-./zig/zig build test --test-filter="storage"
-
-# With deterministic seed
-./zig/zig build test -Dseed=0x12345
-```
-
-````
-
-### Memory Safety Validation
-
-```bash
-# Enable safety allocator
-./zig/zig build test -Denable-memory-guard=true
-
-# AddressSanitizer (deep analysis)
-./zig/zig build test -fsanitize-address
-
-# Valgrind (Linux only)
-valgrind --leak-check=full ./zig-out/bin/test
-````
-
-### CI Integration
-
-GitHub Actions runs multiple configurations:
-
-- Unit and integration tests
-- Cross-platform validation (Linux, macOS, Windows)
-- Multiple deterministic seeds
-- Memory safety validation
-- Performance regression detection
-
-## Test Organization
-
-```
-src/tests/
-├── harness.zig                   # Test utilities and harnesses
-├── simulation/                   # Deterministic simulation tests
-│   ├── crash_recovery_test.zig   # WAL recovery validation
-│   ├── property_test.zig         # Property-based testing
-│   └── workload_test.zig         # Mixed operation patterns
-├── storage/                      # Storage engine tests
-│   ├── memtable_test.zig         # In-memory operations
-│   ├── wal_test.zig              # Write-ahead log durability
-│   └── compaction_test.zig       # LSM compaction behavior
-├── query/                        # Query engine tests
-│   ├── traversal_test.zig        # Graph traversal algorithms
-│   └── filtering_test.zig        # Query filtering
-└── fault_injection/              # Failure scenario testing
-    ├── io_errors_test.zig        # Disk failure simulation
-    └── corruption_test.zig       # Data corruption handling
-```
-
-## Performance Testing
-
-### Statistical Benchmarking
-
-Located in `src/dev/benchmark/`, uses statistical sampling:
-
-```zig
-var sampler = StatisticalSampler.init();
-// Multiple iterations with warmup
-// P95, P99 percentile calculations
-// Regression detection vs thresholds
-```
-
-### Benchmark Categories
-
-- **Storage**: Block operations, WAL performance, compaction
-- **Query**: Traversal algorithms, filtering, caching
-- **Parsing**: Code ingestion from different languages
-- **Memory**: Arena allocation patterns, cleanup performance
-
-## Debugging Failed Tests
-
-### Deterministic Reproduction
-
-```bash
-# Get seed from failed test output
-./zig/zig build test -Dseed=0xFAILED_SEED
-
-# Run with verbose output
-./zig/zig build test --verbose
-
-# Debug single test
-./zig/zig build test --test-filter="exact_test_name"
-```
-
-### Memory Debugging
-
-Tiered approach for memory issues:
-
-1. **Quick**: Safety allocator in debug builds
-2. **Deep**: AddressSanitizer for detailed analysis
-3. **Interactive**: LLDB for complex issues
-
-## What We Test
-
-### Core Properties
-
-- **Durability**: Acknowledged writes survive crashes
-- **Consistency**: Graph relationships remain valid after operations
-- **Isolation**: Concurrent operations don't interfere
-- **Recoverability**: WAL replay restores exact pre-crash state
-
-### Graph-Specific Properties
-
-- **Edge Validity**: All edges reference existing blocks
-- **Traversal Consistency**: Same query returns same results
-- **Bidirectional Index**: Forward/reverse edge lookups are consistent
-
-### Performance Properties
-
-- Block writes: <100µs (95th percentile)
-- Block reads: <1µs (hot data from memory)
-- Graph traversal: <100µs (3-hop cached)
-- Memory per operation: <2KB including all overhead
-
-## What We Don't Test
-
-- **Byzantine failures**: Single-node system, not distributed consensus
-- **Network partitions**: No distributed components
-- **SQL compliance**: Graph-native API only
-- **Infinite edge cases**: Bounded by practical usage scenarios
-
-## Philosophy
-
-Test properties, not examples. Use deterministic simulation to systematically explore the state space. Every bug found in testing is one that won't corrupt production data.
-
-The goal isn't 100% code coverage - it's confidence that the system behaves correctly under any realistic conditions.
