@@ -279,31 +279,31 @@ pub const TraversalResult = struct {
     }
 
     /// Clone traversal result for caching
-    pub fn clone(self: TraversalResult, backing_allocator: std.mem.Allocator) !TraversalResult {
-        // Create arena for this cloned result - all allocations will be in the arena
-        var query_arena = std.heap.ArenaAllocator.init(backing_allocator);
-        errdefer query_arena.deinit();
-        const arena_allocator = query_arena.allocator();
+    /// Caller's allocator will own the cloned data
+    pub fn clone(self: TraversalResult, allocator: std.mem.Allocator) !TraversalResult {
+        const cloned_blocks = try allocator.alloc(OwnedBlock, self.blocks.len);
+        errdefer allocator.free(cloned_blocks);
 
-        const cloned_blocks = try arena_allocator.alloc(OwnedBlock, self.blocks.len);
         for (self.blocks, 0..) |block, i| {
             const ctx_block = block.read(.query_engine);
             const cloned_ctx_block = ContextBlock{
                 .id = ctx_block.id,
                 .sequence = ctx_block.sequence,
-                .source_uri = try arena_allocator.dupe(u8, ctx_block.source_uri),
-                .metadata_json = try arena_allocator.dupe(u8, ctx_block.metadata_json),
-                .content = try arena_allocator.dupe(u8, ctx_block.content),
+                .source_uri = try allocator.dupe(u8, ctx_block.source_uri),
+                .metadata_json = try allocator.dupe(u8, ctx_block.metadata_json),
+                .content = try allocator.dupe(u8, ctx_block.content),
             };
             cloned_blocks[i] = OwnedBlock.take_ownership(&cloned_ctx_block, .query_engine);
         }
 
-        const cloned_paths = try arena_allocator.alloc([]const BlockId, self.paths.len);
+        const cloned_paths = try allocator.alloc([]const BlockId, self.paths.len);
+        errdefer allocator.free(cloned_paths);
+
         for (self.paths, 0..) |path, i| {
-            cloned_paths[i] = try arena_allocator.dupe(BlockId, path);
+            cloned_paths[i] = try allocator.dupe(BlockId, path);
         }
 
-        const cloned_depths = try arena_allocator.dupe(u32, self.depths);
+        const cloned_depths = try allocator.dupe(u32, self.depths);
 
         return TraversalResult{
             .blocks = cloned_blocks,

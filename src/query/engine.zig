@@ -499,6 +499,9 @@ pub const QueryEngine = struct {
 
         try query.validate();
 
+        // Reset arena for O(1) cleanup of previous query memory
+        _ = self.query_arena.reset(.retain_capacity);
+
         if (self.caching_enabled) {
             const cache_key = cache.CacheKey.for_traversal(
                 query.start_block_id,
@@ -508,7 +511,8 @@ pub const QueryEngine = struct {
                 traversal.edge_filter_to_hash(query.edge_filter),
             );
 
-            if (self.query_cache.get(cache_key, self.allocator)) |cached_value| {
+            // Check cache, clone result using arena allocator
+            if (self.query_cache.get(cache_key, self.query_arena.allocator())) |cached_value| {
                 switch (cached_value) {
                     .traversal => |cached_result| {
                         return cached_result;
@@ -519,7 +523,7 @@ pub const QueryEngine = struct {
         }
 
         const result = traversal.execute_traversal(
-            self.allocator,
+            self.query_arena.allocator(),
             self.storage_engine,
             query,
         ) catch |err| {

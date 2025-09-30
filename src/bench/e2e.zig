@@ -93,7 +93,7 @@ const E2ETestHarness = struct {
 
     pub fn create_test_project(self: *E2ETestHarness, project_name: []const u8, config: E2EBenchmarkConfig) ![]const u8 {
         const project_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.temp_dir, project_name });
-        try self.cleanup_paths.append(try self.allocator.dupe(u8, project_path));
+        try self.cleanup_paths.append(project_path);
 
         // Create project structure
         try std.fs.cwd().makePath(project_path);

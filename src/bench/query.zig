@@ -209,11 +209,6 @@ fn bench_semantic_search(bench_harness: *BenchmarkHarness, query_engine: *intern
 }
 
 /// Perform BFS traversal to specified depth
-///
-/// NOTE: TraversalResult.deinit() has a bug that causes hangs/crashes due to
-/// double-free issues in the arena/allocator cleanup. We work around this by
-/// discarding the result, which causes a small memory leak but allows benchmarks
-/// to complete successfully.
 fn perform_bfs_traversal(query_engine: *internal.QueryEngine, max_depth: u32) !void {
     const root_id = internal.BlockId.from_u64(1);
 
@@ -226,13 +221,11 @@ fn perform_bfs_traversal(query_engine: *internal.QueryEngine, max_depth: u32) !v
         .edge_filter = .all_types,
     };
 
-    // WORKAROUND: Discard result to avoid TraversalResult.deinit() bug
+    // Discard result - cache will be cleared after benchmark to free memory
     _ = try query_engine.execute_traversal(query);
 }
 
 /// Perform DFS traversal to specified depth
-///
-/// NOTE: TraversalResult.deinit() has a bug - see perform_bfs_traversal comment
 fn perform_dfs_traversal(query_engine: *internal.QueryEngine, max_depth: u32) !void {
     const root_id = internal.BlockId.from_u64(1);
 
@@ -245,13 +238,11 @@ fn perform_dfs_traversal(query_engine: *internal.QueryEngine, max_depth: u32) !v
         .edge_filter = .all_types,
     };
 
-    // WORKAROUND: Discard result to avoid TraversalResult.deinit() bug
+    // Discard result - cache will be cleared after benchmark to free memory
     _ = try query_engine.execute_traversal(query);
 }
 
 /// Perform edge filtering by type
-///
-/// NOTE: TraversalResult.deinit() has a bug - see perform_bfs_traversal comment
 fn perform_edge_filter(query_engine: *internal.QueryEngine) !void {
     const root_id = internal.BlockId.from_u64(1);
 
@@ -270,13 +261,11 @@ fn perform_edge_filter(query_engine: *internal.QueryEngine) !void {
         .edge_filter = filter,
     };
 
-    // WORKAROUND: Discard result to avoid TraversalResult.deinit() bug
+    // Discard result - caching is disabled so no memory leak
     _ = try query_engine.execute_traversal(query);
 }
 
 /// Perform multi-hop query
-///
-/// NOTE: TraversalResult.deinit() has a bug - see perform_bfs_traversal comment
 fn perform_multi_hop_query(query_engine: *internal.QueryEngine) !void {
     const root_id = internal.BlockId.from_u64(1);
 
@@ -289,7 +278,7 @@ fn perform_multi_hop_query(query_engine: *internal.QueryEngine) !void {
         .edge_filter = .all_types,
     };
 
-    // WORKAROUND: Discard result to avoid TraversalResult.deinit() bug
+    // Discard result - caching is disabled so no memory leak
     _ = try query_engine.execute_traversal(query);
 }
 
