@@ -12,14 +12,11 @@
 const std = @import("std");
 
 const ctx_block = @import("../core/types.zig");
-const assert_mod = @import("../core/assert.zig");
+
 const error_context = @import("../core/error_context.zig");
 const query_engine = @import("../query/engine.zig");
 const cli_protocol = @import("../cli/protocol.zig");
 
-const assert = assert_mod.assert;
-const comptime_assert = assert_mod.comptime_assert;
-const comptime_no_padding = assert_mod.comptime_no_padding;
 const log = std.log.scoped(.connection);
 
 const BlockId = ctx_block.BlockId;
@@ -272,7 +269,7 @@ pub const ClientConnection = struct {
 
     /// Begin response transmission and transition to writing state
     pub fn send_response(self: *ClientConnection, response_data: []const u8) void {
-        assert(self.state == .processing);
+        std.debug.assert(self.state == .processing);
         self.current_response = response_data;
         self.response_bytes_written = 0;
         self.state = .writing_response;
@@ -281,12 +278,10 @@ pub const ClientConnection = struct {
 
 // Compile-time guarantees for network protocol stability
 comptime {
-    // CLI v2 protocol compatibility checks
-    comptime_assert(@sizeOf(MessageHeader) == 16, "CLI v2 MessageHeader must be exactly 16 bytes");
-    comptime_no_padding(MessageHeader);
+    if (!(@sizeOf(MessageHeader) == 16)) @compileError(
+        "CLI v2 MessageHeader must be exactly 16 bytes",
+    );
 }
-
-// === Unit Tests ===
 
 const testing = std.testing;
 

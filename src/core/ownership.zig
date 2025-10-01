@@ -12,11 +12,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const types = @import("types.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -115,7 +111,7 @@ pub const OwnedBlock = struct {
     /// Zero runtime cost in release builds - ownership validation is compile-time only.
     pub fn read(self: *const OwnedBlock, comptime accessor: BlockOwnership) *const ContextBlock {
         // Validate block hasn't been moved
-        fatal_assert(self.state == .valid, "Attempted to read moved-from block {}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to read moved-from block {}", .{self.block.id});
 
         // Compile-time validation when ownership is known at compile time
         if (comptime @TypeOf(self.ownership) == BlockOwnership) {
@@ -131,7 +127,7 @@ pub const OwnedBlock = struct {
     /// Zero runtime cost in release builds - ownership validation is compile-time only.
     pub fn write(self: *OwnedBlock, comptime accessor: BlockOwnership) *ContextBlock {
         // Validate block hasn't been moved
-        fatal_assert(self.state == .valid, "Attempted to write moved-from block {}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to write moved-from block {}", .{self.block.id});
 
         // Compile-time validation when ownership is known at compile time
         if (comptime @TypeOf(self.ownership) == BlockOwnership) {
@@ -186,7 +182,7 @@ pub const OwnedBlock = struct {
         new_ownership: BlockOwnership,
         new_arena: anytype,
     ) OwnedBlock {
-        fatal_assert(self.state == .valid, "Attempted to transfer already-moved block {any}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to transfer already-moved block {any}", .{self.block.id});
 
         if (builtin.mode == .Debug) {
             log.debug("Ownership transfer: block {any} from {s} to {s} (source invalidated)", .{ self.block.id, self.ownership.name(), new_ownership.name() });
@@ -211,7 +207,7 @@ pub const OwnedBlock = struct {
     pub fn validate_read_access(self: *const OwnedBlock, accessor: BlockOwnership) void {
         if (builtin.mode == .Debug) {
             if (!accessor.can_read_from(self.ownership)) {
-                fatal_assert(false, "Read access violation: {s} cannot read {s}-owned block {}", .{ accessor.name(), self.ownership.name(), self.block.id });
+                if (!(false)) std.debug.panic("Read access violation: {s} cannot read {s}-owned block {}", .{ accessor.name(), self.ownership.name(), self.block.id });
             }
         }
     }
@@ -221,26 +217,26 @@ pub const OwnedBlock = struct {
     pub fn validate_write_access(self: *const OwnedBlock, accessor: BlockOwnership) void {
         if (builtin.mode == .Debug) {
             if (!accessor.can_write_to(self.ownership)) {
-                fatal_assert(false, "Write access violation: {s} cannot write to {s}-owned block {}", .{ accessor.name(), self.ownership.name(), self.block.id });
+                if (!(false)) std.debug.panic("Write access violation: {s} cannot write to {s}-owned block {}", .{ accessor.name(), self.ownership.name(), self.block.id });
             }
         }
     }
 
     /// Get ownership information for debugging.
     pub fn query_owner(self: *const OwnedBlock) BlockOwnership {
-        fatal_assert(self.state == .valid, "Attempted to query moved-from block {}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to query moved-from block {}", .{self.block.id});
         return self.ownership;
     }
 
     /// Check if block is owned by specific subsystem.
     pub fn is_owned_by(self: *const OwnedBlock, ownership: BlockOwnership) bool {
-        fatal_assert(self.state == .valid, "Attempted to check ownership of moved-from block {}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to check ownership of moved-from block {}", .{self.block.id});
         return self.ownership == ownership;
     }
 
     /// Check if block has temporary ownership (can be accessed by any subsystem).
     pub fn is_temporary(self: *const OwnedBlock) bool {
-        fatal_assert(self.state == .valid, "Attempted to check temporality of moved-from block {}", .{self.block.id});
+        if (!(self.state == .valid)) std.debug.panic("Attempted to check temporality of moved-from block {}", .{self.block.id});
         return self.ownership == .temporary;
     }
 };
@@ -362,7 +358,7 @@ pub const OwnedBlockCollection = struct {
     pub fn query_blocks(self: *const OwnedBlockCollection, comptime accessor: BlockOwnership) []const OwnedBlock {
         // Validate accessor can read from this collection
         if (builtin.mode == .Debug) {
-            assert_fmt(accessor.can_read_from(self.ownership), "Collection access violation: {s} cannot read {s} collection", .{ accessor.name(), self.ownership.name() });
+            std.debug.assert(accessor.can_read_from(self.ownership));
         }
         return self.blocks.items;
     }
@@ -492,7 +488,7 @@ pub const OwnershipTracker = struct {
         if (builtin.mode == .Debug) {
             if (self.active_blocks.get(block_id)) |owner| {
                 if (!accessor.can_read_from(owner)) {
-                    fatal_assert(false, "Ownership validation failed", .{});
+                    if (!(false)) std.debug.panic("Ownership validation failed", .{});
                 }
             } else {
                 log.warn("Accessing untracked block: {any} by {s}", .{ block_id, accessor.name() });
@@ -618,11 +614,11 @@ pub fn validate_ownership_usage(comptime T: type) void {
 comptime {
     // Enforce reasonable enum size limits to prevent excessive compile-time overhead
     const ownership_count = @typeInfo(BlockOwnership).@"enum".fields.len;
-    assert_mod.comptime_assert(ownership_count >= 3 and ownership_count <= 16, "BlockOwnership should have 3-16 variants for reasonable subsystem count");
+    if (!(ownership_count >= 3 and ownership_count <= 16)) @compileError("BlockOwnership should have 3-16 variants for reasonable subsystem count");
 
     // Prevent memory bloat by enforcing size constraints on core ownership structures
-    assert_mod.comptime_assert(@sizeOf(OwnedBlock) <= 256, "OwnedBlock should be reasonably sized");
-    assert_mod.comptime_assert(@sizeOf(OwnershipTransfer) <= 128, "OwnershipTransfer should be compact");
+    if (!(@sizeOf(OwnedBlock) <= 256)) @compileError("OwnedBlock should be reasonably sized");
+    if (!(@sizeOf(OwnershipTransfer) <= 128)) @compileError("OwnershipTransfer should be compact");
 }
 
 // Tests

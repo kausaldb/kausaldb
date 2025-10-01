@@ -17,10 +17,7 @@ const tombstone = @import("tombstone.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const wal = @import("wal.zig");
-const assert_mod = @import("../core/assert.zig");
 
-const assert = assert_mod.assert;
-const assert_fmt = assert_mod.assert_fmt;
 const log = std.log.scoped(.storage_recovery);
 const testing = std.testing;
 

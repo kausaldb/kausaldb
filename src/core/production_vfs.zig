@@ -11,10 +11,8 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const vfs = @import("vfs.zig");
 
-const assert = assert_mod.assert;
 const testing = std.testing;
 
 const DirectoryEntry = vfs.DirectoryEntry;
@@ -35,12 +33,12 @@ const MAX_REASONABLE_FILE_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 
 // Cross-platform compatibility and security validation
 comptime {
-    assert(MAX_PATH_LENGTH > 0);
-    assert(MAX_PATH_LENGTH <= 8192);
-    assert(MAX_REASONABLE_FILE_SIZE > 0);
-    assert(MAX_REASONABLE_FILE_SIZE < std.math.maxInt(u64) / 2);
-    assert(PRODUCTION_FILE_MAGIC != 0);
-    assert(PRODUCTION_FILE_MAGIC != std.math.maxInt(u64));
+    std.debug.assert(MAX_PATH_LENGTH > 0);
+    std.debug.assert(MAX_PATH_LENGTH <= 8192);
+    std.debug.assert(MAX_REASONABLE_FILE_SIZE > 0);
+    std.debug.assert(MAX_REASONABLE_FILE_SIZE < std.math.maxInt(u64) / 2);
+    std.debug.assert(PRODUCTION_FILE_MAGIC != 0);
+    std.debug.assert(PRODUCTION_FILE_MAGIC != std.math.maxInt(u64));
 }
 
 /// Platform-specific error set for filesystem sync operations
@@ -137,7 +135,7 @@ pub const ProductionVFS = struct {
     fn open(ptr: *anyopaque, path: []const u8, mode: VFS.OpenMode) VFSError!VFile {
         // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
 
         const file = std.fs.openFileAbsolute(path, .{
@@ -167,7 +165,7 @@ pub const ProductionVFS = struct {
     fn create(ptr: *anyopaque, path: []const u8) VFSError!VFile {
         // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         _ = self; // ProductionVFS no longer needs arena for VFile
 
         const file = std.fs.createFileAbsolute(path, .{ .read = true, .exclusive = true }) catch |err| {
@@ -191,7 +189,7 @@ pub const ProductionVFS = struct {
 
     fn remove(ptr: *anyopaque, path: []const u8) VFSError!void {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
@@ -217,7 +215,7 @@ pub const ProductionVFS = struct {
 
     fn exists(ptr: *anyopaque, path: []const u8) bool {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
@@ -230,7 +228,7 @@ pub const ProductionVFS = struct {
 
     fn mkdir(ptr: *anyopaque, path: []const u8) VFSError!void {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
@@ -263,7 +261,7 @@ pub const ProductionVFS = struct {
 
     fn mkdir_all(ptr: *anyopaque, path: []const u8) VFSError!void {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const is_absolute = std.fs.path.isAbsolute(path);
         if (is_absolute) {
@@ -296,7 +294,7 @@ pub const ProductionVFS = struct {
 
     fn rmdir(ptr: *anyopaque, path: []const u8) VFSError!void {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         std.fs.deleteDirAbsolute(path) catch |err| {
             return switch (err) {
@@ -313,7 +311,7 @@ pub const ProductionVFS = struct {
     /// enabling O(1) cleanup when the arena is reset or destroyed.
     fn iterate_directory(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) VFSError!DirectoryIterator {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const is_absolute = std.fs.path.isAbsolute(path);
         var dir = if (is_absolute)
@@ -369,8 +367,8 @@ pub const ProductionVFS = struct {
 
     fn rename(ptr: *anyopaque, old_path: []const u8, new_path: []const u8) VFSError!void {
         _ = ptr;
-        assert(old_path.len > 0 and old_path.len < MAX_PATH_LENGTH);
-        assert(new_path.len > 0 and new_path.len < MAX_PATH_LENGTH);
+        std.debug.assert(old_path.len > 0 and old_path.len < MAX_PATH_LENGTH);
+        std.debug.assert(new_path.len > 0 and new_path.len < MAX_PATH_LENGTH);
 
         std.fs.renameAbsolute(old_path, new_path) catch |err| {
             return switch (err) {
@@ -384,7 +382,7 @@ pub const ProductionVFS = struct {
 
     fn stat(ptr: *anyopaque, path: []const u8) VFSError!VFS.FileStat {
         _ = ptr;
-        assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
+        std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
         const file_stat = std.fs.cwd().statFile(path) catch |err| {
             return switch (err) {

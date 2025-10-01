@@ -11,11 +11,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const state_machines = @import("state_machines.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 
 const FileState = state_machines.FileState;
 
@@ -29,7 +25,7 @@ pub const FileHandleId = struct {
 
     /// Create new file handle ID with generation counter.
     pub fn init(id: u32, generation: u32) FileHandleId {
-        fatal_assert(id != std.math.maxInt(u32), "Invalid file handle ID: {}", .{id});
+        if (!(id != std.math.maxInt(u32))) std.debug.panic("Invalid file handle ID: {}", .{id});
         return FileHandleId{ .id = id, .generation = generation };
     }
 
@@ -99,9 +95,9 @@ pub const TypedFileHandle = struct {
 
     /// Create new typed file handle.
     pub fn init(handle_id: FileHandleId, path: []const u8, access_mode: FileAccessMode) TypedFileHandle {
-        fatal_assert(handle_id.is_valid(), "Invalid file handle ID", .{});
-        fatal_assert(path.len > 0, "Empty file path", .{});
-        fatal_assert(path.len <= 4096, "File path too long: {}", .{path.len});
+        if (!(handle_id.is_valid())) std.debug.panic("Invalid file handle ID", .{});
+        if (!(path.len > 0)) std.debug.panic("Empty file path", .{});
+        if (!(path.len <= 4096)) std.debug.panic("File path too long: {}", .{path.len});
 
         return TypedFileHandle{
             .id = handle_id,
@@ -120,7 +116,7 @@ pub const TypedFileHandle = struct {
         if (!self.access_mode.can_read()) return error.WriteOnlyFile;
 
         if (builtin.mode == .Debug) {
-            assert_fmt(self.position <= self.file_size, "File position beyond EOF: {} > {}", .{ self.position, self.file_size });
+            std.debug.assert(self.position <= self.file_size);
         }
 
         const available = if (self.position >= self.file_size) 0 else self.file_size - self.position;
@@ -147,7 +143,7 @@ pub const TypedFileHandle = struct {
         if (!self.state.is_open()) return error.FileClosed;
 
         if (builtin.mode == .Debug) {
-            assert_fmt(offset <= self.file_size, "Seek beyond EOF: {} > {}", .{ offset, self.file_size });
+            std.debug.assert(offset <= self.file_size);
         }
 
         self.position = offset;
@@ -187,15 +183,15 @@ pub const TypedFileHandle = struct {
     /// Validate file handle consistency in debug builds.
     pub fn validate_consistency(self: *const TypedFileHandle) void {
         if (builtin.mode == .Debug) {
-            assert_fmt(self.id.is_valid(), "Invalid file handle for {s}", .{self.path});
-            assert_fmt(self.position <= self.file_size, "Position beyond EOF: {} > {} for {s}", .{ self.position, self.file_size, self.path });
-            assert_fmt(self.path.len > 0, "Empty file path", .{});
+            std.debug.assert(self.id.is_valid());
+            std.debug.assert(self.position <= self.file_size);
+            std.debug.assert(self.path.len > 0);
 
             // Validate state machine consistency
             switch (self.state) {
-                .open_read => assert_fmt(self.access_mode == .read_only, "State/mode mismatch: read state with {} mode", .{self.access_mode}),
-                .open_write => assert_fmt(self.access_mode == .write_only, "State/mode mismatch: write state with {} mode", .{self.access_mode}),
-                .open_read_write => assert_fmt(self.access_mode == .read_write, "State/mode mismatch: read_write state with {} mode", .{self.access_mode}),
+                .open_read => std.debug.assert(self.access_mode == .read_only),
+                .open_write => std.debug.assert(self.access_mode == .write_only),
+                .open_read_write => std.debug.assert(self.access_mode == .read_write),
                 .closed, .deleted => {}, // No mode restrictions when closed
             }
         }
@@ -489,12 +485,12 @@ pub const FileInfo = struct {
 
 // Compile-time validation
 comptime {
-    assert_mod.comptime_assert(@sizeOf(FileHandleId) <= 16, "FileHandleId should be compact");
-    assert_mod.comptime_assert(@sizeOf(TypedFileHandle) <= 128, "TypedFileHandle should be reasonably sized");
+    if (!(@sizeOf(FileHandleId) <= 16)) @compileError("FileHandleId should be compact");
+    if (!(@sizeOf(TypedFileHandle) <= 128)) @compileError("TypedFileHandle should be reasonably sized");
 
     // Validate that file access modes cover all cases
     const mode_count = @typeInfo(FileAccessMode).@"enum".fields.len;
-    assert_mod.comptime_assert(mode_count == 3, "FileAccessMode should have exactly 3 variants");
+    if (!(mode_count == 3)) @compileError("FileAccessMode should have exactly 3 variants");
 }
 
 // Tests

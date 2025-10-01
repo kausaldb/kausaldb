@@ -24,10 +24,7 @@ const stdx = @import("../core/stdx.zig");
 const storage = @import("../storage/engine.zig");
 const traversal = @import("traversal.zig");
 const storage_config_mod = @import("../storage/config.zig");
-const assert_mod = @import("../core/assert.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
 const TypedStorageCoordinatorType = memory.TypedStorageCoordinatorType;
@@ -477,7 +474,7 @@ pub const QueryEngine = struct {
         result_buffer: []OwnedBlock,
     ) !u32 {
         if (!self.state.can_query()) return EngineError.NotInitialized;
-        fatal_assert(result_buffer.len >= block_ids.len, "Result buffer too small for batch query", .{});
+        if (!(result_buffer.len >= block_ids.len)) std.debug.panic("Result buffer too small for batch query", .{});
 
         var found_count: u32 = 0;
         for (block_ids) |block_id| {

@@ -12,11 +12,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const comptime_assert = assert_mod.comptime_assert;
-
 /// Unique identifier for a Context Block.
 /// Uses 128-bit UUID to ensure global uniqueness across distributed systems.
 pub const BlockId = struct {
@@ -25,7 +20,7 @@ pub const BlockId = struct {
     const SIZE = 16;
 
     comptime {
-        comptime_assert(@sizeOf(BlockId) == SIZE, "BlockId must be 16 bytes");
+        if (!(@sizeOf(BlockId) == SIZE)) @compileError("BlockId must be 16 bytes");
     }
 
     /// Create BlockId from raw bytes.
@@ -123,7 +118,7 @@ pub const EdgeType = enum(u16) {
     calls_function = 11, // A calls free function B (function invocation relationship)
 
     comptime {
-        comptime_assert(@sizeOf(EdgeType) == 2, "EdgeType must be 2 bytes (u16)");
+        if (!(@sizeOf(EdgeType) == 2)) @compileError("EdgeType must be 2 bytes (u16)");
     }
 
     /// Convert EdgeType to u16 for serialization.
@@ -174,10 +169,10 @@ pub const ContextBlock = struct {
         pub const SIZE: usize = 64;
 
         comptime {
-            comptime_assert(@sizeOf(BlockHeader) == SIZE, "BlockHeader must be exactly 64 bytes for on-disk format compatibility");
-            comptime_assert(BlockHeader.SIZE == @sizeOf(BlockHeader), "BlockHeader.SIZE constant must match actual struct size");
-            comptime_assert(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
-                @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64, "BlockHeader field sizes must sum to exactly 64 bytes");
+            if (!(@sizeOf(BlockHeader) == SIZE)) @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
+            if (!(BlockHeader.SIZE == @sizeOf(BlockHeader))) @compileError("BlockHeader.SIZE constant must match actual struct size");
+            if (!(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
+                @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64)) @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
         }
 
         /// Serialize block header to binary buffer in little-endian format.
@@ -260,10 +255,10 @@ pub const ContextBlock = struct {
 
     // Compile-time guarantees for on-disk format integrity
     comptime {
-        comptime_assert(@sizeOf(BlockHeader) == 64, "BlockHeader must be exactly 64 bytes for on-disk format compatibility");
-        comptime_assert(BlockHeader.SIZE == @sizeOf(BlockHeader), "BlockHeader.SIZE constant must match actual struct size");
-        comptime_assert(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
-            @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64, "BlockHeader field sizes must sum to exactly 64 bytes");
+        if (!(@sizeOf(BlockHeader) == 64)) @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
+        if (!(BlockHeader.SIZE == @sizeOf(BlockHeader))) @compileError("BlockHeader.SIZE constant must match actual struct size");
+        if (!(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
+            @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64)) @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
     }
 
     /// Calculate the total serialized size for this block.
@@ -327,7 +322,7 @@ pub const ContextBlock = struct {
         // Data was already serialized for checksum computation, just update offset
         offset += self.source_uri.len + self.metadata_json.len + self.content.len;
 
-        assert_fmt(offset == required_size, "Serialization size mismatch: expected {}, got {}", .{ required_size, offset });
+        std.debug.assert(offset == required_size);
         if (offset != required_size) return error.SerializationSizeMismatch;
 
         return offset;
@@ -391,7 +386,7 @@ pub const ContextBlock = struct {
     /// Checks memory pointers, size limits, and UTF-8 encoding compliance.
     pub fn validate(self: *const ContextBlock, allocator: std.mem.Allocator) !void {
         // Safety: Converting allocator pointer to integer for null check validation
-        assert_fmt(@intFromPtr(allocator.ptr) != 0, "Allocator cannot be null", .{});
+        std.debug.assert(@intFromPtr(allocator.ptr) != 0);
 
         // Size validation - return errors instead of asserting
         if (self.metadata_json.len >= 10 * 1024 * 1024) {
@@ -560,8 +555,8 @@ pub const GraphEdge = struct {
     pub const SERIALIZED_SIZE: usize = 40; // 16 + 16 + 8 bytes
 
     comptime {
-        comptime_assert(SERIALIZED_SIZE == 40, "GraphEdge SERIALIZED_SIZE must be 40 bytes (16 + 16 + 2 + 6 reserved)");
-        comptime_assert(16 + 16 + 2 + 6 == SERIALIZED_SIZE, "GraphEdge field sizes plus reserved bytes must equal SERIALIZED_SIZE");
+        if (!(SERIALIZED_SIZE == 40)) @compileError("GraphEdge SERIALIZED_SIZE must be 40 bytes (16 + 16 + 2 + 6 reserved)");
+        if (!(16 + 16 + 2 + 6 == SERIALIZED_SIZE)) @compileError("GraphEdge field sizes plus reserved bytes must equal SERIALIZED_SIZE");
     }
 
     /// Serialize this GraphEdge to a buffer.

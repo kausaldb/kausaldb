@@ -6,7 +6,6 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const types = @import("../core/types.zig");
 
 const ContextBlock = types.ContextBlock;
@@ -15,7 +14,7 @@ const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 
 comptime {
-    assert_mod.comptime_assert(@sizeOf(MessageHeader) == 16, "MessageHeader size mismatch");
+    if (!(@sizeOf(MessageHeader) == 16)) @compileError("MessageHeader size mismatch");
 }
 
 /// Protocol version for compatibility checking

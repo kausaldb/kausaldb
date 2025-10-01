@@ -12,14 +12,12 @@
 const std = @import("std");
 
 const concurrency = @import("../core/concurrency.zig");
-const assert_mod = @import("../core/assert.zig");
+
 const memory = @import("../core/memory.zig");
 const vfs = @import("../core/vfs.zig");
 const sstable = @import("sstable.zig");
 
 const log = std.log.scoped(.tiered_compaction);
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const ArenaCoordinator = memory.ArenaCoordinator;
 const Compactor = sstable.Compactor;
@@ -168,7 +166,7 @@ pub const TieredCompactionManager = struct {
             for (self.sstables.items, 0..) |info, i| {
                 if (std.mem.eql(u8, info.path, path)) {
                     // Prevent size accounting underflow
-                    fatal_assert(self.total_size >= info.size, "Tier size underflow: removing {} bytes from {} total", .{ info.size, self.total_size });
+                    if (!(self.total_size >= info.size)) std.debug.panic("Tier size underflow: removing {} bytes from {} total", .{ info.size, self.total_size });
 
                     // Free the owned path copy
                     allocator.free(info.path);
@@ -254,7 +252,7 @@ pub const TieredCompactionManager = struct {
         level: u8,
     ) !void {
         concurrency.assert_main_thread();
-        assert(level < MAX_TIERS);
+        std.debug.assert(level < MAX_TIERS);
 
         try self.tiers[level].add_sstable(self.backing_allocator, path, size, level);
     }
@@ -262,7 +260,7 @@ pub const TieredCompactionManager = struct {
     /// Remove an SSTable from tracking using path reference
     pub fn remove_sstable(self: *TieredCompactionManager, path: []const u8, level: u8) void {
         concurrency.assert_main_thread();
-        assert(level < MAX_TIERS);
+        std.debug.assert(level < MAX_TIERS);
 
         self.tiers[level].remove_sstable(self.backing_allocator, path);
     }

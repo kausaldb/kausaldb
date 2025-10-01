@@ -8,16 +8,13 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 const stdx = @import("core/stdx.zig");
-const assert_mod = @import("core/assert.zig");
+
 const concurrency = @import("core/concurrency.zig");
 const error_context = @import("core/error_context.zig");
 const daemon = @import("server/daemon.zig");
 const config_mod = @import("server/config.zig");
 const coordinator_mod = @import("server/coordinator.zig");
 const network_server_mod = @import("server/network_server.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const ServerConfig = config_mod.ServerConfig;
 const ServerCoordinator = coordinator_mod.ServerCoordinator;

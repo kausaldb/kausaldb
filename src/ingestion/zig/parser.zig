@@ -6,12 +6,8 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../../core/assert.zig");
 const pipeline_types = @import("../pipeline_types.zig");
 const types = @import("../../core/types.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const ParsedUnit = pipeline_types.ParsedUnit;
 const ParsedEdge = pipeline_types.ParsedEdge;

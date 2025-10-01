@@ -6,7 +6,6 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const cli_protocol = @import("../cli/protocol.zig");
 const concurrency = @import("../core/concurrency.zig");
 const error_context = @import("../core/error_context.zig");
@@ -16,9 +15,6 @@ const storage = @import("../storage/engine.zig");
 const types = @import("../core/types.zig");
 const workspace_manager = @import("../workspace/manager.zig");
 const ownership = @import("../core/ownership.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = types.BlockId;
@@ -165,13 +161,13 @@ fn handle_status_request(ctx: HandlerContext) ![]const u8 {
         );
         // Add assertions to catch corruption early
         const raw_sync_status = @intFromEnum(workspace_proto.sync_status);
-        fatal_assert(raw_sync_status <= 3, "Invalid workspace sync_status: {}", .{raw_sync_status});
+        if (!(raw_sync_status <= 3)) std.debug.panic("Invalid workspace sync_status: {}", .{raw_sync_status});
 
         log.debug("Server: Created workspace proto name='{s}' sync_status={}", .{ (&workspace_proto).name_text(), raw_sync_status });
 
         // Verify workspace data integrity before adding to status
         const name_before_add = (&workspace_proto).name_text();
-        fatal_assert(name_before_add.len > 0, "Empty workspace name before add_workspace", .{});
+        if (!(name_before_add.len > 0)) std.debug.panic("Empty workspace name before add_workspace", .{});
         status.add_workspace(&workspace_proto);
 
         // Verify the workspace was added correctly and data is not corrupted
@@ -181,8 +177,8 @@ fn handle_status_request(ctx: HandlerContext) ![]const u8 {
             const name_after_add = last_workspace.name_text();
             const sync_status_after_add = @intFromEnum(last_workspace.sync_status);
 
-            fatal_assert(sync_status_after_add <= 3, "Corrupted workspace sync_status after add: {}", .{sync_status_after_add});
-            fatal_assert(name_after_add.len > 0, "Corrupted workspace name after add: '{s}'", .{name_after_add});
+            if (!(sync_status_after_add <= 3)) std.debug.panic("Corrupted workspace sync_status after add: {}", .{sync_status_after_add});
+            if (!(name_after_add.len > 0)) std.debug.panic("Corrupted workspace name after add: '{s}'", .{name_after_add});
 
             log.debug("Server: Verified workspace after add name='{s}' sync_status={}", .{ name_after_add, sync_status_after_add });
         }
@@ -196,8 +192,8 @@ fn handle_status_request(ctx: HandlerContext) ![]const u8 {
         const name = workspace.name_text();
         const sync_status_raw = @intFromEnum(workspace.sync_status);
 
-        fatal_assert(sync_status_raw <= 3, "Final check: corrupted sync_status in workspace {}: {}", .{ i, sync_status_raw });
-        fatal_assert(name.len > 0, "Final check: empty name in workspace {}", .{i});
+        if (!(sync_status_raw <= 3)) std.debug.panic("Final check: corrupted sync_status in workspace {}: {}", .{ i, sync_status_raw });
+        if (!(name.len > 0)) std.debug.panic("Final check: empty name in workspace {}", .{i});
 
         log.debug("Server: Final workspace {} name='{s}' sync_status={}", .{ i, name, sync_status_raw });
     }

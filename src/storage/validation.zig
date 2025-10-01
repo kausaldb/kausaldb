@@ -13,14 +13,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const assert_mod = @import("../core/assert.zig");
 const memory = @import("../core/memory.zig");
 const context_block = @import("../core/types.zig");
 const wal = @import("wal.zig");
 const sstable = @import("sstable.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 const ContextBlock = context_block.ContextBlock;
 const BlockId = context_block.BlockId;
 const GraphEdge = context_block.GraphEdge;

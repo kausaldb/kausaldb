@@ -23,13 +23,9 @@ const vfs = @import("../core/vfs.zig");
 const sstable = @import("sstable.zig");
 const tiered_compaction = @import("tiered_compaction.zig");
 const tombstone = @import("tombstone.zig");
-const assert_mod = @import("../core/assert.zig");
 
 const log = std.log.scoped(.sstable_manager);
 const testing = std.testing;
-const assert = assert_mod.assert;
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 
 const TombstoneRecord = tombstone.TombstoneRecord;
 
@@ -175,12 +171,10 @@ pub const SSTableManager = struct {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
         defer sstable_paths.deinit();
 
-        fatal_assert(
-            sstable_paths.items.len < 10000,
+        if (!(sstable_paths.items.len < 10000)) std.debug.panic(
             "Excessive SSTable count {} suggests corruption",
             .{sstable_paths.items.len},
         );
-
         // Search in reverse order (newer files first) for better performance
         var i: usize = sstable_paths.items.len;
         while (i > 0) {
@@ -222,12 +216,10 @@ pub const SSTableManager = struct {
         defer sstable_paths.deinit();
 
         // Basic safety validation for the collected paths
-        fatal_assert(
-            sstable_paths.items.len < 10000,
+        if (!(sstable_paths.items.len < 10000)) std.debug.panic(
             "Excessive SSTable count {} suggests corruption",
             .{sstable_paths.items.len},
         );
-
         // Collect and load all SSTables upfront for proper tombstone precedence
         // This ensures tombstones from newer SSTables shadow blocks in older ones
         var loaded_sstables = std.array_list.Managed(SSTable).init(self.backing_allocator);
@@ -581,12 +573,11 @@ pub const SSTableManager = struct {
 
             // Corruption tracking: Validate path before append
             if (builtin.mode == .Debug) {
-                fatal_assert(
-                    full_path.len > 0 and full_path.len < 4096,
+                if (!(full_path.len > 0 and full_path.len < 4096)) std.debug.panic(
                     "Invalid path length: {}, path: '{s}'",
                     .{ full_path.len, full_path },
                 );
-                fatal_assert(@intFromPtr(full_path.ptr) != 0, "Path pointer is null", .{});
+                if (!(@intFromPtr(full_path.ptr) != 0)) std.debug.panic("Path pointer is null", .{});
             }
 
             // Corruption tracking: Validate ArrayList before append
@@ -936,7 +927,7 @@ pub const SSTableManager = struct {
     pub fn validate_invariants(self: *const SSTableManager) void {
         if (builtin.mode == .Debug) {
             self.validate_sstable_paths_integrity("invariant_validation") catch |err| {
-                fatal_assert(false, "SSTableManager path integrity validation failed: {}", .{err});
+                if (!(false)) std.debug.panic("SSTableManager path integrity validation failed: {}", .{err});
             };
             self.validate_arena_coordinator_stability();
             self.validate_compaction_manager_coherence();
@@ -945,21 +936,21 @@ pub const SSTableManager = struct {
 
     /// P0.6: Validate arena coordinator stability.
     fn validate_arena_coordinator_stability(self: *const SSTableManager) void {
-        assert_fmt(builtin.mode == .Debug, "Arena coordinator validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // Arena coordinator corruption indicates struct copying which breaks allocation interface
-        fatal_assert(@intFromPtr(self.arena_coordinator) != 0, "Arena coordinator pointer is null - struct copying corruption", .{});
+        if (!(@intFromPtr(self.arena_coordinator) != 0)) std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
 
         // Minimal allocation test verifies coordinator hasn't been corrupted by struct copying
         const test_alloc = self.arena_coordinator.alloc(u8, 1) catch {
-            fatal_assert(false, "SSTableManager arena coordinator non-functional - corruption detected", .{});
+            if (!(false)) std.debug.panic("SSTableManager arena coordinator non-functional - corruption detected", .{});
             return;
         };
         _ = test_alloc; // Arena will clean up during next reset
 
         // Validate backing allocator is functional
         const test_backing_alloc = self.backing_allocator.alloc(u8, 1) catch {
-            fatal_assert(false, "SSTableManager backing allocator non-functional", .{});
+            if (!(false)) std.debug.panic("SSTableManager backing allocator non-functional", .{});
             return;
         };
         defer self.backing_allocator.free(test_backing_alloc);
@@ -967,22 +958,22 @@ pub const SSTableManager = struct {
 
     /// Validate compaction manager state coherence.
     fn validate_compaction_manager_coherence(self: *const SSTableManager) void {
-        assert_fmt(builtin.mode == .Debug, "Compaction manager validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // Compaction manager corruption would break background maintenance operations
-        fatal_assert(@intFromPtr(&self.compaction_manager) != 0, "CompactionManager pointer corruption", .{});
+        if (!(@intFromPtr(&self.compaction_manager) != 0)) std.debug.panic("CompactionManager pointer corruption", .{});
 
         // Excessive SSTable count indicates counter corruption or runaway file creation
         const current_sstable_count = @as(u32, @intCast(self.sstable_paths.items.len));
-        assert_fmt(current_sstable_count < 10000, "SSTable count {} is unreasonable - indicates corruption", .{current_sstable_count});
+        std.debug.assert(current_sstable_count < 10000);
 
         // ID overflow or corruption could cause file naming conflicts and data loss
-        assert_fmt(self.next_sstable_id < 1000000, "Next SSTable ID {} is unreasonable - indicates corruption", .{self.next_sstable_id});
+        std.debug.assert(self.next_sstable_id < 1000000);
 
         // Validate data directory is set and reasonable
         if (self.data_dir.len > 0) {
-            assert_fmt(self.data_dir.len < 4096, "Data directory path too long: {} bytes", .{self.data_dir.len});
-            assert_fmt(@intFromPtr(self.data_dir.ptr) != 0, "Data directory pointer is null with length {}", .{self.data_dir.len});
+            std.debug.assert(self.data_dir.len < 4096);
+            std.debug.assert(@intFromPtr(self.data_dir.ptr) != 0);
         }
     }
 

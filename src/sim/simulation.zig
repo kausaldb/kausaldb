@@ -12,7 +12,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const deterministic_logger_mod = @import("deterministic_logger.zig");
 const ownership = @import("../core/ownership.zig");
 const sim_vfs = @import("simulation_vfs.zig");
@@ -72,12 +71,7 @@ pub const Simulation = struct {
 
     /// Get a node by its ID.
     pub fn find_node(self: *Self, node_id: NodeId) *Node {
-        assert_mod.assert_index_valid(
-            node_id.id,
-            self.nodes.items.len,
-            "Invalid node ID: {}",
-            .{node_id.id},
-        );
+        std.debug.assert(node_id.id < self.nodes.items.len);
         return &self.nodes.items[node_id.id];
     }
 
@@ -112,7 +106,7 @@ pub const Simulation = struct {
 
     /// Configure packet loss between two nodes.
     pub fn configure_packet_loss(self: *Self, node_a: NodeId, node_b: NodeId, loss_rate: f32) void {
-        assert_mod.assert_range(loss_rate, 0.0, 1.0, "Invalid loss rate: {}", .{loss_rate});
+        std.debug.assert(loss_rate >= 0.0 and loss_rate <= 1.0);
         self.network.configure_packet_loss(node_a, node_b, loss_rate);
     }
 
@@ -515,7 +509,7 @@ pub const OwnershipViolationInjector = struct {
     /// Enable ownership violation injection with specified rate.
     /// Rate should be between 0.0 (never) and 1.0 (always).
     pub fn enable_injection(self: *Self, rate: f32) void {
-        assert_mod.assert_fmt(rate >= 0.0 and rate <= 1.0, "Invalid injection rate: {d}", .{rate});
+        std.debug.assert(rate >= 0.0 and rate <= 1.0);
         self.injection_rate = rate;
         self.is_enabled = true;
     }

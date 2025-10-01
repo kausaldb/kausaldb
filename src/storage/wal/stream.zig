@@ -13,12 +13,10 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("../../core/assert.zig");
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const stdx = @import("../../core/stdx.zig");
 const vfs = @import("../../core/vfs.zig");
 
-const assert = assert_mod.assert;
 const log = std.log.scoped(.wal_stream);
 const testing = std.testing;
 
@@ -293,11 +291,11 @@ pub const WALEntryStream = struct {
 
     /// Preserve unprocessed data for the next buffer fill
     fn preserve_remaining_data(self: *WALEntryStream, consumed: usize, available: usize) void {
-        assert(consumed <= available);
+        std.debug.assert(consumed <= available);
 
         if (consumed < available) {
             const leftover_size = available - consumed;
-            assert(leftover_size <= self.remaining_buffer.len);
+            std.debug.assert(leftover_size <= self.remaining_buffer.len);
 
             @memcpy(self.remaining_buffer[0..leftover_size], self.process_buffer[consumed..available]);
             self.remaining_len = leftover_size;
@@ -325,9 +323,9 @@ pub const WALEntryStream = struct {
 // Compile-time validation of buffer relationships
 comptime {
     // Process buffer must accommodate multiple headers to prevent thrashing
-    assert_mod.comptime_assert(PROCESS_BUFFER_SIZE >= WAL_HEADER_SIZE * 4, "Process buffer too small for multiple headers");
-    assert_mod.comptime_assert(READ_BUFFER_SIZE >= WAL_HEADER_SIZE * 4, "Read buffer too small for multiple headers");
-    assert_mod.comptime_assert(PROCESS_BUFFER_SIZE >= READ_BUFFER_SIZE, "Process buffer must be at least as large as read buffer");
+    if (!(PROCESS_BUFFER_SIZE >= WAL_HEADER_SIZE * 4)) @compileError("Process buffer too small for multiple headers");
+    if (!(READ_BUFFER_SIZE >= WAL_HEADER_SIZE * 4)) @compileError("Read buffer too small for multiple headers");
+    if (!(PROCESS_BUFFER_SIZE >= READ_BUFFER_SIZE)) @compileError("Process buffer must be at least as large as read buffer");
 }
 
 test "WALEntryStream initialization" {

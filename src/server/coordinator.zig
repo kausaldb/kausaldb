@@ -9,7 +9,6 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const concurrency = @import("../core/concurrency.zig");
 const error_context = @import("../core/error_context.zig");
 const memory = @import("../core/memory.zig");
@@ -19,8 +18,6 @@ const storage = @import("../storage/engine.zig");
 const workspace_manager = @import("../workspace/manager.zig");
 const config_mod = @import("config.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 const log = std.log.scoped(.server_coordinator);
 
 const ArenaCoordinator = memory.ArenaCoordinator;
@@ -261,7 +258,7 @@ pub const ServerCoordinator = struct {
         if (self.storage_engine) |se| {
             return se;
         }
-        fatal_assert(false, "Storage engine not initialized", .{});
+        if (!(false)) std.debug.panic("Storage engine not initialized", .{});
         unreachable;
     }
 
@@ -270,7 +267,7 @@ pub const ServerCoordinator = struct {
         if (self.query_engine) |qe| {
             return qe;
         }
-        fatal_assert(false, "Query engine not initialized", .{});
+        if (!(false)) std.debug.panic("Query engine not initialized", .{});
         unreachable;
     }
 
@@ -279,7 +276,7 @@ pub const ServerCoordinator = struct {
         if (self.workspace_manager) |wm| {
             return wm;
         }
-        fatal_assert(false, "Workspace manager not initialized", .{});
+        if (!(false)) std.debug.panic("Workspace manager not initialized", .{});
         unreachable;
     }
 };

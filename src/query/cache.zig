@@ -15,10 +15,6 @@ const context_block = @import("../core/types.zig");
 const ownership = @import("../core/ownership.zig");
 const operations = @import("operations.zig");
 const traversal = @import("traversal.zig");
-const assert_mod = @import("../core/assert.zig");
-
-const assert = assert_mod.assert;
-const assert_fmt = assert_mod.assert_fmt;
 
 const BlockId = context_block.BlockId;
 const ContextBlock = context_block.ContextBlock;

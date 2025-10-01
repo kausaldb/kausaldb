@@ -43,7 +43,7 @@ pub const production_vfs = @import("core/production_vfs.zig");
 pub const ProductionVFS = production_vfs.ProductionVFS;
 
 // Core utilities and error handling
-pub const assert_mod = @import("core/assert.zig");
+
 pub const memory = @import("core/memory.zig");
 pub const error_context = @import("core/error_context.zig");
 

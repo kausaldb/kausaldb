@@ -115,22 +115,18 @@ pub const MemtableManager = struct {
     pub fn deinit(self: *MemtableManager) void {
         concurrency.assert_main_thread();
 
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "MemtableManager self pointer is null - memory corruption detected",
             .{},
         );
-        fatal_assert(
-            @intFromPtr(&self.wal) != 0,
+        if (!(@intFromPtr(&self.wal) != 0)) std.debug.panic(
             "MemtableManager WAL pointer corrupted - memory safety violation detected",
             .{},
         );
-        fatal_assert(
-            @intFromPtr(&self.block_index) != 0,
+        if (!(@intFromPtr(&self.block_index) != 0)) std.debug.panic(
             "MemtableManager block_index pointer corrupted - memory safety violation detected",
             .{},
-        );
-        // Note: graph_index is now owned by StorageEngine, not MemtableManager
+        ); // Note: graph_index is now owned by StorageEngine, not MemtableManager
 
         self.wal.deinit();
         self.block_index.deinit();
@@ -174,7 +170,7 @@ pub const MemtableManager = struct {
         };
 
         // WAL operation succeeded, safe to proceed to memtable update
-        assert(wal_succeeded);
+        std.debug.assert(wal_succeeded);
 
         // Skip per-operation validation to prevent performance regression
         // Validation is expensive (allocator testing + memory calculation)
@@ -313,13 +309,7 @@ pub const MemtableManager = struct {
         // P0.5: Verify WAL write completed before memtable update
         // This ordering is CRITICAL for durability guarantees
         const wal_entries_after = self.wal.stats.entries_written;
-        assert_fmt(
-            wal_entries_after > wal_entries_before,
-            "WAL entry count must increase before memtable update: {} -> {}",
-            .{ wal_entries_before, wal_entries_after },
-        );
-
-        // Only update memtable AFTER WAL persistence is confirmed
+        std.debug.assert(wal_entries_after > wal_entries_before); // Only update memtable AFTER WAL persistence is confirmed
         try self.block_index.put_block(block.*);
 
         // Skip per-operation validation to prevent performance regression
@@ -429,7 +419,7 @@ pub const MemtableManager = struct {
     /// Ensures WAL durability ordering is preserved - WAL entries must be persistent
     /// before corresponding memtable state exists. Critical for LSM-tree durability guarantees.
     fn validate_wal_memtable_ordering_invariant(self: *const MemtableManager) void {
-        assert_fmt(builtin.mode == .Debug, "WAL ordering validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // WAL entry count should reflect all memtable blocks in durable form
         const memtable_blocks = @as(u32, @intCast(self.block_index.blocks.count()));
@@ -437,19 +427,10 @@ pub const MemtableManager = struct {
 
         // In normal operation, WAL should have at least as many entries as memtable blocks
         // (WAL may have more due to edges, deletes, or unflushed entries)
-        assert_fmt(
-            wal_entries >= memtable_blocks,
-            "WAL entry count {} cannot be less than memtable block count {} - durability ordering violated",
-            .{ wal_entries, memtable_blocks },
-        );
-
+        std.debug.assert(wal_entries >= memtable_blocks);
         // Verify WAL is in a consistent state for durability
         if (self.wal.active_file != null) {
-            assert_fmt(
-                self.wal.statistics().entries_written > 0 or memtable_blocks == 0,
-                "Active WAL file exists but no entries written with {} blocks in memtable - inconsistent state",
-                .{memtable_blocks},
-            );
+            std.debug.assert(self.wal.statistics().entries_written > 0 or memtable_blocks == 0);
         }
     }
 
@@ -468,18 +449,18 @@ pub const MemtableManager = struct {
     /// P0.6: Validate arena coordinator stability across all subsystems.
     /// Ensures arena coordinators remain functional after struct operations.
     fn validate_arena_coordinator_stability(self: *const MemtableManager) void {
-        assert_fmt(builtin.mode == .Debug, "Arena coordinator validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // Validate BlockIndex arena coordinator stability
         self.block_index.validate_invariants();
 
         // Validate GraphEdgeIndex has stable coordinator (if it uses one)
         // The graph_index should have its own validation if it uses arena coordinator
-        assert_fmt(@intFromPtr(&self.graph_index) != 0, "GraphEdgeIndex pointer corruption detected", .{});
+        std.debug.assert(@intFromPtr(&self.graph_index) != 0);
 
         // Validate backing allocator is still functional
         const test_alloc = self.backing_allocator.alloc(u8, 1) catch {
-            fatal_assert(false, "MemtableManager backing allocator non-functional - corruption detected", .{});
+            if (!(false)) std.debug.panic("MemtableManager backing allocator non-functional - corruption detected", .{});
             return;
         };
         defer self.backing_allocator.free(test_alloc);
@@ -488,55 +469,37 @@ pub const MemtableManager = struct {
     /// P0.7: Validate memory accounting consistency across subsystems.
     /// Ensures tracked memory usage matches actual subsystem usage.
     fn validate_memory_accounting_consistency(self: *const MemtableManager) void {
-        assert_fmt(builtin.mode == .Debug, "Memory accounting validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // Validate BlockIndex memory accounting (delegated to BlockIndex.validate_invariants)
         const block_index_memory = self.block_index.memory_used;
         const total_memory = self.block_index.memory_used;
 
         // MemtableManager memory should equal BlockIndex memory (main consumer)
-        assert_fmt(
-            total_memory == block_index_memory,
-            "MemtableManager memory accounting inconsistency: total={} block_index={}",
-            .{ total_memory, block_index_memory },
-        );
-
+        std.debug.assert(total_memory == block_index_memory);
         // Validate memory usage is reasonable given block count
         const current_block_count = @as(u32, @intCast(self.block_index.blocks.count()));
         if (current_block_count > 0) {
             const avg_block_size = total_memory / current_block_count;
-            assert_fmt(
-                avg_block_size > 0 and avg_block_size < 100 * 1024 * 1024,
-                "Average block size {} indicates memory corruption",
-                .{avg_block_size},
-            );
+            std.debug.assert(avg_block_size > 0 and avg_block_size < 100 * 1024 * 1024);
         }
     }
 
     /// Validate coherence between different MemtableManager components.
     /// Ensures WAL, BlockIndex, and GraphEdgeIndex are in consistent states.
     fn validate_component_state_coherence(self: *const MemtableManager) void {
-        assert_fmt(builtin.mode == .Debug, "Component coherence validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         // Validate pointers are not corrupted
-        fatal_assert(@intFromPtr(&self.block_index) != 0, "BlockIndex pointer corruption in MemtableManager", .{});
-        fatal_assert(@intFromPtr(&self.graph_index) != 0, "GraphEdgeIndex pointer corruption in MemtableManager", .{});
-        fatal_assert(@intFromPtr(&self.wal) != 0, "WAL pointer corruption in MemtableManager", .{});
+        if (!(@intFromPtr(&self.block_index) != 0)) std.debug.panic("BlockIndex pointer corruption in MemtableManager", .{});
+        if (!(@intFromPtr(&self.graph_index) != 0)) std.debug.panic("GraphEdgeIndex pointer corruption in MemtableManager", .{});
+        if (!(@intFromPtr(&self.wal) != 0)) std.debug.panic("WAL pointer corruption in MemtableManager", .{});
 
         // Configuration corruption could lead to OOM or pathological performance degradation
-        assert_fmt(
-            self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024,
-            "Memtable max size {} is unreasonable - indicates corruption",
-            .{self.memtable_max_size},
-        );
-
+        std.debug.assert(self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024);
         // Validate current usage doesn't exceed configured maximum (with small buffer for overhead)
         const current_usage = self.block_index.memory_used;
-        assert_fmt(
-            current_usage <= self.memtable_max_size * 2,
-            "Memory usage {} exceeds 2x max size {} - indicates accounting corruption",
-            .{ current_usage, self.memtable_max_size },
-        );
+        std.debug.assert(current_usage <= self.memtable_max_size * 2);
     }
 
     /// Clean up old WAL segments after successful memtable flush.
@@ -598,13 +561,7 @@ pub const MemtableManager = struct {
 
         // Final validation
         const final_edge_count = graph_index.edge_count();
-        assert_mod.assert_fmt(
-            edges.len == final_edge_count,
-            "Edge collection ultimately failed: expected {} edges, collected {}",
-            .{ final_edge_count, edges.len },
-        );
-
-        // Validate that counts fit in u16 limits for SSTable format
+        std.debug.assert(edges.len == final_edge_count); // Validate that counts fit in u16 limits for SSTable format
         const max_items_per_sstable = std.math.maxInt(u16);
 
         if (tombstones.len > max_items_per_sstable or edges.len > max_items_per_sstable) {
@@ -684,13 +641,10 @@ const SimulationVFS = simulation_vfs.SimulationVFS;
 
 const block_index_mod = @import("block_index.zig");
 const sstable_manager_mod = @import("sstable_manager.zig");
-const assert_mod = @import("../core/assert.zig");
 
 const BlockIndex = block_index_mod.BlockIndex;
 const SSTableManager = sstable_manager_mod.SSTableManager;
-const assert = assert_mod.assert;
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
+
 fn create_test_block(id: BlockId, content: []const u8) ContextBlock {
     return ContextBlock{
         .id = id,

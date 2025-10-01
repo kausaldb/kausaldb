@@ -5,10 +5,6 @@
 
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
-
-const assert = assert_mod.assert;
-
 /// DateTime in UTC, intended primarily for logging.
 ///
 /// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
@@ -24,7 +20,7 @@ pub const DateTimeUTC = struct {
 
     pub fn now() DateTimeUTC {
         const timestamp_ms = std.time.milliTimestamp();
-        assert(timestamp_ms > 0);
+        std.debug.assert(timestamp_ms > 0);
         return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
     }
 
@@ -167,9 +163,9 @@ pub fn ProtectedType(comptime T: type) type {
 /// Left-to-right copy is safe for overlapping buffers where destination starts
 /// before source, preventing corruption during the copy operation.
 pub fn copy_left(comptime T: type, dest: []T, source: []const T) void {
-    assert(dest.len >= source.len);
+    std.debug.assert(dest.len >= source.len);
     // Safety: Converting pointers to integers to detect overlapping memory regions
-    assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
+    std.debug.assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
     std.mem.copyForwards(T, dest, source);
 }
 
@@ -184,9 +180,9 @@ pub fn copy_left(comptime T: type, dest: []T, source: []const T) void {
 /// Right-to-left copy is safe for overlapping buffers where destination starts
 /// after source, preventing corruption during the copy operation.
 pub fn copy_right(comptime T: type, dest: []T, source: []const T) void {
-    assert(dest.len >= source.len);
+    std.debug.assert(dest.len >= source.len);
     // Safety: Converting pointers to integers to detect overlapping memory regions
-    assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
+    std.debug.assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
 
     std.mem.copyBackwards(T, dest, source);
 }
@@ -216,22 +212,22 @@ pub fn BitSetType(comptime size: comptime_int) type {
         }
 
         pub fn set(self: *Self, index: usize) void {
-            assert(index < size);
+            std.debug.assert(index < size);
             self.inner.set(index);
         }
 
         pub fn unset(self: *Self, index: usize) void {
-            assert(index < size);
+            std.debug.assert(index < size);
             self.inner.unset(index);
         }
 
         pub fn is_set(self: Self, index: usize) bool {
-            assert(index < size);
+            std.debug.assert(index < size);
             return self.inner.isSet(index);
         }
 
         pub fn toggle(self: *Self, index: usize) void {
-            assert(index < size);
+            std.debug.assert(index < size);
             self.inner.toggle(index);
         }
 

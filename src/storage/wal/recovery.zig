@@ -9,14 +9,13 @@ const std = @import("std");
 
 const context_block = @import("../../core/types.zig");
 const corruption_tracker_mod = @import("corruption_tracker.zig");
-const assert_mod = @import("../../core/assert.zig");
+
 const entry_mod = @import("entry.zig");
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const types = @import("types.zig");
 const vfs = @import("../../core/vfs.zig");
 const wal_entry_stream = @import("stream.zig");
 
-const assert = assert_mod.assert;
 const log = std.log.scoped(.wal_recovery);
 const testing = std.testing;
 
@@ -42,8 +41,8 @@ pub fn recover_from_segment(
     context: anytype,
     stats: *types.WALStats,
 ) WALError!void {
-    assert(file_path.len > 0);
-    assert(file_path.len < MAX_PATH_LENGTH);
+    std.debug.assert(file_path.len > 0);
+    std.debug.assert(file_path.len < MAX_PATH_LENGTH);
 
     var corruption_tracker = if (builtin.is_test) CorruptionTracker.init_testing() else CorruptionTracker.init();
 
@@ -153,9 +152,9 @@ pub fn recover_from_segments(
     const initial_recovery_failures = stats.recovery_failures;
 
     for (segment_files) |file_name| {
-        assert(file_name.len > 0);
-        assert(std.mem.startsWith(u8, file_name, "wal_"));
-        assert(std.mem.endsWith(u8, file_name, ".log"));
+        std.debug.assert(file_name.len > 0);
+        std.debug.assert(std.mem.startsWith(u8, file_name, "wal_"));
+        std.debug.assert(std.mem.endsWith(u8, file_name, ".log"));
 
         const file_path = try std.fmt.allocPrint(
             allocator,
@@ -174,7 +173,7 @@ pub fn recover_from_segments(
         };
     }
 
-    assert(stats.recovery_failures >= initial_recovery_failures);
+    std.debug.assert(stats.recovery_failures >= initial_recovery_failures);
 }
 
 /// List all WAL segment files in the directory, sorted in chronological order

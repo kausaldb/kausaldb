@@ -11,10 +11,8 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const stdx = @import("stdx.zig");
 
-const fatal_assert = assert_mod.fatal_assert;
 const log = std.log.scoped(.pools);
 
 /// Debug tracker for object pools with allocation monitoring and leak detection.
@@ -114,7 +112,7 @@ pub fn ObjectPoolType(comptime T: type) type {
         /// Initialize object pool with pre-allocated capacity.
         /// All objects are allocated upfront to eliminate runtime allocation.
         pub fn init(backing_allocator: std.mem.Allocator, pool_capacity: u32) !Self {
-            fatal_assert(pool_capacity > 0 and pool_capacity <= 65536, "Pool capacity must be 1-65536, got {}", .{pool_capacity});
+            if (!(pool_capacity > 0 and pool_capacity <= 65536)) std.debug.panic("Pool capacity must be 1-65536, got {}", .{pool_capacity});
 
             var self = Self{
                 .backing_allocator = backing_allocator,
@@ -219,7 +217,7 @@ pub fn ObjectPoolType(comptime T: type) type {
                 const node_addr = @intFromPtr(node);
 
                 // Note: a more sophisticated validation could walk all nodes
-                fatal_assert(node_addr != 0, "Attempted to release null pointer to pool", .{});
+                if (!(node_addr != 0)) std.debug.panic("Attempted to release null pointer to pool", .{});
             }
         }
 
@@ -385,12 +383,12 @@ pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
             const base_addr = @intFromPtr(&self.items[0]);
             const item_size = @sizeOf(T);
 
-            fatal_assert(item_addr >= base_addr, "Object not from this stack pool", .{});
-            fatal_assert((item_addr - base_addr) % item_size == 0, "Misaligned object in stack pool", .{});
+            if (!(item_addr >= base_addr)) std.debug.panic("Object not from this stack pool", .{});
+            if (!((item_addr - base_addr) % item_size == 0)) std.debug.panic("Misaligned object in stack pool", .{});
 
             const index = (item_addr - base_addr) / item_size;
-            fatal_assert(index < capacity, "Object index out of bounds: {}", .{index});
-            fatal_assert(self.used_mask.is_set(index), "Attempted to release already-free object at index {}", .{index});
+            if (!(index < capacity)) std.debug.panic("Object index out of bounds: {}", .{index});
+            if (!(self.used_mask.is_set(index))) std.debug.panic("Attempted to release already-free object at index {}", .{index});
 
             self.used_mask.unset(index);
             self.next_hint = @intCast(index); // Prefer recently freed slots

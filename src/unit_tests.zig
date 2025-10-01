@@ -16,7 +16,7 @@ pub const std_options = .{
 
 comptime {
     _ = @import("core/arena.zig");
-    _ = @import("core/assert.zig");
+
     _ = @import("core/bounded.zig");
     _ = @import("core/concurrency.zig");
     _ = @import("core/error_context.zig");

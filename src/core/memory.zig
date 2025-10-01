@@ -11,11 +11,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
-
 const log = std.log.scoped(.memory);
 
 /// Memory generation validation errors
@@ -163,7 +158,7 @@ pub const ArenaCoordinator = struct {
     pub fn validate_coordinator(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
             // Safety: Converting pointer to integer for null pointer validation
-            fatal_assert(@intFromPtr(self.arena) != 0, "ArenaCoordinator arena pointer is null - coordinator corruption", .{});
+            if (!(@intFromPtr(self.arena) != 0)) std.debug.panic("ArenaCoordinator arena pointer is null - coordinator corruption", .{});
         }
     }
 
@@ -196,18 +191,18 @@ pub const ArenaCoordinator = struct {
         if (comptime builtin.mode == .Debug) {
             // Basic pointer validation
             // Safety: Converting pointers to integers for null pointer validation
-            fatal_assert(@intFromPtr(self) != 0, "ArenaCoordinator self pointer is null", .{});
-            fatal_assert(@intFromPtr(self.arena) != 0, "ArenaCoordinator arena pointer is null", .{});
+            if (!(@intFromPtr(self) != 0)) std.debug.panic("ArenaCoordinator self pointer is null", .{});
+            if (!(@intFromPtr(self.arena) != 0)) std.debug.panic("ArenaCoordinator arena pointer is null", .{});
 
             // Arena alignment validation
             const arena_addr = @intFromPtr(self.arena);
             const arena_align = @alignOf(std.heap.ArenaAllocator);
-            fatal_assert(arena_addr % arena_align == 0, "Arena pointer misaligned: 0x{x}", .{arena_addr});
+            if (!(arena_addr % arena_align == 0)) std.debug.panic("Arena pointer misaligned: 0x{x}", .{arena_addr});
 
             // Coordinator address validation
             const coord_addr = @intFromPtr(self);
             const coord_align = @alignOf(ArenaCoordinator);
-            fatal_assert(coord_addr % coord_align == 0, "Coordinator pointer misaligned: 0x{x}", .{coord_addr});
+            if (!(coord_addr % coord_align == 0)) std.debug.panic("Coordinator pointer misaligned: 0x{x}", .{coord_addr});
         }
     }
 
@@ -258,7 +253,7 @@ pub fn TypedStorageCoordinatorType(comptime StorageEngineType: type) type {
         /// Debug-only validation to catch use-after-free and corruption.
         pub fn validate_coordinator(self: Self) void {
             if (comptime builtin.mode == .Debug) {
-                fatal_assert(@intFromPtr(self.storage_engine) != 0, "Storage coordinator has null engine reference", .{});
+                if (!(@intFromPtr(self.storage_engine) != 0)) std.debug.panic("Storage coordinator has null engine reference", .{});
                 // Additional validation can be added by implementers
             }
         }

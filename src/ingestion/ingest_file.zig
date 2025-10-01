@@ -4,8 +4,7 @@
 //! Only the final API boundary converts to ContextBlock for external use.
 
 const std = @import("std");
-const assert_mod = @import("../core/assert.zig");
-const assert = assert_mod.assert;
+
 const types = @import("../core/types.zig");
 const ownership = @import("../core/ownership.zig");
 

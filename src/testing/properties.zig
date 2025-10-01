@@ -16,13 +16,9 @@ const std = @import("std");
 const testing = std.testing;
 const log = std.log.scoped(.properties);
 
-const assert_mod = @import("../core/assert.zig");
 const storage_engine_mod = @import("../storage/engine.zig");
 const types = @import("../core/types.zig");
 const model_mod = @import("model.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -131,7 +127,7 @@ pub const PropertyChecker = struct {
             const durability_threshold = determine_durability_threshold(system);
 
             if (error_context.integrity_rate < durability_threshold) {
-                fatal_assert(false, "DURABILITY VIOLATION: Data integrity compromised\n" ++
+                if (!(false)) std.debug.panic("DURABILITY VIOLATION: Data integrity compromised\n" ++
                     "  Missing blocks: {}/{} ({d:.1}%)\n" ++
                     "  Corrupted blocks: {}/{} ({d:.1}%)\n" ++
                     "  System integrity: {d:.3}%\n" ++
@@ -189,7 +185,7 @@ pub const PropertyChecker = struct {
         };
 
         if (usage.total_bytes > max_bytes) {
-            fatal_assert(false, "RESOURCE VIOLATION: Memory bounds exceeded\n" ++
+            if (!(false)) std.debug.panic("RESOURCE VIOLATION: Memory bounds exceeded\n" ++
                 "  Current usage: {d:.1} MB ({d:.1}% of limit)\n" ++
                 "  Memory limit: {d:.1} MB\n" ++
                 "  Arena usage: {d:.1} MB ({d:.1}% of total)\n" ++
@@ -197,7 +193,7 @@ pub const PropertyChecker = struct {
         }
 
         if (memory_metrics.arena_ratio > PROPERTY_CONFIG.MAX_ARENA_MEMORY_RATIO) {
-            fatal_assert(false, "MEMORY PATTERN VIOLATION: Arena allocation imbalance\n" ++
+            if (!(false)) std.debug.panic("MEMORY PATTERN VIOLATION: Arena allocation imbalance\n" ++
                 "  Arena ratio: {d:.1}% (max allowed: {d:.1}%)\n" ++
                 "  This indicates inefficient memory management patterns.", .{ memory_metrics.arena_ratio * 100, PROPERTY_CONFIG.MAX_ARENA_MEMORY_RATIO * 100 });
         }
@@ -275,7 +271,7 @@ pub const PropertyChecker = struct {
             const edge_integrity = @as(f64, @floatFromInt(total_edges - missing_edges)) /
                 @as(f64, @floatFromInt(total_edges));
 
-            fatal_assert(false, "GRAPH INTEGRITY VIOLATION: Edge consistency compromised\n" ++
+            if (!(false)) std.debug.panic("GRAPH INTEGRITY VIOLATION: Edge consistency compromised\n" ++
                 "  Missing edges: {}/{} ({d:.1}%)\n" ++
                 "  Graph integrity: {d:.3}%\n" ++
                 "  This breaks the fundamental graph consistency contract.", .{ missing_edges, total_edges, @as(f64, @floatFromInt(missing_edges)) / @as(f64, @floatFromInt(total_edges)) * 100, edge_integrity * 100 });
@@ -315,7 +311,7 @@ pub const PropertyChecker = struct {
         }
 
         if (violations > 0) {
-            fatal_assert(false, "Transitivity violations found: {} broken transitive paths in {} blocks", .{ violations, blocks_checked });
+            if (!(false)) std.debug.panic("Transitivity violations found: {} broken transitive paths in {} blocks", .{ violations, blocks_checked });
         }
     }
 
@@ -360,7 +356,7 @@ pub const PropertyChecker = struct {
 
         // If any present blocks weren't found, it's a critical failure
         if (blocks_not_found > 0) {
-            fatal_assert(false, "STORAGE CORRUPTION: Present blocks not found\n" ++
+            if (!(false)) std.debug.panic("STORAGE CORRUPTION: Present blocks not found\n" ++
                 "  Missing blocks: {}/{}\n" ++
                 "  Failure rate: {d:.1}%\n" ++
                 "  CRITICAL: This indicates data loss or bloom filter corruption.", .{
@@ -457,7 +453,7 @@ pub const PropertyChecker = struct {
             const traversal_integrity = @as(f64, @floatFromInt(blocks_tested - mismatches)) /
                 @as(f64, @floatFromInt(blocks_tested));
 
-            fatal_assert(false, "TRAVERSAL CONSISTENCY VIOLATION: K-hop neighborhoods inconsistent\n" ++
+            if (!(false)) std.debug.panic("TRAVERSAL CONSISTENCY VIOLATION: K-hop neighborhoods inconsistent\n" ++
                 "  Mismatched blocks: {}/{} ({d:.1}%)\n" ++
                 "  Hop distance: {}\n" ++
                 "  Traversal integrity: {d:.3}%\n" ++
@@ -523,7 +519,7 @@ fn validate_block_count(model: *ModelState, system: *StorageEngine) !void {
         else
             -@as(i64, @intCast(model_count - system_count));
 
-        fatal_assert(false, "CARDINALITY VIOLATION: Block count inconsistency detected\n" ++
+        if (!(false)) std.debug.panic("CARDINALITY VIOLATION: Block count inconsistency detected\n" ++
             "  Model blocks: {}\n" ++
             "  System blocks: {}\n" ++
             "  Difference: {}\n" ++
@@ -559,7 +555,7 @@ fn validate_edge_integrity(model: *ModelState, system: *StorageEngine) !void {
         const integrity_ratio = @as(f64, @floatFromInt(total_edges - orphaned_edges)) /
             @as(f64, @floatFromInt(total_edges));
 
-        fatal_assert(false, "REFERENTIAL INTEGRITY VIOLATION: Orphaned edges detected\n" ++
+        if (!(false)) std.debug.panic("REFERENTIAL INTEGRITY VIOLATION: Orphaned edges detected\n" ++
             "  Orphaned edges: {}/{} ({d:.1}%)\n" ++
             "  Graph integrity: {d:.3}%\n" ++
             "  This violates the fundamental constraint that edges must reference valid blocks.", .{ orphaned_edges, total_edges, @as(f64, @floatFromInt(orphaned_edges)) / @as(f64, @floatFromInt(total_edges)) * 100, integrity_ratio * 100 });

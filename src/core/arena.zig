@@ -12,11 +12,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
-
 const log = std.log.scoped(.arena);
 
 /// Ownership categories for type-safe memory management.
@@ -97,8 +92,8 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// Allocate a slice of n objects of type T.
         /// The returned slice is owned by this arena and becomes invalid after reset().
         pub fn alloc_slice(self: *Arena, n: usize) ![]T {
-            fatal_assert(n > 0, "Cannot allocate zero-length slice", .{});
-            fatal_assert(n <= std.math.maxInt(u32), "Slice too large: {}", .{n});
+            if (!(n > 0)) std.debug.panic("Cannot allocate zero-length slice", .{});
+            if (!(n <= std.math.maxInt(u32))) std.debug.panic("Slice too large: {}", .{n});
 
             const slice = try self.arena.allocator().alloc(T, n);
 
@@ -166,7 +161,7 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// Used for runtime validation in debug builds.
         pub fn validate_ownership_access(self: *const Arena, expected: ArenaOwnership) void {
             if (builtin.mode == .Debug) {
-                fatal_assert(self.ownership == expected or expected == .temporary, "Ownership violation: {s} arena accessed as {s}", .{ self.ownership.name(), expected.name() });
+                if (!(self.ownership == expected or expected == .temporary)) std.debug.panic("Ownership violation: {s} arena accessed as {s}", .{ self.ownership.name(), expected.name() });
             }
         }
 
@@ -304,7 +299,7 @@ pub fn OwnedPtrType(comptime T: type) type {
         /// Access the underlying pointer with ownership validation.
         pub fn access(self: *const Ptr, expected_ownership: ArenaOwnership) *T {
             if (builtin.mode == .Debug) {
-                fatal_assert(self.ownership == expected_ownership or expected_ownership == .temporary, "Ownership violation: {s} pointer accessed as {s}", .{ self.ownership.name(), expected_ownership.name() });
+                if (!(self.ownership == expected_ownership or expected_ownership == .temporary)) std.debug.panic("Ownership violation: {s} pointer accessed as {s}", .{ self.ownership.name(), expected_ownership.name() });
             }
             return self.ptr;
         }
@@ -322,10 +317,10 @@ pub fn OwnedPtrType(comptime T: type) type {
 comptime {
     // Validate ownership enum has reasonable number of variants
     const ownership_count = @typeInfo(ArenaOwnership).@"enum".fields.len;
-    assert_mod.comptime_assert(ownership_count >= 3 and ownership_count <= 16, "ArenaOwnership should have 3-16 variants, found " ++ std.fmt.comptimePrint("{}", .{ownership_count}));
+    if (!(ownership_count >= 3 and ownership_count <= 16)) @compileError("ArenaOwnership should have 3-16 variants, found " ++ std.fmt.comptimePrint("{}", .{ownership_count}));
 
     // Validate ArenaDebugInfo struct layout
-    assert_mod.comptime_assert(@sizeOf(ArenaDebugInfo) > 0, "ArenaDebugInfo must have non-zero size");
+    if (!(@sizeOf(ArenaDebugInfo) > 0)) @compileError("ArenaDebugInfo must have non-zero size");
 }
 
 // Tests

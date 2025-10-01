@@ -14,7 +14,7 @@ const std = @import("std");
 
 const concurrency = @import("../../core/concurrency.zig");
 const context_block = @import("../../core/types.zig");
-const assert_mod = @import("../../core/assert.zig");
+
 const entry_mod = @import("entry.zig");
 const error_context = @import("../../core/error_context.zig");
 const recovery = @import("recovery.zig");
@@ -22,7 +22,6 @@ const simulation_vfs = @import("../../sim/simulation_vfs.zig");
 const types = @import("types.zig");
 const vfs = @import("../../core/vfs.zig");
 
-const assert = assert_mod.assert;
 const log = std.log.scoped(.wal);
 const testing = std.testing;
 
@@ -55,18 +54,18 @@ pub const WAL = struct {
     disable_write_verification: bool,
 
     comptime {
-        assert(@sizeOf(u32) == 4);
-        assert(@sizeOf(u64) == 8);
+        std.debug.assert(@sizeOf(u32) == 4);
+        std.debug.assert(@sizeOf(u64) == 8);
 
         const max_segment_number = std.math.pow(u32, 10, WAL_FILE_NUMBER_DIGITS) - 1;
-        assert(max_segment_number > 1000);
+        std.debug.assert(max_segment_number > 1000);
     }
 
     /// Phase 1 initialization: Create WAL structure with memory allocation only.
     /// No I/O operations performed. Call startup() to complete initialization.
     pub fn init(allocator: std.mem.Allocator, filesystem: VFS, directory: []const u8) WALError!WAL {
         if (directory.len == 0) return WALError.InvalidArgument;
-        assert(directory.len < 4096); // Reasonable path length limit
+        std.debug.assert(directory.len < 4096);
 
         return WAL{
             .directory = try allocator.dupe(u8, directory),
@@ -160,15 +159,15 @@ pub const WAL = struct {
     fn validate_entry_for_write(self: *WAL, entry: WALEntry) WALError!usize {
         concurrency.assert_main_thread();
 
-        assert(self.active_file != null);
-        assert(entry.payload.len <= MAX_PAYLOAD_SIZE);
-        assert(entry.payload_size == entry.payload.len);
+        std.debug.assert(self.active_file != null);
+        std.debug.assert(entry.payload.len <= MAX_PAYLOAD_SIZE);
+        std.debug.assert(entry.payload_size == entry.payload.len);
 
         if (self.active_file == null) return WALError.NotInitialized;
 
         const serialized_size = WALEntry.HEADER_SIZE + entry.payload.len;
-        assert(serialized_size > WALEntry.HEADER_SIZE);
-        assert(serialized_size <= WALEntry.HEADER_SIZE + MAX_PAYLOAD_SIZE);
+        std.debug.assert(serialized_size > WALEntry.HEADER_SIZE);
+        std.debug.assert(serialized_size <= WALEntry.HEADER_SIZE + MAX_PAYLOAD_SIZE);
 
         return serialized_size;
     }
@@ -176,10 +175,10 @@ pub const WAL = struct {
     /// Ensure active segment has capacity for entry, rotating if necessary
     fn ensure_segment_capacity(self: *WAL, required_size: usize) WALError!void {
         if (self.segment_size + required_size > MAX_SEGMENT_SIZE) {
-            assert(self.segment_size <= MAX_SEGMENT_SIZE);
+            std.debug.assert(self.segment_size <= MAX_SEGMENT_SIZE);
             try self.rotate_segment();
-            assert(self.segment_size == 0);
-            assert(self.active_file != null);
+            std.debug.assert(self.segment_size == 0);
+            std.debug.assert(self.active_file != null);
         }
     }
 
@@ -196,7 +195,7 @@ pub const WAL = struct {
         @memset(write_buffer, 0);
 
         const bytes_written = try entry.serialize(write_buffer);
-        assert(bytes_written == serialized_size);
+        std.debug.assert(bytes_written == serialized_size);
 
         if (write_buffer.len >= WALEntry.HEADER_SIZE) {
             const serialized_checksum = std.mem.readInt(u64, write_buffer[0..8], .little);
@@ -349,10 +348,10 @@ pub const WAL = struct {
         self.stats.entries_written += 1;
         self.stats.bytes_written += bytes_written;
 
-        assert(self.segment_size == old_segment_size + bytes_written);
-        assert(self.segment_size <= MAX_SEGMENT_SIZE);
-        assert(self.stats.entries_written > 0);
-        assert(self.stats.bytes_written >= bytes_written);
+        std.debug.assert(self.segment_size == old_segment_size + bytes_written);
+        std.debug.assert(self.segment_size <= MAX_SEGMENT_SIZE);
+        std.debug.assert(self.stats.entries_written > 0);
+        std.debug.assert(self.stats.bytes_written >= bytes_written);
     }
 
     /// Recover all entries from WAL segments in chronological order.

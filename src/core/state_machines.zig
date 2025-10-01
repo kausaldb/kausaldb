@@ -11,11 +11,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const stdx = @import("stdx.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 
 const log = std.log.scoped(.state_machines);
 
@@ -57,12 +53,12 @@ pub const FileState = enum {
     pub fn transition(self: *FileState, next: FileState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                fatal_assert(false, "Invalid file state transition: {} -> {}", .{ self.*, next });
+                if (!(false)) std.debug.panic("Invalid file state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("File state transition: {} -> {}", .{ self.*, next });
         } else {
             // Release builds still validate critical transitions
-            fatal_assert(self.* != .deleted, "File operation on deleted file", .{});
+            if (!(self.* != .deleted)) std.debug.panic("File operation on deleted file", .{});
         }
         self.* = next;
     }
@@ -120,7 +116,7 @@ pub const ConnectionState = enum {
     pub fn transition(self: *ConnectionState, next: ConnectionState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                fatal_assert(false, "Invalid connection state transition: {} -> {}", .{ self.*, next });
+                if (!(false)) std.debug.panic("Invalid connection state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Connection state transition: {} -> {}", .{ self.*, next });
         }
@@ -180,7 +176,7 @@ pub const StorageState = enum {
     pub fn transition(self: *StorageState, next: StorageState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                fatal_assert(false, "Invalid storage state transition: {} -> {}", .{ self.*, next });
+                if (!(false)) std.debug.panic("Invalid storage state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Storage state transition: {} -> {}", .{ self.*, next });
         }
@@ -228,7 +224,7 @@ pub const QueryState = enum {
     pub fn transition(self: *QueryState, next: QueryState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                fatal_assert(false, "Invalid query state transition: {} -> {}", .{ self.*, next });
+                if (!(false)) std.debug.panic("Invalid query state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Query state transition: {} -> {}", .{ self.*, next });
         }

@@ -13,9 +13,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const context_block = @import("../core/types.zig");
-const assert_mod = @import("../core/assert.zig");
-
-const assert = assert_mod.assert;
 
 const BlockId = context_block.BlockId;
 
@@ -45,8 +42,8 @@ pub const BloomFilter = struct {
 
         /// Calculate optimal parameters for given expected items and desired false positive rate
         pub fn calculate(expected_items: u32, false_positive_rate: f64) Params {
-            assert(expected_items > 0);
-            assert(false_positive_rate > 0.0 and false_positive_rate < 1.0);
+            std.debug.assert(expected_items > 0);
+            std.debug.assert(false_positive_rate > 0.0 and false_positive_rate < 1.0);
 
             // m = -n * ln(p) / (ln(2)^2)
             const items_f = @as(f64, @floatFromInt(expected_items));
@@ -200,14 +197,14 @@ pub const BloomFilter = struct {
     }
 
     fn enable_bit(self: *BloomFilter, bit_index: u32) void {
-        assert(bit_index < self.bit_count);
+        std.debug.assert(bit_index < self.bit_count);
         const byte_index = bit_index / 8;
         const bit_offset = @as(u3, @truncate(bit_index % 8));
         self.bits[byte_index] |= (@as(u8, 1) << bit_offset);
     }
 
     fn test_bit(self: *const BloomFilter, bit_index: u32) bool {
-        assert(bit_index < self.bit_count);
+        std.debug.assert(bit_index < self.bit_count);
         const byte_index = bit_index / 8;
         const bit_offset = @as(u3, @truncate(bit_index % 8));
         return (self.bits[byte_index] & (@as(u8, 1) << bit_offset)) != 0;

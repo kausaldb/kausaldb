@@ -10,11 +10,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("assert.zig");
 const stdx = @import("stdx.zig");
-
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 
 /// Fixed-size array with compile-time maximum enforcement.
 /// Prevents buffer overflows and provides O(1) append operations
@@ -55,7 +51,7 @@ pub fn BoundedArrayType(
             }
 
             if (builtin.mode == .Debug) {
-                assert_fmt(self.len < MAX_SIZE, "bounded_array_type append overflow: len={}, max={}", .{ self.len, MAX_SIZE });
+                std.debug.assert(self.len < MAX_SIZE);
             }
 
             self.items[self.len] = item;
@@ -82,7 +78,7 @@ pub fn BoundedArrayType(
         /// Get element at index with bounds checking.
         /// Panics if index out of bounds.
         pub fn at(self: *const BoundedArray, index: usize) T {
-            fatal_assert(index < self.len, "bounded_array_type index out of bounds: {} >= {}", .{ index, self.len });
+            if (!(index < self.len)) std.debug.panic("bounded_array_type index out of bounds: {} >= {}", .{ index, self.len });
             return self.items[index];
         }
 
@@ -701,8 +697,8 @@ pub fn BoundedGraphBuilderType(comptime max_nodes: usize, comptime max_edges: us
         pub fn validate(self: *const Self) !void {
             // Ensure all edges reference existing nodes
             for (self.edges.slice()) |edge| {
-                fatal_assert(self.has_node(edge.source), "Edge references non-existent source node", .{});
-                fatal_assert(self.has_node(edge.target), "Edge references non-existent target node", .{});
+                if (!(self.has_node(edge.source))) std.debug.panic("Edge references non-existent source node", .{});
+                if (!(self.has_node(edge.target))) std.debug.panic("Edge references non-existent target node", .{});
             }
         }
     };
@@ -741,9 +737,9 @@ comptime {
     const TestQueue = BoundedQueueType(u8, 20);
     const TestMap = BoundedHashMapType(u32, []const u8, 16);
 
-    assert_mod.comptime_assert(@sizeOf(TestArray) > 0, "bounded_array_type must have non-zero size");
-    assert_mod.comptime_assert(@sizeOf(TestQueue) > 0, "bounded_queue_type must have non-zero size");
-    assert_mod.comptime_assert(@sizeOf(TestMap) > 0, "bounded_hash_map_type must have non-zero size");
+    if (!(@sizeOf(TestArray) > 0)) @compileError("bounded_array_type must have non-zero size");
+    if (!(@sizeOf(TestQueue) > 0)) @compileError("bounded_queue_type must have non-zero size");
+    if (!(@sizeOf(TestMap) > 0)) @compileError("bounded_hash_map_type must have non-zero size");
 }
 
 // Tests

@@ -131,15 +131,7 @@ const TidyChecker = struct {
                 }
             }
 
-            // Rule 6: Use KausalDB assertion library instead of std.debug.assert
-            if (std.mem.indexOf(u8, line, "std.debug.assert") != null and
-                !std.mem.endsWith(u8, file_path, "assert.zig") and
-                !std.mem.endsWith(u8, file_path, "tidy.zig"))
-            {
-                try self.add_violation(file_path, line_number, "Use KausalDB assert library (assert_mod.assert) instead of std.debug.assert for consistent error handling");
-            }
-
-            // Rule 7: Use stdx memory operations instead of raw std.mem operations for safety
+            // Rule 6: Use stdx memory operations instead of raw std.mem operations for safety
             if (std.mem.indexOf(u8, line, "std.mem.copy") != null and
                 !std.mem.endsWith(u8, file_path, "stdx.zig") and
                 !std.mem.endsWith(u8, file_path, "tidy.zig"))
@@ -147,7 +139,7 @@ const TidyChecker = struct {
                 try self.add_violation(file_path, line_number, "Use stdx copy functions (copy_left, copy_right) instead of std.mem.copy for explicit overlap semantics");
             }
 
-            // Rule 8: Use stdx bit_set_type instead of std.StaticBitSet
+            // Rule 7: Use stdx bit_set_type instead of std.StaticBitSet
             if (std.mem.indexOf(u8, line, "std.StaticBitSet") != null and
                 !std.mem.endsWith(u8, file_path, "stdx.zig") and
                 !std.mem.endsWith(u8, file_path, "tidy.zig"))
@@ -155,7 +147,7 @@ const TidyChecker = struct {
                 try self.add_violation(file_path, line_number, "Use stdx.bit_set_type instead of std.StaticBitSet for consistent snake_case API and bounds checking");
             }
 
-            // Rule 9: No TODO/FIXME/HACK comments in committed code
+            // Rule 8: No TODO/FIXME/HACK comments in committed code
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
                 !std.mem.endsWith(u8, file_path, "build.zig") and
                 (std.mem.indexOf(u8, line, "// TODO") != null or

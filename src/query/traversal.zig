@@ -11,9 +11,7 @@ const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const storage = @import("../storage/engine.zig");
-const assert_mod = @import("../core/assert.zig");
 
-const assert = assert_mod.assert;
 const testing = std.testing;
 
 const ArenaCoordinator = memory.ArenaCoordinator;

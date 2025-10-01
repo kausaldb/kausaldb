@@ -19,7 +19,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const bloom_filter = @import("bloom_filter.zig");
 const config_mod = @import("config.zig");
 const context_block = @import("../core/types.zig");
@@ -33,7 +32,6 @@ const vfs = @import("../core/vfs.zig");
 const block_index_mod = @import("block_index.zig");
 const BlockIdContext = block_index_mod.BlockIndex.BlockIdContext;
 
-const comptime_assert = assert_mod.comptime_assert;
 const log = std.log.scoped(.sstable);
 const testing = std.testing;
 
@@ -89,7 +87,7 @@ pub const SSTable = struct {
         /// Writes the block ID, offset, and size to the buffer in little-endian format.
         /// Buffer must have at least SERIALIZED_SIZE bytes available.
         pub fn serialize(self: IndexEntry, buffer: []u8) !void {
-            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+            std.debug.assert(buffer.len >= SERIALIZED_SIZE);
 
             var offset: usize = 0;
 
@@ -107,7 +105,7 @@ pub const SSTable = struct {
         /// Reads the block ID, offset, and size from little-endian format.
         /// Buffer must contain at least SERIALIZED_SIZE bytes of valid data.
         pub fn deserialize(buffer: []const u8) !IndexEntry {
-            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+            std.debug.assert(buffer.len >= SERIALIZED_SIZE);
             if (buffer.len < SERIALIZED_SIZE) return error.BufferTooSmall;
 
             var offset: usize = 0;
@@ -141,7 +139,7 @@ pub const SSTable = struct {
 
         /// Serialize edge index entry to binary format for on-disk storage
         pub fn serialize(self: EdgeIndexEntry, buffer: []u8) !void {
-            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+            std.debug.assert(buffer.len >= SERIALIZED_SIZE);
 
             var offset: usize = 0;
 
@@ -159,7 +157,7 @@ pub const SSTable = struct {
 
         /// Deserialize edge index entry from binary format stored on disk
         pub fn deserialize(buffer: []const u8) !EdgeIndexEntry {
-            assert_mod.assert(buffer.len >= SERIALIZED_SIZE);
+            std.debug.assert(buffer.len >= SERIALIZED_SIZE);
             if (buffer.len < SERIALIZED_SIZE) return error.BufferTooSmall;
 
             var offset: usize = 0;
@@ -212,12 +210,11 @@ pub const SSTable = struct {
         edge_count: u16, // 2 bytes: Number of edges (max 65K per SSTable)
 
         comptime {
-            comptime_assert(@sizeOf(Header) == 64, "SSTable Header must be exactly 64 bytes for cache-aligned performance");
-            comptime_assert(HEADER_SIZE == @sizeOf(Header), "HEADER_SIZE constant must match actual Header struct size");
-            comptime_assert(
-                4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u64) +
-                    @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) +
-                    @sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) == 64,
+            if (!(@sizeOf(Header) == 64)) @compileError("SSTable Header must be exactly 64 bytes for cache-aligned performance");
+            if (!(HEADER_SIZE == @sizeOf(Header))) @compileError("HEADER_SIZE constant must match actual Header struct size");
+            if (!(4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u64) +
+                @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) +
+                @sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) == 64)) @compileError(
                 "SSTable Header field sizes must sum to exactly 64 bytes",
             );
         }
@@ -227,7 +224,7 @@ pub const SSTable = struct {
         /// Writes all header fields including magic number, version, counts, and offsets
         /// to the buffer in little-endian format. Essential for SSTable file format integrity.
         pub fn serialize(self: Header, buffer: []u8) !void {
-            assert_mod.assert(buffer.len >= HEADER_SIZE);
+            std.debug.assert(buffer.len >= HEADER_SIZE);
 
             var offset: usize = 0;
 
@@ -275,7 +272,7 @@ pub const SSTable = struct {
         /// Reads and validates the complete header structure from storage buffer.
         /// Critical for ensuring data integrity when opening existing SSTables.
         pub fn deserialize(buffer: []const u8) !Header {
-            assert_mod.assert(buffer.len >= HEADER_SIZE);
+            std.debug.assert(buffer.len >= HEADER_SIZE);
             if (buffer.len < HEADER_SIZE) return error.BufferTooSmall;
 
             var offset: usize = 0;
@@ -347,10 +344,10 @@ pub const SSTable = struct {
         filesystem: VFS,
         file_path: []const u8,
     ) SSTable {
-        assert_mod.assert_not_empty(file_path, "SSTable file_path cannot be empty", .{});
-        assert_mod.assert_fmt(file_path.len < 4096, "SSTable file_path too long: {} bytes", .{file_path.len});
+        std.debug.assert(file_path.len > 0);
+        std.debug.assert(file_path.len < 4096);
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(@intFromPtr(file_path.ptr) != 0, "SSTable file_path has null pointer", .{});
+        std.debug.assert(@intFromPtr(file_path.ptr) != 0);
 
         return SSTable{
             .arena_coordinator = coordinator,
@@ -396,13 +393,13 @@ pub const SSTable = struct {
         }
         // Handle empty case - create empty SSTable with just tombstones if needed
         if (blocks.len == 0 and tombstones.len == 0) return;
-        assert_mod.assert_fmt(blocks.len <= 1000000, "Too many blocks for single SSTable: {}", .{blocks.len});
+        std.debug.assert(blocks.len <= 1000000);
 
         self.index.clearAndFree();
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(@intFromPtr(blocks.ptr) != 0, "Blocks array has null pointer", .{});
+        std.debug.assert(@intFromPtr(blocks.ptr) != 0);
 
-        for (blocks, 0..) |block_value, i| {
+        for (blocks) |block_value| {
             const block_data = switch (BlocksType) {
                 []const ContextBlock => block_value,
                 []ContextBlock => block_value,
@@ -413,15 +410,10 @@ pub const SSTable = struct {
                 else => unreachable,
             };
 
-            assert_mod.assert_fmt(block_data.content.len > 0, "Block {} has empty content", .{i});
-            assert_mod.assert_fmt(block_data.source_uri.len > 0, "Block {} has empty source_uri", .{i});
-            assert_mod.assert_fmt(
-                block_data.content.len < 100 * 1024 * 1024,
-                "Block {} content too large: {} bytes",
-                .{ i, block_data.content.len },
-            );
+            std.debug.assert(block_data.content.len > 0);
+            std.debug.assert(block_data.source_uri.len > 0);
+            std.debug.assert(block_data.content.len < 100 * 1024 * 1024);
         }
-
         // Convert all blocks to ContextBlock for sorting (zero-cost for ContextBlock arrays)
         const context_blocks = try self.backing_allocator.alloc(ContextBlock, blocks.len);
         defer self.backing_allocator.free(context_blocks);
@@ -479,7 +471,7 @@ pub const SSTable = struct {
             defer self.backing_allocator.free(buffer);
 
             const written = try (&block).serialize(buffer);
-            assert_mod.assert_equal(written, block_size, "Block serialization size mismatch: {} != {}", .{ written, block_size });
+            std.debug.assert(written == block_size);
 
             _ = try file.write(buffer);
 
@@ -894,8 +886,7 @@ pub const SSTable = struct {
 
         for (self.index.items[0 .. self.index.items.len - 1], self.index.items[1..]) |current, next| {
             const order = std.mem.order(u8, &current.block_id.bytes, &next.block_id.bytes);
-            assert_mod.fatal_assert(
-                order == .lt,
+            if (!(order == .lt)) std.debug.panic(
                 "SSTable index not properly sorted: {any} >= {any} at positions",
                 .{ current.block_id, next.block_id },
             );
@@ -953,8 +944,8 @@ pub const SSTableIterator = struct {
     /// The SSTable must have a loaded index with at least one entry.
     pub fn init(sstable: *SSTable) SSTableIterator {
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(@intFromPtr(sstable) != 0, "SSTable pointer cannot be null", .{});
-        assert_mod.assert_fmt(sstable.index.items.len > 0, "Cannot iterate over SSTable with empty index", .{});
+        std.debug.assert(@intFromPtr(sstable) != 0);
+        std.debug.assert(sstable.index.items.len > 0);
 
         return SSTableIterator{
             .sstable = sstable,
@@ -972,13 +963,8 @@ pub const SSTableIterator = struct {
     /// Get next block from iterator, opening file if needed
     pub fn next(self: *SSTableIterator) !?ContextBlock {
         // Safety: Converting pointer to integer for corruption detection
-        assert_mod.assert_fmt(@intFromPtr(self.sstable) != 0, "Iterator sstable pointer corrupted", .{});
-        assert_mod.assert_index_valid(
-            self.current_index,
-            self.sstable.index.items.len + 1,
-            "Iterator index out of bounds: {} >= {}",
-            .{ self.current_index, self.sstable.index.items.len + 1 },
-        );
+        std.debug.assert(@intFromPtr(self.sstable) != 0);
+        std.debug.assert(self.current_index <= self.sstable.index.items.len);
 
         if (self.current_index >= self.sstable.index.items.len) {
             return null;
@@ -1033,7 +1019,7 @@ pub const Compactor = struct {
         input_paths: []const []const u8,
         output_path: []const u8,
     ) !void {
-        assert_mod.assert(input_paths.len > 1);
+        std.debug.assert(input_paths.len > 1);
 
         var input_tables = try self.backing_allocator.alloc(*SSTable, input_paths.len);
         var tables_initialized: usize = 0;
@@ -1140,12 +1126,7 @@ pub const Compactor = struct {
     /// Remove duplicate blocks, keeping the one with highest sequence
     fn dedup_blocks(self: *Compactor, blocks: []ContextBlock) ![]ContextBlock {
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(
-            @intFromPtr(blocks.ptr) != 0 or blocks.len == 0,
-            "Blocks array has null pointer with non-zero length",
-            .{},
-        );
-
+        std.debug.assert(@intFromPtr(blocks.ptr) != 0 or blocks.len == 0);
         if (blocks.len == 0) return try self.backing_allocator.alloc(ContextBlock, 0);
 
         const sorted = try self.backing_allocator.dupe(ContextBlock, blocks);

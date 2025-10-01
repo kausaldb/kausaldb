@@ -12,7 +12,6 @@ const std = @import("std");
 const testing = std.testing;
 const log = std.log.scoped(.harness);
 
-const assert_mod = @import("../core/assert.zig");
 const ownership = @import("../core/ownership.zig");
 const simulation_vfs = @import("../sim/simulation_vfs.zig");
 const storage_engine_mod = @import("../storage/engine.zig");
@@ -21,9 +20,6 @@ const vfs_mod = @import("../core/vfs.zig");
 const workload_mod = @import("workload.zig");
 const model_mod = @import("model.zig");
 const properties_mod = @import("properties.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
@@ -623,12 +619,12 @@ pub const SimulationRunner = struct {
 
             // Validate block structure
             if (block.block.content.len == 0) {
-                fatal_assert(false, "Block {} has empty content during full scan", .{block.block.id});
+                std.debug.panic("Block {} has empty content during full scan", .{block.block.id});
             }
 
             // Validate block ID is not zero
             if (block.block.id.eql(BlockId.zero())) {
-                fatal_assert(false, "Found zero block ID during full scan", .{});
+                std.debug.panic("Found zero block ID during full scan", .{});
             }
 
             // Test memory allocation patterns by accessing block data
@@ -640,7 +636,7 @@ pub const SimulationRunner = struct {
                 defer parsed.deinit();
                 // Successfully parsed JSON metadata
             } else |_| {
-                fatal_assert(false, "Block {} has invalid JSON metadata during scan", .{block.block.id});
+                std.debug.panic("Block {} has invalid JSON metadata during scan", .{block.block.id});
             }
 
             blocks_scanned += 1;
@@ -650,7 +646,7 @@ pub const SimulationRunner = struct {
         // Verify scan found reasonable number of blocks
         const model_count = try self.model.active_block_count();
         if (blocks_scanned < model_count) {
-            fatal_assert(false, "Full scan found {} blocks but model has {} active blocks", .{ blocks_scanned, model_count });
+            std.debug.panic("Full scan found {} blocks but model has {} active blocks", .{ blocks_scanned, model_count });
         }
     }
 
@@ -742,12 +738,12 @@ pub const SimulationRunner = struct {
         const test_id = BlockId.from_u64(99999);
         _ = self.storage_engine.find_block(test_id, .temporary) catch |err| switch (err) {
             error.BlockNotFound => {}, // Expected
-            else => fatal_assert(false, "System unstable after parse errors: {}", .{err}),
+            else => std.debug.panic("System unstable after parse errors: {}", .{err}),
         };
 
         // Verify that despite parse errors, we have some valid blocks
         if (self.operations_executed() > 100 and block_count == 0) {
-            fatal_assert(false, "Parse error injection prevented all valid blocks", .{});
+            std.debug.panic("Parse error injection prevented all valid blocks", .{});
         }
     }
 
@@ -814,7 +810,7 @@ pub const SimulationRunner = struct {
         // Verify memory usage is reasonable for bulk operations
         const max_memory_per_op = 10 * 1024; // 10KB per operation maximum
         if (total_ops > 0 and memory_usage.total_bytes / total_ops > max_memory_per_op) {
-            fatal_assert(false, "Bulk ingestion memory usage too high: {} bytes per operation", .{memory_usage.total_bytes / total_ops});
+            std.debug.panic("Bulk ingestion memory usage too high: {} bytes per operation", .{memory_usage.total_bytes / total_ops});
         }
 
         try self.verify_consistency();
@@ -890,7 +886,7 @@ pub const SimulationRunner = struct {
 
         // Verify we have some trait-impl relationships if configured
         if (trait_count > 0 and impl_count > 0 and trait_impl_edges == 0) {
-            fatal_assert(false, "Found traits and impls but no relationships", .{});
+            std.debug.panic("Found traits and impls but no relationships", .{});
         }
     }
 
@@ -911,7 +907,7 @@ pub const SimulationRunner = struct {
             if (edge.edge_type == .depends_on) {
                 // Verify both source and target blocks exist
                 if (!self.model.has_active_block(edge.source_id) or !self.model.has_active_block(edge.target_id)) {
-                    fatal_assert(false, "Inheritance edge references non-existent block", .{});
+                    std.debug.panic("Inheritance edge references non-existent block", .{});
                 }
             }
         }
@@ -975,7 +971,7 @@ pub const SimulationRunner = struct {
 
         const total_blocks = try self.model.active_block_count();
         if (total_blocks > 10 and blocks_with_metadata == 0) {
-            fatal_assert(false, "Metadata extraction enabled but no blocks have meaningful metadata", .{});
+            std.debug.panic("Metadata extraction enabled but no blocks have meaningful metadata", .{});
         }
     }
 
@@ -991,7 +987,7 @@ pub const SimulationRunner = struct {
 
                 // Verify import edge points to valid blocks
                 if (!self.model.has_active_block(edge.source_id) or !self.model.has_active_block(edge.target_id)) {
-                    fatal_assert(false, "Import edge references non-existent block", .{});
+                    std.debug.panic("Import edge references non-existent block", .{});
                 }
             }
         }
@@ -1012,14 +1008,14 @@ pub const SimulationRunner = struct {
 
                 // Verify both source and target exist
                 if (!self.model.has_active_block(edge.source_id) or !self.model.has_active_block(edge.target_id)) {
-                    fatal_assert(false, "Call edge references non-existent block", .{});
+                    std.debug.panic("Call edge references non-existent block", .{});
                 }
             }
         }
 
         // If tracking calls, we should have some call relationships
         if (try self.model.active_block_count() > 20 and call_edges == 0 and self.ingestion_config.generate_functions) {
-            fatal_assert(false, "Function call tracking enabled but no call edges found", .{});
+            std.debug.panic("Function call tracking enabled but no call edges found", .{});
         }
     }
 
@@ -1049,7 +1045,7 @@ pub const SimulationRunner = struct {
 
         // Verify metadata is being extracted
         if (try self.model.active_block_count() > 5 and rich_metadata_count == 0) {
-            fatal_assert(false, "Rich metadata extraction enabled but no rich metadata found", .{});
+            std.debug.panic("Rich metadata extraction enabled but no rich metadata found", .{});
         }
     }
 
@@ -1070,7 +1066,7 @@ pub const SimulationRunner = struct {
 
         // If we're tracking sequences, we should have some sequenced blocks
         if ((try self.model.active_block_count()) > 10 and sequence_tracked_count == 0) {
-            fatal_assert(false, "Sequence tracking enabled but no sequenced blocks found", .{});
+            std.debug.panic("Sequence tracking enabled but no sequenced blocks found", .{});
         }
     }
 
@@ -1195,14 +1191,14 @@ pub const TestAssertions = struct {
     /// Assert operation completes within time bound
     pub fn assert_operation_fast(duration_ns: u64, max_duration_ns: u64, operation_name: []const u8) void {
         if (duration_ns > max_duration_ns) {
-            fatal_assert(false, "{s} took {d}ns, expected <{d}ns", .{ operation_name, duration_ns, max_duration_ns });
+            std.debug.panic("{s} took {d}ns, expected <{d}ns", .{ operation_name, duration_ns, max_duration_ns });
         }
     }
 
     /// Assert memory usage is within bounds
     pub fn assert_memory_bounded(current_bytes: u64, max_bytes: u64, context: []const u8) void {
         if (current_bytes > max_bytes) {
-            fatal_assert(false, "{s} memory usage {d} bytes exceeds limit {d} bytes", .{ context, current_bytes, max_bytes });
+            std.debug.panic("{s} memory usage {d} bytes exceeds limit {d} bytes", .{ context, current_bytes, max_bytes });
         }
     }
 };

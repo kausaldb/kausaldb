@@ -15,9 +15,6 @@ const context_block = @import("../core/types.zig");
 const error_context = @import("../core/error_context.zig");
 const ownership = @import("../core/ownership.zig");
 const storage = @import("../storage/engine.zig");
-const assert_mod = @import("../core/assert.zig");
-
-const assert = assert_mod.assert;
 
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;

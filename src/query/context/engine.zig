@@ -14,7 +14,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const assert_mod = @import("../../core/assert.zig");
 const bounded_mod = @import("../../core/bounded.zig");
 const context_query_mod = @import("../context_query.zig");
 const error_context_mod = @import("../../core/error_context.zig");
@@ -24,9 +23,6 @@ const storage_mod = @import("../../storage/engine.zig");
 const types = @import("../../core/types.zig");
 const query_engine_mod = @import("../engine.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
-const comptime_assert = assert_mod.comptime_assert;
 const BoundedArrayType = bounded_mod.BoundedArrayType;
 const BoundedHashMapType = bounded_mod.BoundedHashMapType;
 const BoundedGraphBuilderType = bounded_mod.BoundedGraphBuilderType;
@@ -137,7 +133,7 @@ pub const ContextEngine = struct {
         storage_engine: *StorageEngine,
         query_engine: *QueryEngine,
     ) ContextEngine {
-        fatal_assert(storage_engine.state == .running, "Storage engine must be running", .{});
+        if (!(storage_engine.state == .running)) std.debug.panic("Storage engine must be running", .{});
 
         // Arena Coordinator Pattern: Allocate arena and coordinator on heap for stable pointers
         const query_arena = allocator.create(ArenaAllocator) catch @panic("Failed to allocate query arena");
@@ -175,7 +171,7 @@ pub const ContextEngine = struct {
     pub fn execute_context_query(self: *ContextEngine, query: ContextQuery) !ContextResult {
         // Pre-conditions and validation
         try query.validate();
-        fatal_assert(self.storage_engine.state == .running, "Storage must be running", .{});
+        if (!(self.storage_engine.state == .running)) std.debug.panic("Storage must be running", .{});
 
         // Context initialization prevents state leakage between queries
         var context = QueryExecutionContext.init(query);
@@ -238,7 +234,7 @@ pub const ContextEngine = struct {
                 },
                 .entity_name => |entity| {
                     // Entity name search within workspace
-                    fatal_assert(std.mem.eql(u8, entity.workspace, context.query.workspace), "Anchor workspace mismatch: {s} != {s}", .{ entity.workspace, context.query.workspace });
+                    if (!(std.mem.eql(u8, entity.workspace, context.query.workspace))) std.debug.panic("Anchor workspace mismatch: {s} != {s}", .{ entity.workspace, context.query.workspace });
 
                     const semantic_result = try self.query_engine.find_by_name(
                         entity.workspace,
@@ -254,7 +250,7 @@ pub const ContextEngine = struct {
                 },
                 .file_path => |file| {
                     // File path search within workspace
-                    fatal_assert(std.mem.eql(u8, file.workspace, context.query.workspace), "Anchor workspace mismatch: {s} != {s}", .{ file.workspace, context.query.workspace });
+                    if (!(std.mem.eql(u8, file.workspace, context.query.workspace))) std.debug.panic("Anchor workspace mismatch: {s} != {s}", .{ file.workspace, context.query.workspace });
 
                     const path_result = try self.query_engine.find_by_file_path(
                         file.workspace,
@@ -385,7 +381,7 @@ pub const ContextEngine = struct {
 
             if (try self.storage_engine.find_storage_block(block_id)) |block| {
                 // Final workspace check prevents cross-tenant data leakage in results
-                fatal_assert(try self.validate_workspace_membership(block.read(.storage_engine), context.query.workspace), "Block failed final workspace validation", .{});
+                if (!(try self.validate_workspace_membership(block.read(.storage_engine), context.query.workspace))) std.debug.panic("Block failed final workspace validation", .{});
 
                 try result.blocks.append(block.read(.storage_engine));
             }

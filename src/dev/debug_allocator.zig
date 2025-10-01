@@ -11,7 +11,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const stdx = @import("../core/stdx.zig");
 
 const math = std.math;

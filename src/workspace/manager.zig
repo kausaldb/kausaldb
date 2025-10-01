@@ -10,16 +10,12 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const context_block = @import("../core/types.zig");
 const error_context = @import("../core/error_context.zig");
 const ingest_directory = @import("../ingestion/ingest_directory.zig");
 const memory = @import("../core/memory.zig");
 const storage = @import("../storage/engine.zig");
 const vfs = @import("../core/vfs.zig");
-
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
 
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
@@ -90,7 +86,7 @@ pub const WorkspaceManager = struct {
     /// Phase 2 initialization: Load workspace metadata from storage.
     /// Must be called after StorageEngine startup.
     pub fn startup(self: *WorkspaceManager) !void {
-        assert(!self.initialized);
+        std.debug.assert(!self.initialized);
 
         try self.load_workspace_metadata();
         self.initialized = true;
@@ -116,8 +112,8 @@ pub const WorkspaceManager = struct {
     /// Path must be absolute and point to existing directory.
     /// Name defaults to directory basename if not provided.
     pub fn link_codebase(self: *WorkspaceManager, path: []const u8, name: ?[]const u8) !void {
-        assert(self.initialized);
-        fatal_assert(path.len > 0, "Codebase path cannot be empty", .{});
+        std.debug.assert(self.initialized);
+        if (!(path.len > 0)) std.debug.panic("Codebase path cannot be empty", .{});
 
         // Validate path exists and is accessible
         _ = self.storage_engine.vfs.stat(path) catch |err| switch (err) {
@@ -182,8 +178,8 @@ pub const WorkspaceManager = struct {
     /// This removes metadata but preserves stored blocks for now.
     /// Future versions may implement full cleanup.
     pub fn unlink_codebase(self: *WorkspaceManager, name: []const u8) !void {
-        assert(self.initialized);
-        fatal_assert(name.len > 0, "Codebase name cannot be empty", .{});
+        std.debug.assert(self.initialized);
+        if (!(name.len > 0)) std.debug.panic("Codebase name cannot be empty", .{});
 
         if (!self.linked_codebases.contains(name)) {
             return WorkspaceError.CodebaseNotFound;
@@ -191,7 +187,7 @@ pub const WorkspaceManager = struct {
 
         // Remove from memory and persist changes
         const removed = self.linked_codebases.remove(name);
-        assert(removed);
+        std.debug.assert(removed);
 
         try self.persist_workspace_metadata();
     }
@@ -199,7 +195,7 @@ pub const WorkspaceManager = struct {
     /// List all linked codebases with their information.
     /// Caller owns the returned slice and must free it.
     pub fn list_linked_codebases(self: *WorkspaceManager, allocator: std.mem.Allocator) ![]CodebaseInfo {
-        assert(self.initialized);
+        std.debug.assert(self.initialized);
 
         var result = try allocator.alloc(CodebaseInfo, self.linked_codebases.count());
         var iterator = self.linked_codebases.iterator();
@@ -215,14 +211,14 @@ pub const WorkspaceManager = struct {
 
     /// Check if a codebase is linked to the workspace.
     pub fn is_codebase_linked(self: *WorkspaceManager, name: []const u8) bool {
-        assert(self.initialized);
+        std.debug.assert(self.initialized);
         return self.linked_codebases.contains(name);
     }
 
     /// Clear all linked codebases from workspace (for testing).
     /// This removes all workspace state and persists the empty state.
     pub fn clear_all_linked_codebases(self: *WorkspaceManager) !void {
-        assert(self.initialized);
+        std.debug.assert(self.initialized);
 
         // Clear the HashMap - arena allocation means no individual frees needed
         self.linked_codebases.clearAndFree();
@@ -233,14 +229,14 @@ pub const WorkspaceManager = struct {
 
     /// Get information about a specific linked codebase.
     pub fn find_codebase_info(self: *WorkspaceManager, name: []const u8) ?CodebaseInfo {
-        assert(self.initialized);
+        std.debug.assert(self.initialized);
         return self.linked_codebases.get(name);
     }
 
     /// Sync a codebase with its source directory.
     /// Updates last_sync_timestamp and refreshes statistics.
     pub fn sync_codebase(self: *WorkspaceManager, name: []const u8) !void {
-        assert(self.initialized);
+        std.debug.assert(self.initialized);
 
         var codebase_entry = self.linked_codebases.getEntry(name) orelse {
             return WorkspaceError.CodebaseNotFound;
@@ -336,7 +332,7 @@ pub const WorkspaceManager = struct {
     /// Deserialize workspace configuration from JSON storage.
     fn deserialize_workspace_config(self: *WorkspaceManager, content: []const u8) !void {
         var parsed = std.json.parseFromSlice(std.json.Value, self.coordinator.allocator(), content, .{}) catch |err| {
-            fatal_assert(false, "Failed to parse workspace configuration JSON", .{});
+            if (!(false)) std.debug.panic("Failed to parse workspace configuration JSON", .{});
             return err;
         };
         defer parsed.deinit();
@@ -347,7 +343,7 @@ pub const WorkspaceManager = struct {
         // Safety: JSON parsing guarantees integer fits in u32 range for version field
         const version = @as(u32, @intCast(root.get("version").?.integer));
         if (version != WorkspaceConfig.WORKSPACE_CONFIG_VERSION) {
-            fatal_assert(false, "Unsupported workspace config version", .{});
+            if (!(false)) std.debug.panic("Unsupported workspace config version", .{});
         }
 
         const codebases_array = &root.get("codebases").?.array;

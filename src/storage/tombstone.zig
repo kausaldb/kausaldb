@@ -8,12 +8,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const assert_mod = @import("../core/assert.zig");
 const types = @import("../core/types.zig");
 const error_context = @import("../core/error_context.zig");
 
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
 const BlockId = types.BlockId;

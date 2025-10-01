@@ -7,13 +7,11 @@
 const std = @import("std");
 
 const context_block = @import("../../core/types.zig");
-const assert_mod = @import("../../core/assert.zig");
+
 const ownership = @import("../../core/ownership.zig");
 const stream = @import("stream.zig");
 const tombstone = @import("../tombstone.zig");
 const types = @import("types.zig");
-
-const assert = assert_mod.assert;
 
 const WALError = types.WALError;
 pub const WALEntryType = types.WALEntryType;
@@ -37,18 +35,18 @@ pub const WALEntry = struct {
 
     // Cross-platform binary compatibility requires fixed field sizes
     comptime {
-        assert(@sizeOf(u64) == 8);
-        assert(@sizeOf(u32) == 4);
-        assert(@sizeOf(WALEntryType) == 1);
+        std.debug.assert(@sizeOf(u64) == 8);
+        std.debug.assert(@sizeOf(u32) == 4);
+        std.debug.assert(@sizeOf(WALEntryType) == 1);
 
         const calculated_header_size = @sizeOf(u64) + @sizeOf(WALEntryType) + @sizeOf(u32);
-        assert(HEADER_SIZE == calculated_header_size);
-        assert(HEADER_SIZE == 13);
+        std.debug.assert(HEADER_SIZE == calculated_header_size);
+        std.debug.assert(HEADER_SIZE == 13);
 
         // Minimum size prevents degenerate entries that waste storage
-        assert(MAX_PAYLOAD_SIZE >= 1024);
-        assert(MAX_PAYLOAD_SIZE <= types.MAX_SEGMENT_SIZE);
-        assert(std.math.maxInt(u32) >= MAX_PAYLOAD_SIZE);
+        std.debug.assert(MAX_PAYLOAD_SIZE >= 1024);
+        std.debug.assert(MAX_PAYLOAD_SIZE <= types.MAX_SEGMENT_SIZE);
+        std.debug.assert(std.math.maxInt(u32) >= MAX_PAYLOAD_SIZE);
     }
 
     /// Calculate CRC-64 checksum of type and payload for corruption detection
@@ -165,7 +163,7 @@ pub const WALEntry = struct {
         const bytes_written = try context_block_data.serialize(payload);
 
         // Serialization size mismatch indicates internal logic error
-        assert(bytes_written == payload_size);
+        std.debug.assert(bytes_written == payload_size);
         if (bytes_written != payload_size) {
             return WALError.CorruptedEntry;
         }
@@ -187,8 +185,8 @@ pub const WALEntry = struct {
         std.mem.writeInt(u32, header_buffer[9..13], entry.payload_size, .little);
 
         // Invariant: payload size consistency prevents downstream corruption
-        assert(entry.payload_size == payload_size);
-        assert(entry.payload.len == payload_size);
+        std.debug.assert(entry.payload_size == payload_size);
+        std.debug.assert(entry.payload.len == payload_size);
 
         return entry;
     }
@@ -210,8 +208,8 @@ pub const WALEntry = struct {
             .payload = payload,
         };
 
-        assert(entry.payload.len == tombstone.TOMBSTONE_SIZE);
-        assert(entry.payload_size == tombstone.TOMBSTONE_SIZE);
+        std.debug.assert(entry.payload.len == tombstone.TOMBSTONE_SIZE);
+        std.debug.assert(entry.payload_size == tombstone.TOMBSTONE_SIZE);
 
         return entry;
     }
@@ -296,7 +294,7 @@ pub const WALEntry = struct {
     /// Must be called for all entries created via deserialize() or create_*() methods.
     pub fn deinit(self: WALEntry, allocator: std.mem.Allocator) void {
         // Size consistency prevents double-free and use-after-free bugs
-        assert(self.payload.len == self.payload_size);
+        std.debug.assert(self.payload.len == self.payload_size);
 
         if (self.payload.len > 0) {
             allocator.free(self.payload);

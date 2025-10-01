@@ -15,7 +15,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const block_index_mod = @import("block_index.zig");
 const concurrency = @import("../core/concurrency.zig");
 const config_mod = @import("config.zig");
@@ -36,8 +35,6 @@ const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
 const wal = @import("wal.zig");
 
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
 const log = std.log.scoped(.storage_engine);
 const testing = std.testing;
 
@@ -242,9 +239,9 @@ pub const StorageEngine = struct {
         data_dir: []const u8,
         storage_config: Config,
     ) !StorageEngine {
-        assert_mod.assert_not_empty(data_dir, "Storage data_dir cannot be empty", .{});
+        std.debug.assert(data_dir.len > 0);
         // Safety: Converting pointer to integer for null pointer validation
-        assert_mod.assert_fmt(@intFromPtr(data_dir.ptr) != 0, "Storage data_dir has null pointer", .{});
+        std.debug.assert(@intFromPtr(data_dir.ptr) != 0);
 
         storage_config.validate() catch |err| {
             error_context.log_storage_error(
@@ -351,8 +348,7 @@ pub const StorageEngine = struct {
             self.arena_coordinator.validate_coordinator();
 
             // Safety: Converting pointers to integers for arena reference validation
-            fatal_assert(
-                @intFromPtr(self.arena_coordinator.arena) == @intFromPtr(self.storage_arena),
+            if (!(@intFromPtr(self.arena_coordinator.arena) == @intFromPtr(self.storage_arena))) std.debug.panic(
                 "ArenaCoordinator does not reference StorageEngine arena - coordinator corruption",
                 .{},
             );
@@ -404,7 +400,7 @@ pub const StorageEngine = struct {
     pub fn deinit(self: *StorageEngine) void {
         concurrency.assert_main_thread();
         // Safety: Converting pointer to integer for memory corruption detection
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine self pointer is null - memory corruption detected", .{});
 
         // Prevent double-free by checking if data_dir is already freed
         if (self.data_dir.len == 0) {
@@ -455,7 +451,7 @@ pub const StorageEngine = struct {
     /// Pure delegation to subsystems for flush orchestration.
     fn coordinate_memtable_flush(self: *StorageEngine) !void {
         // Safety: Converting pointer to integer for subsystem corruption detection
-        assert_mod.assert_fmt(@intFromPtr(&self.sstable_manager) != 0, "SSTableManager corrupted before flush", .{});
+        std.debug.assert(@intFromPtr(&self.sstable_manager) != 0);
 
         const command = FlushMemtableCommand{ .storage_engine = self };
         command.execute() catch |err| {
@@ -506,29 +502,23 @@ pub const StorageEngine = struct {
         self.storage_metrics.total_write_time_ns.add(write_duration);
         self.storage_metrics.total_bytes_written.add(content_len);
 
-        assert_mod.assert_fmt(
-            self.storage_metrics.blocks_written.load() == blocks_before + 1,
-            "Blocks written counter update failed",
-            .{},
-        );
+        std.debug.assert(self.storage_metrics.blocks_written.load() == blocks_before + 1);
     }
 
     /// Create directory structure and discover existing data files.
     /// Called internally by startup() to prepare filesystem state.
     fn create_storage_directories(self: *StorageEngine) !void {
         concurrency.assert_main_thread();
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
-
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
         }
 
         if (self.state != .initialized) {
-            fatal_assert(false, "create_storage_directories called in invalid state: {}", .{self.state});
+            if (!(false)) std.debug.panic("create_storage_directories called in invalid state: {}", .{self.state});
         }
 
         if (!self.vfs.exists(self.data_dir)) {
@@ -666,7 +656,7 @@ pub const StorageEngine = struct {
     pub fn put_block_owned(self: *StorageEngine, owned_block: OwnedBlock) !void {
         concurrency.assert_main_thread();
 
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
+        if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine self pointer is null - memory corruption detected", .{});
 
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
@@ -686,37 +676,7 @@ pub const StorageEngine = struct {
             .content = block_data.content,
         };
 
-        assert_mod.assert_fmt(
-            block_data.content.len > 0,
-            "Block content cannot be empty",
-            .{},
-        );
-        assert_mod.assert_fmt(
-            block_data.source_uri.len > 0,
-            "Block source_uri cannot be empty",
-            .{},
-        );
-        assert_mod.assert_fmt(
-            block_data.content.len < 100 * 1024 * 1024,
-            "Block content too large: {} bytes",
-            .{block_data.content.len},
-        );
-        assert_mod.assert_fmt(
-            block_data.source_uri.len < 2048,
-            "Block source_uri too long: {} bytes",
-            .{block_data.source_uri.len},
-        );
-        assert_mod.assert_fmt(
-            block_data.metadata_json.len < 1024 * 1024,
-            "Block metadata_json too large: {} bytes",
-            .{block_data.metadata_json.len},
-        );
-        assert_mod.assert_fmt(
-            sequenced_block.sequence > 0,
-            "Block sequence must be positive: {}",
-            .{sequenced_block.sequence},
-        );
-
+        std.debug.assert(block_data.content.len > 0);
         if (!self.state.can_write()) {
             return if (self.state == .uninitialized or self.state == .initialized)
                 StorageError.NotInitialized
@@ -725,7 +685,7 @@ pub const StorageEngine = struct {
         }
 
         const start_time = std.time.nanoTimestamp();
-        assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
+        std.debug.assert(start_time > 0);
 
         (&sequenced_block).validate(self.backing_allocator) catch |err| {
             error_context.log_storage_error(
@@ -758,12 +718,10 @@ pub const StorageEngine = struct {
             return error.WriteStalled;
         }
 
-        fatal_assert(
-            @intFromPtr(&self.memtable_manager) != 0,
+        if (!(@intFromPtr(&self.memtable_manager) != 0)) std.debug.panic(
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-
         // Create new owned block with sequence number for storage
         const sequenced_owned_block = OwnedBlock.take_ownership(&sequenced_block, .storage_engine);
         var mutable_owned_block = sequenced_owned_block;
@@ -825,12 +783,10 @@ pub const StorageEngine = struct {
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
         concurrency.assert_main_thread();
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
-
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
         }
@@ -839,7 +795,7 @@ pub const StorageEngine = struct {
         for (block_id.bytes) |byte| {
             if (byte != 0) non_zero_bytes += 1;
         }
-        assert_mod.assert_fmt(non_zero_bytes > 0, "Block ID cannot be all zeros", .{});
+        std.debug.assert(non_zero_bytes > 0);
 
         if (!self.state.can_read()) {
             return if (self.state == .uninitialized or self.state == .initialized)
@@ -960,14 +916,9 @@ pub const StorageEngine = struct {
         concurrency.assert_main_thread();
         // Hot path optimizations: minimal validation, direct access
         if (comptime builtin.mode == .Debug) {
-            fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
-            assert_mod.assert_fmt(
-                !block_id.eql(BlockId.from_bytes([_]u8{0} ** 16)),
-                "Invalid block ID: cannot be all zeros",
-                .{},
-            );
+            if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine corrupted", .{});
+            std.debug.assert(!block_id.eql(BlockId.from_bytes([_]u8{0} ** 16)));
         }
-
         if (!self.state.can_read()) {
             return if (self.state == .uninitialized or self.state == .initialized)
                 StorageError.NotInitialized
@@ -994,7 +945,7 @@ pub const StorageEngine = struct {
         block_id: BlockId,
     ) !?OwnedBlock {
         if (comptime builtin.mode == .Debug) {
-            fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
+            if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine corrupted", .{});
         }
 
         // Use unified MVCC read to find highest sequence entry
@@ -1014,7 +965,7 @@ pub const StorageEngine = struct {
     /// Find a Context Block by ID with zero-cost ownership for query operations
     pub fn find_query_block(self: *StorageEngine, block_id: BlockId) !?OwnedBlock {
         if (comptime builtin.mode == .Debug) {
-            fatal_assert(@intFromPtr(self) != 0, "StorageEngine corrupted", .{});
+            if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine corrupted", .{});
         }
 
         // Use unified MVCC read to find highest sequence entry
@@ -1062,12 +1013,10 @@ pub const StorageEngine = struct {
     pub fn put_edge(self: *StorageEngine, edge: GraphEdge) !void {
         concurrency.assert_main_thread();
 
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
-
         if (self.data_dir.len == 0) {
             return error.StorageEngineDeinitialized;
         }
@@ -1080,14 +1029,9 @@ pub const StorageEngine = struct {
         for (edge.target_id.bytes) |byte| {
             if (byte != 0) target_non_zero += 1;
         }
-        assert_mod.assert_fmt(source_non_zero > 0, "Edge source_id cannot be all zeros", .{});
-        assert_mod.assert_fmt(target_non_zero > 0, "Edge target_id cannot be all zeros", .{});
-        assert_mod.assert_fmt(
-            !std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes),
-            "Edge cannot be self-referential",
-            .{},
-        );
-
+        std.debug.assert(source_non_zero > 0);
+        std.debug.assert(target_non_zero > 0);
+        std.debug.assert(!std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes));
         if (!self.state.can_write()) {
             return if (self.state == .uninitialized or self.state == .initialized)
                 StorageError.NotInitialized
@@ -1108,14 +1052,12 @@ pub const StorageEngine = struct {
         }
 
         const start_time = std.time.nanoTimestamp();
-        assert_mod.assert_fmt(start_time > 0, "Invalid timestamp: {}", .{start_time});
+        std.debug.assert(start_time > 0);
 
-        fatal_assert(
-            @intFromPtr(&self.memtable_manager) != 0,
+        if (!(@intFromPtr(&self.memtable_manager) != 0)) std.debug.panic(
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-
         // Write edge to WAL for durability (memtable_manager owns WAL)
         self.memtable_manager.put_edge_wal_only(edge) catch |err| {
             error_context.log_storage_error(
@@ -1137,8 +1079,7 @@ pub const StorageEngine = struct {
         const edges_before = self.storage_metrics.edges_added.load();
         self.storage_metrics.edges_added.incr();
 
-        fatal_assert(
-            self.storage_metrics.edges_added.load() == edges_before + 1,
+        if (!(self.storage_metrics.edges_added.load() == edges_before + 1)) std.debug.panic(
             "Edges added counter update failed - metrics corruption detected",
             .{},
         );
@@ -1192,12 +1133,10 @@ pub const StorageEngine = struct {
     /// Searches both memtable and SSTables following LSM-tree read path.
     /// Returns edges with memtable_manager ownership for consistency.
     pub fn find_outgoing_edges(self: *const StorageEngine, source_id: BlockId) []const OwnedGraphEdge {
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
-
         if (self.data_dir.len == 0) {
             return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
         }
@@ -1206,25 +1145,21 @@ pub const StorageEngine = struct {
         for (source_id.bytes) |byte| {
             if (byte != 0) non_zero_bytes += 1;
         }
-        assert_mod.assert_fmt(non_zero_bytes > 0, "Source block ID cannot be all zeros", .{});
+        std.debug.assert(non_zero_bytes > 0);
 
-        fatal_assert(
-            @intFromPtr(&self.memtable_manager) != 0,
+        if (!(@intFromPtr(&self.memtable_manager) != 0)) std.debug.panic(
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-
         // First check persistent graph index (in-memory edges)
         const in_memory_edges = self.graph_index.find_outgoing_edges_with_ownership(source_id, .storage_engine) orelse &[_]OwnedGraphEdge{};
 
         if (in_memory_edges.len > 0) {
-            fatal_assert(
-                @intFromPtr(in_memory_edges.ptr) != 0,
+            if (!(@intFromPtr(in_memory_edges.ptr) != 0)) std.debug.panic(
                 "Graph index returned null edges pointer with non-zero length - heap corruption detected",
                 .{},
             );
-            fatal_assert(
-                std.mem.eql(u8, &in_memory_edges[0].edge.source_id.bytes, &source_id.bytes),
+            if (!(std.mem.eql(u8, &in_memory_edges[0].edge.source_id.bytes, &source_id.bytes))) std.debug.panic(
                 "First edge has wrong source_id - index corruption detected",
                 .{},
             );
@@ -1261,12 +1196,10 @@ pub const StorageEngine = struct {
     /// Find all incoming edges to a target block.
     /// Delegates to memtable manager for reverse graph traversal operations.
     pub fn find_incoming_edges(self: *const StorageEngine, target_id: BlockId) []const OwnedGraphEdge {
-        fatal_assert(
-            @intFromPtr(self) != 0,
+        if (!(@intFromPtr(self) != 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
-
         if (self.data_dir.len == 0) {
             return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
         }
@@ -1275,24 +1208,20 @@ pub const StorageEngine = struct {
         for (target_id.bytes) |byte| {
             if (byte != 0) non_zero_bytes += 1;
         }
-        assert_mod.assert_fmt(non_zero_bytes > 0, "Target block ID cannot be all zeros", .{});
+        std.debug.assert(non_zero_bytes > 0);
 
-        fatal_assert(
-            @intFromPtr(&self.memtable_manager) != 0,
+        if (!(@intFromPtr(&self.memtable_manager) != 0)) std.debug.panic(
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-
         const edges = self.memtable_manager.find_incoming_edges(target_id);
 
         if (edges.len > 0) {
-            fatal_assert(
-                @intFromPtr(edges.ptr) != 0,
+            if (!(@intFromPtr(edges.ptr) != 0)) std.debug.panic(
                 "MemtableManager returned null edges pointer with non-zero length - heap corruption detected",
                 .{},
             );
-            fatal_assert(
-                std.mem.eql(u8, &edges[0].edge.target_id.bytes, &target_id.bytes),
+            if (!(std.mem.eql(u8, &edges[0].edge.target_id.bytes, &target_id.bytes))) std.debug.panic(
                 "First edge has wrong target_id - index corruption detected",
                 .{},
             );
@@ -1513,50 +1442,50 @@ pub const StorageEngine = struct {
 
     /// Validate StorageEngine state machine and critical pointers.
     fn validate_storage_state_invariants(self: *const StorageEngine) void {
-        assert_fmt(builtin.mode == .Debug, "Storage state validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
-        fatal_assert(@intFromPtr(self) != 0, "StorageEngine self pointer is null - memory corruption detected", .{});
-        fatal_assert(@intFromPtr(&self.memtable_manager) != 0, "MemtableManager pointer corruption in StorageEngine", .{});
-        fatal_assert(@intFromPtr(&self.sstable_manager) != 0, "SSTableManager pointer corruption in StorageEngine", .{});
+        if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine self pointer is null - memory corruption detected", .{});
+        if (!(@intFromPtr(&self.memtable_manager) != 0)) std.debug.panic("MemtableManager pointer corruption in StorageEngine", .{});
+        if (!(@intFromPtr(&self.sstable_manager) != 0)) std.debug.panic("SSTableManager pointer corruption in StorageEngine", .{});
 
-        assert_fmt(self.state != .uninitialized or self.data_dir.len == 0, "Uninitialized state but data_dir is set: '{s}'", .{self.data_dir});
-        assert_fmt(self.state == .uninitialized or self.data_dir.len > 0, "Initialized state but data_dir is empty", .{});
+        std.debug.assert(self.state != .uninitialized or self.data_dir.len == 0);
+        std.debug.assert(self.state == .uninitialized or self.data_dir.len > 0);
 
         if (self.data_dir.len > 0) {
-            assert_fmt(self.data_dir.len < 4096, "Data directory path too long: {} bytes", .{self.data_dir.len});
-            assert_fmt(@intFromPtr(self.data_dir.ptr) != 0, "Data directory pointer is null with length {}", .{self.data_dir.len});
+            std.debug.assert(self.data_dir.len < 4096);
+            std.debug.assert(@intFromPtr(self.data_dir.ptr) != 0);
         }
     }
 
     /// Validate coherence between StorageEngine subsystems.
     fn validate_subsystem_coherence(self: *const StorageEngine) void {
-        assert_fmt(builtin.mode == .Debug, "Subsystem coherence validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
         const memtable_memory = self.memtable_manager.block_index.memory_used;
         const memtable_block_count = @as(u32, @intCast(self.memtable_manager.block_index.blocks.count()));
 
         if (memtable_block_count > 0) {
             const avg_block_size = memtable_memory / memtable_block_count;
-            assert_fmt(avg_block_size > 0 and avg_block_size < 500 * 1024 * 1024, "Average block size {} indicates memory corruption", .{avg_block_size});
+            std.debug.assert(avg_block_size > 0 and avg_block_size < 500 * 1024 * 1024);
         }
 
         const memtable_blocks = memtable_block_count;
         const sstable_blocks = self.sstable_manager.total_block_count();
-        assert_fmt(memtable_blocks < 1000000 and sstable_blocks < 10000000, "Block counts indicate potential corruption: memtable={} sstable={}", .{ memtable_blocks, sstable_blocks });
+        std.debug.assert(memtable_blocks < 1000000 and sstable_blocks < 10000000);
     }
 
     /// P0.6 & P0.7: Validate arena coordinator stability and memory consistency.
     fn validate_arena_memory_consistency(self: *const StorageEngine) void {
-        assert_fmt(builtin.mode == .Debug, "Arena memory validation should only run in debug builds", .{});
+        std.debug.assert(builtin.mode == .Debug);
 
-        fatal_assert(@intFromPtr(&self.storage_arena) != 0, "Storage arena pointer corruption", .{});
+        if (!(@intFromPtr(&self.storage_arena) != 0)) std.debug.panic("Storage arena pointer corruption", .{});
 
         // Arena validation requires mutable access, but this method is const
         // Skip allocation test in const validation - arena corruption would be caught elsewhere
         // The pointer validation above is sufficient for detecting major corruption
 
         const test_backing_alloc = self.backing_allocator.alloc(u8, 1) catch {
-            fatal_assert(false, "StorageEngine backing allocator non-functional - corruption detected", .{});
+            if (!(false)) std.debug.panic("StorageEngine backing allocator non-functional - corruption detected", .{});
             return;
         };
         defer self.backing_allocator.free(test_backing_alloc);

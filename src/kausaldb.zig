@@ -52,7 +52,7 @@ pub const SimulationVFS = @import("sim/simulation_vfs.zig").SimulationVFS;
 pub const simulation = @import("sim/simulation.zig");
 
 pub const stdx = @import("core/stdx.zig");
-pub const assert = @import("core/assert.zig");
+
 pub const query_operations = @import("query/operations.zig");
 
 pub const version = .{

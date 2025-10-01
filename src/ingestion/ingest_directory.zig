@@ -1,12 +1,11 @@
 const std = @import("std");
-const assert_mod = @import("../core/assert.zig");
+
 const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const parse_file_to_blocks = @import("ingest_file.zig");
 const vfs = @import("../core/vfs.zig");
 const ownership = @import("../core/ownership.zig");
 
-const assert = assert_mod.assert;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const ContextBlock = context_block.ContextBlock;
 const IngestionBlock = ownership.ComptimeOwnedBlockType(.temporary);
@@ -38,7 +37,7 @@ pub fn ingest_directory_to_blocks(
     codebase_name: []const u8,
     config: IngestionConfig,
 ) !struct { blocks: []ContextBlock, stats: IngestionStats } {
-    assert(directory_path.len > 0);
+    std.debug.assert(directory_path.len > 0);
 
     if (!file_system.exists(directory_path)) {
         return error.DirectoryNotFound;

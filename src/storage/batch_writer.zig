@@ -15,7 +15,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const assert_mod = @import("../core/assert.zig");
 const bounded_mod = @import("../core/bounded.zig");
 const error_context_mod = @import("../core/error_context.zig");
 const memory_mod = @import("../core/memory.zig");
@@ -23,9 +22,6 @@ const ownership = @import("../core/ownership.zig");
 const storage_mod = @import("engine.zig");
 const types = @import("../core/types.zig");
 
-const assert = assert_mod.assert;
-const fatal_assert = assert_mod.fatal_assert;
-const comptime_assert = assert_mod.comptime_assert;
 const BoundedArrayType = bounded_mod.BoundedArrayType;
 const BoundedHashMapType = bounded_mod.BoundedHashMapType;
 
@@ -133,9 +129,9 @@ pub const BatchConfig = struct {
     /// Validate configuration parameters are within acceptable bounds.
     /// Ensures max_batch_size prevents memory exhaustion and timeout prevents hanging.
     pub fn validate(self: @This()) !void {
-        fatal_assert(self.max_batch_size > 0, "BatchConfig requires positive max_batch_size", .{});
-        fatal_assert(self.max_batch_size <= BATCH_CAPACITY, "BatchConfig max_batch_size exceeds BATCH_CAPACITY: {}", .{self.max_batch_size});
-        fatal_assert(self.timeout_us > 0, "BatchConfig requires positive timeout", .{});
+        if (!(self.max_batch_size > 0)) std.debug.panic("BatchConfig requires positive max_batch_size", .{});
+        if (!(self.max_batch_size <= BATCH_CAPACITY)) std.debug.panic("BatchConfig max_batch_size exceeds BATCH_CAPACITY: {}", .{self.max_batch_size});
+        if (!(self.timeout_us > 0)) std.debug.panic("BatchConfig requires positive timeout", .{});
     }
 };
 
@@ -197,7 +193,7 @@ pub const BatchWriter = struct {
         config: BatchConfig,
     ) !BatchWriter {
         try config.validate();
-        fatal_assert(storage_engine.state.can_write(), "Storage engine must be in writable state", .{});
+        if (!(storage_engine.state.can_write())) std.debug.panic("Storage engine must be in writable state", .{});
 
         return BatchWriter{
             .allocator = allocator,
@@ -222,9 +218,9 @@ pub const BatchWriter = struct {
         const start_time = std.time.nanoTimestamp();
 
         // Pre-conditions and validation
-        fatal_assert(blocks.len > 0, "BatchWriter requires non-empty blocks array", .{});
-        fatal_assert(workspace.len > 0, "BatchWriter requires workspace identifier", .{});
-        fatal_assert(blocks.len <= self.config.max_batch_size, "Batch size {} exceeds maximum {}", .{ blocks.len, self.config.max_batch_size });
+        if (!(blocks.len > 0)) std.debug.panic("BatchWriter requires non-empty blocks array", .{});
+        if (!(workspace.len > 0)) std.debug.panic("BatchWriter requires workspace identifier", .{});
+        if (!(blocks.len <= self.config.max_batch_size)) std.debug.panic("Batch size {} exceeds maximum {}", .{ blocks.len, self.config.max_batch_size });
 
         // Reset for new batch - O(1) cleanup from previous batch
         try self.reset_for_new_batch();
@@ -391,9 +387,9 @@ pub const BatchWriter = struct {
 
     /// Validate block has required structure and fields
     fn validate_block_structure(self: *BatchWriter, block: *const ContextBlock) !void {
-        fatal_assert(block.content.len > 0, "Block requires non-empty content", .{});
-        fatal_assert(block.metadata_json.len > 0, "Block requires metadata", .{});
-        fatal_assert(block.source_uri.len > 0, "Block requires source URI", .{});
+        if (!(block.content.len > 0)) std.debug.panic("Block requires non-empty content", .{});
+        if (!(block.metadata_json.len > 0)) std.debug.panic("Block requires metadata", .{});
+        if (!(block.source_uri.len > 0)) std.debug.panic("Block requires source URI", .{});
 
         // Validate metadata is parseable JSON
         var parsed = std.json.parseFromSlice(
@@ -482,8 +478,8 @@ pub const BatchWriter = struct {
 
 // Compile-time validation of structure sizes
 comptime {
-    comptime_assert(@sizeOf(BatchStatistics) <= 128, "BatchStatistics too large");
-    comptime_assert(@sizeOf(BatchConfig) <= 64, "BatchConfig too large");
+    if (!(@sizeOf(BatchStatistics) <= 128)) @compileError("BatchStatistics too large");
+    if (!(@sizeOf(BatchConfig) <= 64)) @compileError("BatchConfig too large");
 }
 
 //

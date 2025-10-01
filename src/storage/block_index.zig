@@ -10,12 +10,8 @@ const std = @import("std");
 const context_block = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const ownership = @import("../core/ownership.zig");
-const assert_mod = @import("../core/assert.zig");
-const tombstone = @import("tombstone.zig");
 
-const assert = assert_mod.assert;
-const assert_fmt = assert_mod.assert_fmt;
-const fatal_assert = assert_mod.fatal_assert;
+const tombstone = @import("tombstone.zig");
 
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
@@ -110,29 +106,29 @@ pub const BlockIndex = struct {
     /// Accepts ContextBlock and manages internal ownership tracking within the subsystem.
     pub fn put_block(self: *BlockIndex, block: ContextBlock) !void {
         // Safety: Converting pointer to integer for null pointer validation
-        assert_fmt(@intFromPtr(self) != 0, "BlockIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
 
         // Skip per-operation validation to prevent performance regression
         // Validation is expensive (iterator + memory calculation + allocator testing)
         // and should only run during specific tests, not benchmarks or normal operation
 
         // Validate string lengths to prevent allocation of corrupted sizes
-        assert_fmt(block.source_uri.len < 1024 * 1024, "source_uri too large: {} bytes", .{block.source_uri.len});
-        assert_fmt(block.metadata_json.len < 1024 * 1024, "metadata_json too large: {} bytes", .{block.metadata_json.len});
-        assert_fmt(block.content.len < 100 * 1024 * 1024, "content too large: {} bytes", .{block.content.len});
+        std.debug.assert(block.source_uri.len < 1024 * 1024);
+        std.debug.assert(block.metadata_json.len < 1024 * 1024);
+        std.debug.assert(block.content.len < 100 * 1024 * 1024);
 
         // Catch null pointers masquerading as slices
         if (block.source_uri.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.source_uri.ptr) != 0, "source_uri has null pointer", .{});
+            std.debug.assert(@intFromPtr(block.source_uri.ptr) != 0);
         }
         if (block.metadata_json.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.metadata_json.ptr) != 0, "metadata_json has null pointer", .{});
+            std.debug.assert(@intFromPtr(block.metadata_json.ptr) != 0);
         }
         if (block.content.len > 0) {
             // Safety: Converting pointer to integer for null pointer validation
-            assert_fmt(@intFromPtr(block.content.ptr) != 0, "content has null pointer", .{});
+            std.debug.assert(@intFromPtr(block.content.ptr) != 0);
         }
 
         // Clone all string content through arena coordinator for O(1) bulk deallocation
@@ -153,13 +149,13 @@ pub const BlockIndex = struct {
         // These checks ensure memory safety during development but compile to no-ops
         // in release builds for zero-overhead production performance.
         if (block.source_uri.len > 0) {
-            assert_fmt(@intFromPtr(cloned_block.source_uri.ptr) != @intFromPtr(block.source_uri.ptr), "ArenaCoordinator failed to clone source_uri - returned original pointer", .{});
+            std.debug.assert(@intFromPtr(cloned_block.source_uri.ptr) != @intFromPtr(block.source_uri.ptr));
         }
         if (block.metadata_json.len > 0) {
-            assert_fmt(@intFromPtr(cloned_block.metadata_json.ptr) != @intFromPtr(block.metadata_json.ptr), "ArenaCoordinator failed to clone metadata_json - returned original pointer", .{});
+            std.debug.assert(@intFromPtr(cloned_block.metadata_json.ptr) != @intFromPtr(block.metadata_json.ptr));
         }
         if (block.content.len > 0) {
-            assert_fmt(@intFromPtr(cloned_block.content.ptr) != @intFromPtr(block.content.ptr), "ArenaCoordinator failed to clone content - returned original pointer", .{});
+            std.debug.assert(@intFromPtr(cloned_block.content.ptr) != @intFromPtr(block.content.ptr));
         }
 
         // Adjust memory accounting for replacement case
@@ -168,7 +164,7 @@ pub const BlockIndex = struct {
         if (self.blocks.get(cloned_block.id)) |existing_block| {
             const existing_data = existing_block.read(.memtable_manager);
             old_memory = existing_data.source_uri.len + existing_data.metadata_json.len + existing_data.content.len;
-            fatal_assert(self.memory_used >= old_memory, "Memory accounting underflow: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
+            if (!(self.memory_used >= old_memory)) std.debug.panic("Memory accounting underflow: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
         }
 
         const new_memory = cloned_block.source_uri.len + cloned_block.metadata_json.len + cloned_block.content.len;
@@ -212,7 +208,7 @@ pub const BlockIndex = struct {
         if (self.blocks.get(block_id)) |existing_block| {
             const block_data = existing_block.read(.memtable_manager);
             const old_memory = block_data.source_uri.len + block_data.metadata_json.len + block_data.content.len;
-            fatal_assert(self.memory_used >= old_memory, "Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
+            if (!(self.memory_used >= old_memory)) std.debug.panic("Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
             self.memory_used -= old_memory;
         }
         _ = self.blocks.remove(block_id);
@@ -222,7 +218,7 @@ pub const BlockIndex = struct {
     /// Retains HashMap capacity for efficient reuse after StorageEngine resets arena.
     /// This is the key operation that enables O(1) bulk deallocation through StorageEngine.
     pub fn clear(self: *BlockIndex) void {
-        fatal_assert(@intFromPtr(self) != 0, "BlockIndex self pointer is null - memory corruption detected", .{});
+        if (!(@intFromPtr(self) != 0)) std.debug.panic("BlockIndex self pointer is null - memory corruption detected", .{});
 
         // Skip per-operation validation to prevent performance regression
         // Clear operation validation is expensive and should be selective
@@ -235,9 +231,9 @@ pub const BlockIndex = struct {
 
         // Validate cleared state in debug builds
         if (builtin.mode == .Debug) {
-            fatal_assert(self.blocks.count() == 0, "Clear operation failed - blocks still present", .{});
+            if (!(self.blocks.count() == 0)) std.debug.panic("Clear operation failed - blocks still present", .{});
             // Tombstones are intentionally preserved to prevent data resurrection from SSTables
-            fatal_assert(self.memory_used == 0, "Clear operation failed - memory not reset", .{});
+            if (!(self.memory_used == 0)) std.debug.panic("Clear operation failed - memory not reset", .{});
         }
     }
 
@@ -314,16 +310,16 @@ pub const BlockIndex = struct {
                 block_data.metadata_json.len +
                 block_data.content.len;
         }
-        fatal_assert(self.memory_used == calculated_memory, "Memory accounting mismatch: tracked={} actual={}", .{ self.memory_used, calculated_memory });
+        if (!(self.memory_used == calculated_memory)) std.debug.panic("Memory accounting mismatch: tracked={} actual={}", .{ self.memory_used, calculated_memory });
     }
 
     /// Validate arena coordinator pointer stability.
     fn validate_coordinator_stability(self: *const BlockIndex) void {
-        fatal_assert(@intFromPtr(self.arena_coordinator) != 0, "Arena coordinator pointer is null - struct copying corruption", .{});
+        if (!(@intFromPtr(self.arena_coordinator) != 0)) std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
 
         // Verify coordinator is still functional
         const test_alloc = self.arena_coordinator.alloc(u8, 1) catch {
-            fatal_assert(false, "Arena coordinator non-functional - corruption detected", .{});
+            if (!(false)) std.debug.panic("Arena coordinator non-functional - corruption detected", .{});
             return;
         };
 
@@ -342,12 +338,12 @@ pub const BlockIndex = struct {
 
             // Verify each block can be found by its ID
             const found = self.blocks.get(entry.key_ptr.*);
-            fatal_assert(found != null, "Block ID corruption: stored block not findable by key", .{});
+            if (!(found != null)) std.debug.panic("Block ID corruption: stored block not findable by key", .{});
             const found_block_data = found.?.read(.memtable_manager);
-            fatal_assert(found_block_data.id.eql(entry.key_ptr.*), "Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found_block_data.id });
+            if (!(found_block_data.id.eql(entry.key_ptr.*))) std.debug.panic("Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found_block_data.id });
         }
 
-        fatal_assert(actual_count == expected_count, "HashMap count corruption: expected={} actual={}", .{ expected_count, actual_count });
+        if (!(actual_count == expected_count)) std.debug.panic("HashMap count corruption: expected={} actual={}", .{ expected_count, actual_count });
     }
 
     /// Validate content pointer integrity and detect memory corruption.
@@ -358,19 +354,19 @@ pub const BlockIndex = struct {
 
             // Validate content pointers are not null for non-empty strings
             if (block_data.source_uri.len > 0) {
-                fatal_assert(@intFromPtr(block_data.source_uri.ptr) != 0, "source_uri pointer corruption: null with length {}", .{block_data.source_uri.len});
+                if (!(@intFromPtr(block_data.source_uri.ptr) != 0)) std.debug.panic("source_uri pointer corruption: null with length {}", .{block_data.source_uri.len});
             }
             if (block_data.metadata_json.len > 0) {
-                fatal_assert(@intFromPtr(block_data.metadata_json.ptr) != 0, "metadata_json pointer corruption: null with length {}", .{block_data.metadata_json.len});
+                if (!(@intFromPtr(block_data.metadata_json.ptr) != 0)) std.debug.panic("metadata_json pointer corruption: null with length {}", .{block_data.metadata_json.len});
             }
             if (block_data.content.len > 0) {
-                fatal_assert(@intFromPtr(block_data.content.ptr) != 0, "content pointer corruption: null with length {}", .{block_data.content.len});
+                if (!(@intFromPtr(block_data.content.ptr) != 0)) std.debug.panic("content pointer corruption: null with length {}", .{block_data.content.len});
             }
 
             // Validate string lengths are reasonable (detect corruption)
-            fatal_assert(block_data.source_uri.len < 10 * 1024 * 1024, "source_uri length corruption: {} bytes too large", .{block_data.source_uri.len});
-            fatal_assert(block_data.metadata_json.len < 10 * 1024 * 1024, "metadata_json length corruption: {} bytes too large", .{block_data.metadata_json.len});
-            fatal_assert(block_data.content.len < 1024 * 1024 * 1024, "content length corruption: {} bytes too large", .{block_data.content.len});
+            if (!(block_data.source_uri.len < 10 * 1024 * 1024)) std.debug.panic("source_uri length corruption: {} bytes too large", .{block_data.source_uri.len});
+            if (!(block_data.metadata_json.len < 10 * 1024 * 1024)) std.debug.panic("metadata_json length corruption: {} bytes too large", .{block_data.metadata_json.len});
+            if (!(block_data.content.len < 1024 * 1024 * 1024)) std.debug.panic("content length corruption: {} bytes too large", .{block_data.content.len});
         }
     }
 };

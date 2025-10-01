@@ -5,11 +5,9 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const protocol = @import("protocol.zig");
 const types = @import("../core/types.zig");
 
-const fatal_assert = assert_mod.fatal_assert;
 const testing = std.testing;
 
 const BlockId = types.BlockId;
@@ -158,23 +156,18 @@ pub const Client = struct {
     fn validate_status_response(status: *const protocol.StatusResponse) void {
         const workspaces = status.workspaces_slice();
 
-        fatal_assert(
-            workspaces.len <= protocol.MAX_WORKSPACES_PER_STATUS,
+        if (!(workspaces.len <= protocol.MAX_WORKSPACES_PER_STATUS)) std.debug.panic(
             "Client: Invalid workspace count: {}",
             .{workspaces.len},
         );
-
         for (workspaces, 0..) |*workspace, i| {
             const sync_status_raw = @intFromEnum(workspace.sync_status);
-            fatal_assert(
-                sync_status_raw <= 3,
+            if (!(sync_status_raw <= 3)) std.debug.panic(
                 "Client: Corrupted sync_status in workspace {}: {}",
                 .{ i, sync_status_raw },
             );
-
             const name = workspace.name_text();
-            fatal_assert(
-                name.len > 0,
+            if (!(name.len > 0)) std.debug.panic(
                 "Client: Empty workspace name at index {}",
                 .{i},
             );
@@ -185,21 +178,16 @@ pub const Client = struct {
     fn validate_find_response(response: *const protocol.FindResponse) void {
         const blocks = response.blocks_slice();
 
-        fatal_assert(
-            blocks.len <= protocol.MAX_BLOCKS_PER_RESPONSE,
+        if (!(blocks.len <= protocol.MAX_BLOCKS_PER_RESPONSE)) std.debug.panic(
             "Client: Invalid block count: {}",
             .{blocks.len},
         );
-
         for (blocks, 0..) |*block, i| {
-            fatal_assert(
-                block.uri_len <= 256,
+            if (!(block.uri_len <= 256)) std.debug.panic(
                 "Client: Corrupted uri_len in block {}: {}",
                 .{ i, block.uri_len },
             );
-
-            fatal_assert(
-                block.content_preview_len <= 256,
+            if (!(block.content_preview_len <= 256)) std.debug.panic(
                 "Client: Corrupted content_preview_len in block {}: {}",
                 .{ i, block.content_preview_len },
             );

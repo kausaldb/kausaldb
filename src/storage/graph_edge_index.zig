@@ -8,7 +8,6 @@
 
 const std = @import("std");
 
-const assert_mod = @import("../core/assert.zig");
 const context_block = @import("../core/types.zig");
 const ownership = @import("../core/ownership.zig");
 
@@ -30,7 +29,7 @@ pub const OwnedGraphEdge = struct {
 
     pub fn read(self: *const OwnedGraphEdge, accessor: BlockOwnership) *const GraphEdge {
         if (accessor != self.ownership and accessor != .temporary) {
-            assert_mod.fatal_assert(false, "Edge access violation: {s} cannot read {s}-owned edge", .{ accessor.name(), self.ownership.name() });
+            if (!(false)) std.debug.panic("Edge access violation: {s} cannot read {s}-owned edge", .{ accessor.name(), self.ownership.name() });
         }
         return &self.edge;
     }
@@ -111,7 +110,7 @@ pub const GraphEdgeIndex = struct {
     /// Updates both outgoing and incoming edge collections for efficient traversal.
     /// Uses arena allocation for O(1) bulk cleanup during index reset operations.
     pub fn put_edge(self: *GraphEdgeIndex, edge: GraphEdge) !void {
-        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
         // Hierarchical model: Arena validation handled at coordinator level
 
         var source_non_zero: u32 = 0;
@@ -122,9 +121,9 @@ pub const GraphEdgeIndex = struct {
         for (edge.target_id.bytes) |byte| {
             if (byte != 0) target_non_zero += 1;
         }
-        assert_mod.assert_fmt(source_non_zero > 0, "Edge source_id cannot be all zeros", .{});
-        assert_mod.assert_fmt(target_non_zero > 0, "Edge target_id cannot be all zeros", .{});
-        assert_mod.assert_fmt(!std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes), "Edge cannot be self-referential", .{});
+        std.debug.assert(source_non_zero > 0);
+        std.debug.assert(target_non_zero > 0);
+        std.debug.assert(!std.mem.eql(u8, &edge.source_id.bytes, &edge.target_id.bytes));
 
         const owned_edge = OwnedGraphEdge.init(edge, .storage_engine);
 
@@ -134,7 +133,7 @@ pub const GraphEdgeIndex = struct {
         }
         const outgoing_before = outgoing_result.value_ptr.items.len;
         try outgoing_result.value_ptr.append(owned_edge);
-        assert_mod.assert_fmt(outgoing_result.value_ptr.items.len == outgoing_before + 1, "Outgoing edge append failed", .{});
+        std.debug.assert(outgoing_result.value_ptr.items.len == outgoing_before + 1);
 
         var incoming_result = try self.incoming_edges.getOrPut(edge.target_id);
         if (!incoming_result.found_existing) {
@@ -142,7 +141,7 @@ pub const GraphEdgeIndex = struct {
         }
         const incoming_before = incoming_result.value_ptr.items.len;
         try incoming_result.value_ptr.append(owned_edge);
-        assert_mod.assert_fmt(incoming_result.value_ptr.items.len == incoming_before + 1, "Incoming edge append failed", .{});
+        std.debug.assert(incoming_result.value_ptr.items.len == incoming_before + 1);
     }
 
     /// Find all outgoing edges from a source block with ownership validation.
@@ -153,16 +152,16 @@ pub const GraphEdgeIndex = struct {
         source_id: BlockId,
         accessor: BlockOwnership,
     ) ?[]const OwnedGraphEdge {
-        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
 
         var non_zero_bytes: u32 = 0;
         for (source_id.bytes) |byte| {
             if (byte != 0) non_zero_bytes += 1;
         }
-        assert_mod.assert_fmt(non_zero_bytes > 0, "Source block ID cannot be all zeros", .{});
+        std.debug.assert(non_zero_bytes > 0);
 
         if (self.outgoing_edges.getPtr(source_id)) |owned_edge_list| {
-            assert_mod.assert_fmt(@intFromPtr(owned_edge_list.items.ptr) != 0 or owned_edge_list.items.len == 0, "Edge list has null pointer with non-zero length", .{});
+            std.debug.assert(@intFromPtr(owned_edge_list.items.ptr) != 0 or owned_edge_list.items.len == 0);
 
             const owned_edges = owned_edge_list.items;
             if (owned_edges.len == 0) return null;
@@ -182,16 +181,16 @@ pub const GraphEdgeIndex = struct {
         target_id: BlockId,
         accessor: BlockOwnership,
     ) ?[]const OwnedGraphEdge {
-        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
 
         var non_zero_bytes: u32 = 0;
         for (target_id.bytes) |byte| {
             if (byte != 0) non_zero_bytes += 1;
         }
-        assert_mod.assert_fmt(non_zero_bytes > 0, "Target block ID cannot be all zeros", .{});
+        std.debug.assert(non_zero_bytes > 0);
 
         if (self.incoming_edges.getPtr(target_id)) |owned_edge_list| {
-            assert_mod.assert_fmt(@intFromPtr(owned_edge_list.items.ptr) != 0 or owned_edge_list.items.len == 0, "Edge list has null pointer with non-zero length", .{});
+            std.debug.assert(@intFromPtr(owned_edge_list.items.ptr) != 0 or owned_edge_list.items.len == 0);
 
             const owned_edges = owned_edge_list.items;
             if (owned_edges.len == 0) return null;
@@ -302,7 +301,7 @@ pub const GraphEdgeIndex = struct {
     /// Counts outgoing edges only to avoid double-counting since each edge
     /// appears in both outgoing and incoming indexes.
     pub fn edge_count(self: *const GraphEdgeIndex) u32 {
-        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
 
         var total: u32 = 0;
         var iterator = self.outgoing_edges.iterator();
@@ -310,7 +309,7 @@ pub const GraphEdgeIndex = struct {
             // Use the same logic as collect_edges() to ensure consistency
             if (entry.value_ptr.items.len > 0) {
                 const count = @as(u32, @intCast(entry.value_ptr.items.len));
-                assert_mod.assert_fmt(count < 1000000, "Suspicious edge count for single block: {}", .{count});
+                std.debug.assert(count < 1000000);
                 total += count;
             }
         }
@@ -342,7 +341,7 @@ pub const GraphEdgeIndex = struct {
     /// Returns array of all edges that must be freed by caller.
     /// Used during memtable flush to extract edges before clearing.
     pub fn collect_edges(self: *const GraphEdgeIndex, allocator: std.mem.Allocator) ![]const GraphEdge {
-        assert_mod.assert_fmt(@intFromPtr(self) != 0, "GraphEdgeIndex self pointer cannot be null", .{});
+        std.debug.assert(@intFromPtr(self) != 0);
 
         // Use direct iteration instead of edge_count() to avoid any counting bugs
         var edges = std.array_list.Managed(GraphEdge).init(allocator);
