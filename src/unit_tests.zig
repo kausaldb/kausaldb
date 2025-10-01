@@ -34,8 +34,9 @@ comptime {
     _ = @import("cli/protocol.zig");
     _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/tidy.zig");
+    _ = @import("ingestion/ingest_file.zig");
     _ = @import("ingestion/ingest_directory.zig");
-    _ = @import("ingestion/zig/parser.zig");
+    _ = @import("ingestion/parsers/zig_parser.zig");
     _ = @import("kausaldb.zig");
     _ = @import("query/cache.zig");
     _ = @import("query/context_query.zig");

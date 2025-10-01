@@ -76,9 +76,7 @@ pub const ingestion = struct {
     pub const ingest_directory = @import("ingestion/ingest_directory.zig");
     pub const ingest_file = @import("ingestion/ingest_file.zig");
     pub const pipeline_types = @import("ingestion/pipeline_types.zig");
-    pub const zig = struct {
-        pub const parser = @import("ingestion/zig/parser.zig");
-    };
+    pub const zig_parser = @import("ingestion/parsers/zig_parser.zig");
 };
 
 // Standard library conveniences

@@ -152,15 +152,22 @@ pub const WorkspaceManager = struct {
         try self.persist_workspace_metadata();
 
         // Trigger initial ingestion of the linked codebase and update statistics
-        const ingestion_stats = self.ingest_codebase(codebase_info.name, codebase_info.path) catch |err| {
-            // Log the error but don't fail the link operation
-            // The user can manually sync later if needed
-            error_context.log_ingestion_error(err, error_context.IngestionContext{
-                .operation = "initial_ingestion",
-                .repository_path = codebase_info.path,
-                .content_type = "codebase",
-            });
-            return; // Exit early if ingestion fails
+        const ingestion_stats = blk: {
+            break :blk self.ingest_codebase(codebase_info.name, codebase_info.path) catch |err| {
+                const ctx = error_context.IngestionContext{
+                    .operation = "initial_ingestion",
+                    .repository_path = codebase_info.path,
+                    .file_path = null,
+                    .content_type = "codebase",
+                };
+                error_context.log_ingestion_error(err, ctx);
+
+                break :blk IngestionStats{
+                    .files_processed = 0,
+                    .blocks_generated = 0,
+                    .errors_encountered = 1,
+                };
+            };
         };
 
         // Update block count with actual statistics from ingestion
@@ -172,6 +179,16 @@ pub const WorkspaceManager = struct {
 
         // Persist updated statistics to ensure they survive restarts
         try self.persist_workspace_metadata();
+
+        // Inform user about ingestion status
+        if (ingestion_stats.errors_encountered > 0) {
+            const total_files = ingestion_stats.files_processed + ingestion_stats.errors_encountered;
+            log.warn("Codebase linked with errors: {}/{} files failed to parse", .{
+                ingestion_stats.errors_encountered,
+                total_files,
+            });
+            log.info("Run 'kausal sync --name {s}' to retry ingestion", .{codebase_info.name});
+        }
     }
 
     /// Remove a codebase from the workspace.

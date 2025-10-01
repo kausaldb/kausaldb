@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const context_block = @import("../core/types.zig");
+const error_context = @import("../core/error_context.zig");
 const memory = @import("../core/memory.zig");
 const parse_file_to_blocks = @import("ingest_file.zig");
 const vfs = @import("../core/vfs.zig");
@@ -12,12 +13,16 @@ const IngestionBlock = ownership.ComptimeOwnedBlockType(.temporary);
 const FileContent = parse_file_to_blocks.FileContent;
 const VFS = vfs.VFS;
 
+const log = std.log.scoped(.ingest_directory);
+
+/// Statistics from directory ingestion operation.
 pub const IngestionStats = struct {
     files_processed: usize,
     blocks_generated: usize,
     errors_encountered: usize,
 };
 
+/// Configuration for directory ingestion behavior.
 pub const IngestionConfig = struct {
     include_patterns: [][]const u8,
     exclude_patterns: [][]const u8,
@@ -66,24 +71,43 @@ pub fn ingest_directory_to_blocks(
     for (file_paths.items) |file_path| {
         stats.files_processed += 1;
 
-        const stat = file_system.stat(file_path) catch {
+        const stat = file_system.stat(file_path) catch |err| {
+            const ctx = error_context.file_context("stat_file", file_path);
+            error_context.log_storage_error(err, ctx);
             stats.errors_encountered += 1;
             continue;
         };
 
         if (stat.size > config.max_file_size) {
+            const ctx = error_context.file_size_context(
+                "check_file_size",
+                file_path,
+                stat.size,
+                config.max_file_size,
+            );
+            error_context.log_ingestion_error(error.FileTooLarge, ctx);
             stats.errors_encountered += 1;
             continue;
         }
 
-        const file_content = file_system.read_file_alloc(
-            coordinator.allocator(),
+        // Read file into temporary buffer using backing allocator
+        const temp_content = file_system.read_file_alloc(
+            backing,
             file_path,
             stat.size,
-        ) catch {
+        ) catch |err| {
+            const ctx = error_context.file_context("read_file", file_path);
+            error_context.log_storage_error(err, ctx);
             stats.errors_encountered += 1;
             continue;
         };
+        defer backing.free(temp_content);
+
+        // CRITICAL: Create a SINGLE null-terminated copy in the coordinator's arena.
+        // This buffer is guaranteed to live for the entire directory ingestion, enabling
+        // a zero-copy optimization in the downstream parser. All `ParsedUnit.content`
+        // and `ContextBlock.content` slices will point safely into this stable buffer.
+        const file_content = try coordinator.allocator().dupeZ(u8, temp_content);
 
         const relative_path = if (std.mem.startsWith(u8, file_path, directory_path)) blk: {
             const relative = file_path[directory_path.len..];
@@ -111,12 +135,24 @@ pub fn ingest_directory_to_blocks(
             };
 
             // Get context blocks and convert to owned ingestion blocks
-            const file_blocks = try parse_file_to_blocks.parse_file_to_blocks(
+            const file_blocks = parse_file_to_blocks.parse_file_to_blocks(
                 coordinator.allocator(),
                 file_content_struct,
                 codebase_name,
                 parse_config,
-            );
+            ) catch |err| {
+                // Log detailed parsing failure with file context
+                const ctx = error_context.parsing_context(
+                    "parse_zig_file",
+                    relative_path,
+                    "text/zig",
+                    null,
+                    "file_parsing",
+                );
+                error_context.log_ingestion_error(err, ctx);
+                stats.errors_encountered += 1;
+                continue;
+            };
 
             // Convert each ContextBlock to IngestionBlock for ownership tracking
             for (file_blocks) |block| {
@@ -127,19 +163,51 @@ pub fn ingest_directory_to_blocks(
         }
     }
 
-    // Convert to []ContextBlock at API boundary
     const owned_blocks = try all_blocks.toOwnedSlice(coordinator.allocator());
     var blocks = try coordinator.allocator().alloc(ContextBlock, owned_blocks.len);
     for (owned_blocks, 0..) |owned, i| {
         blocks[i] = owned.block;
     }
+
     return .{
         .blocks = blocks,
         .stats = stats,
     };
 }
 
-/// Collect files tracked by git, matching include/exclude patterns.
+fn should_include_file(
+    filename: []const u8,
+    include_patterns: [][]const u8,
+    exclude_patterns: [][]const u8,
+) bool {
+    for (exclude_patterns) |pattern| {
+        if (std.mem.indexOf(u8, filename, pattern) != null) return false;
+    }
+
+    if (include_patterns.len == 0) {
+        return std.mem.endsWith(u8, filename, ".zig") or
+            std.mem.endsWith(u8, filename, ".c") or
+            std.mem.endsWith(u8, filename, ".cpp") or
+            std.mem.endsWith(u8, filename, ".h") or
+            std.mem.endsWith(u8, filename, ".hpp") or
+            std.mem.endsWith(u8, filename, ".rs") or
+            std.mem.endsWith(u8, filename, ".go") or
+            std.mem.endsWith(u8, filename, ".py") or
+            std.mem.endsWith(u8, filename, ".js") or
+            std.mem.endsWith(u8, filename, ".ts");
+    }
+
+    for (include_patterns) |pattern| {
+        if (std.mem.indexOf(u8, filename, pattern) != null) return true;
+        if (std.mem.startsWith(u8, pattern, "**/*")) {
+            const extension = pattern[4..];
+            if (std.mem.endsWith(u8, filename, extension)) return true;
+        }
+    }
+
+    return false;
+}
+
 fn collect_git_tracked_files(
     allocator: std.mem.Allocator,
     file_system: *VFS,
@@ -152,7 +220,7 @@ fn collect_git_tracked_files(
         .allocator = allocator,
         .argv = &[_][]const u8{ "git", "ls-files" },
         .cwd = directory_path,
-        .max_output_bytes = 1024 * 1024, // 1MB max
+        .max_output_bytes = 1024 * 1024,
     }) catch |err| switch (err) {
         error.FileNotFound => return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths),
         else => return err,
@@ -168,7 +236,6 @@ fn collect_git_tracked_files(
     }
 
     var git_files_found = false;
-
     var lines = std.mem.splitScalar(u8, git_result.stdout, '\n');
     while (lines.next()) |line| {
         const trimmed_line = std.mem.trim(u8, line, " \t\r\n");
@@ -176,35 +243,12 @@ fn collect_git_tracked_files(
 
         git_files_found = true;
 
-        var matches_include = include_patterns.len == 0;
-        for (include_patterns) |pattern| {
-            if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
-                matches_include = true;
-                break;
-            } else if (std.mem.startsWith(u8, pattern, "**/*")) {
-                const extension = pattern[4..];
-                if (std.mem.endsWith(u8, trimmed_line, extension)) {
-                    matches_include = true;
-                    break;
-                }
-            }
-        }
-
-        var matches_exclude = false;
-        for (exclude_patterns) |pattern| {
-            if (std.mem.indexOf(u8, trimmed_line, pattern) != null) {
-                matches_exclude = true;
-                break;
-            }
-        }
-
-        if (matches_include and !matches_exclude) {
+        if (should_include_file(trimmed_line, include_patterns, exclude_patterns)) {
             const absolute_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, trimmed_line });
             try out_paths.append(allocator, absolute_path);
         }
     }
 
-    // If Git found no files, fall back to filesystem traversal
     if (!git_files_found) {
         return collect_filesystem_files(allocator, file_system, directory_path, include_patterns, exclude_patterns, out_paths);
     }
@@ -224,52 +268,9 @@ fn collect_filesystem_files(
     while (iterator.next()) |entry| {
         if (entry.kind != .file) continue;
 
-        const file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, entry.name });
-        defer allocator.free(file_path);
-
-        const should_include = blk: {
-            if (include_patterns.len == 0) {
-                break :blk std.mem.endsWith(u8, entry.name, ".zig") or
-                    std.mem.endsWith(u8, entry.name, ".c") or
-                    std.mem.endsWith(u8, entry.name, ".cpp") or
-                    std.mem.endsWith(u8, entry.name, ".h") or
-                    std.mem.endsWith(u8, entry.name, ".hpp") or
-                    std.mem.endsWith(u8, entry.name, ".rs") or
-                    std.mem.endsWith(u8, entry.name, ".go") or
-                    std.mem.endsWith(u8, entry.name, ".py") or
-                    std.mem.endsWith(u8, entry.name, ".js") or
-                    std.mem.endsWith(u8, entry.name, ".ts");
-            }
-
-            for (include_patterns) |pattern| {
-                if (std.mem.indexOf(u8, entry.name, pattern) != null) {
-                    break :blk true;
-                } else if (std.mem.startsWith(u8, pattern, "**/*")) {
-                    const extension = pattern[4..];
-                    if (std.mem.endsWith(u8, entry.name, extension)) {
-                        break :blk true;
-                    }
-                }
-            }
-            break :blk false;
-        };
-
-        if (!should_include) continue;
-
-        const should_exclude = blk: {
-            for (exclude_patterns) |pattern| {
-                if (std.mem.indexOf(u8, entry.name, pattern) != null) {
-                    break :blk true;
-                }
-            }
-            break :blk false;
-        };
-
-        if (should_exclude) continue;
-
-        const absolute_path = try allocator.dupe(u8, file_path);
-        try out_paths.append(allocator, absolute_path);
+        if (should_include_file(entry.name, include_patterns, exclude_patterns)) {
+            const file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, entry.name });
+            try out_paths.append(allocator, file_path);
+        }
     }
 }
-
-// Additional helpers (collect_git_ls_files, collect_matching_files, etc.) would also avoid ContextBlock internally.

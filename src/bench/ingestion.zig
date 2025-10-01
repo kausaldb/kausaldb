@@ -7,6 +7,8 @@ const internal = @import("internal");
 
 const harness = @import("harness.zig");
 
+const zig_parser = internal.ingestion.zig_parser;
+
 const BenchmarkHarness = harness.BenchmarkHarness;
 const Timer = std.time.Timer;
 
@@ -181,35 +183,16 @@ fn bench_incremental_ingestion(bench_harness: *BenchmarkHarness, storage: *inter
 
 /// Parse Zig source code
 fn perform_zig_parse(source: []const u8, allocator: std.mem.Allocator) !void {
-    const config = internal.ingestion.zig.parser.ZigParserConfig{};
-    var parser = internal.ingestion.zig.parser.ZigParser.init(allocator, config);
-    defer parser.deinit();
+    const source_z = try allocator.dupeZ(u8, source);
+    defer allocator.free(source_z);
 
-    // Create owned strings for SourceContent to avoid memory issues
-    const owned_data = try allocator.dupe(u8, source);
-    defer allocator.free(owned_data);
-    const owned_content_type = try allocator.dupe(u8, "text/zig");
-    defer allocator.free(owned_content_type);
-    const owned_uri = try allocator.dupe(u8, "bench://test.zig");
-    defer allocator.free(owned_uri);
-
-    var metadata = std.StringHashMap([]const u8).init(allocator);
-    defer metadata.deinit();
-
-    const content = internal.ingestion.pipeline_types.SourceContent{
-        .data = owned_data,
-        .content_type = owned_content_type,
-        .source_uri = owned_uri,
-        .metadata = metadata,
-        .timestamp_ns = @intCast(std.time.nanoTimestamp()),
-    };
-
-    const blocks = try parser.parse(allocator, content);
+    const units = try zig_parser.parse(allocator, source_z, "bench://test.zig");
     defer {
-        for (blocks) |*block| {
-            block.deinit(allocator);
+        for (units) |*unit| {
+            var mutable_unit = unit.*;
+            mutable_unit.deinit(allocator);
         }
-        allocator.free(blocks);
+        allocator.free(units);
     }
 }
 
@@ -278,13 +261,13 @@ fn create_test_files(vfs: *internal.SimulationVFS, _: std.mem.Allocator) !void {
 
     // Create Zig files
     const files = [_]struct { path: []const u8, content: []const u8 }{
-        .{ .path = "test_project/src/main.zig", .content = 
+        .{ .path = "test_project/src/main.zig", .content =
         \\const std = @import("std");
         \\pub fn main() !void {
         \\    std.debug.print("Hello, world!\n", .{});
         \\}
         },
-        .{ .path = "test_project/src/core/types.zig", .content = 
+        .{ .path = "test_project/src/core/types.zig", .content =
         \\pub const MyType = struct {
         \\    value: u32,
         \\    pub fn init(v: u32) MyType {
@@ -292,7 +275,7 @@ fn create_test_files(vfs: *internal.SimulationVFS, _: std.mem.Allocator) !void {
         \\    }
         \\};
         },
-        .{ .path = "test_project/tests/test.zig", .content = 
+        .{ .path = "test_project/tests/test.zig", .content =
         \\const std = @import("std");
         \\test "basic test" {
         \\    try std.testing.expectEqual(@as(u32, 42), 42);
