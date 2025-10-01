@@ -262,12 +262,12 @@ fn handle_find_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
     };
 
     // Convert semantic results to owned blocks
-    var blocks = std.array_list.Managed(OwnedBlock).init(ctx.allocator);
-    defer blocks.deinit();
+    var blocks = std.ArrayList(OwnedBlock){};
+    defer blocks.deinit(ctx.allocator);
 
     const max_results = @min(request.max_results, semantic_result.results.len);
     for (semantic_result.results[0..max_results]) |result| {
-        try blocks.append(result.block);
+        try blocks.append(ctx.allocator, result.block);
     }
 
     // Build response
@@ -324,11 +324,11 @@ fn handle_show_callers_request(ctx: HandlerContext, payload: []const u8) ![]cons
     };
 
     // Convert OwnedBlocks to ContextBlocks for response
-    var context_blocks = std.array_list.Managed(ContextBlock).init(ctx.allocator);
-    defer context_blocks.deinit();
+    var context_blocks = std.ArrayList(ContextBlock){};
+    defer context_blocks.deinit(ctx.allocator);
 
     for (callers.blocks) |owned_block| {
-        try context_blocks.append(owned_block.block);
+        try context_blocks.append(ctx.allocator, owned_block.block);
     }
 
     return try serialize_show_response(ctx, context_blocks.items, &[_]GraphEdge{});
@@ -378,11 +378,11 @@ fn handle_show_callees_request(ctx: HandlerContext, payload: []const u8) ![]cons
     };
 
     // Convert OwnedBlocks to ContextBlocks for response
-    var context_blocks = std.array_list.Managed(ContextBlock).init(ctx.allocator);
-    defer context_blocks.deinit();
+    var context_blocks = std.ArrayList(ContextBlock){};
+    defer context_blocks.deinit(ctx.allocator);
 
     for (callees.blocks) |owned_block| {
-        try context_blocks.append(owned_block.block);
+        try context_blocks.append(ctx.allocator, owned_block.block);
     }
 
     return try serialize_show_response(ctx, context_blocks.items, &[_]GraphEdge{});

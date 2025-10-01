@@ -139,8 +139,8 @@ test "regression: issue #127 - block iterator memory leak" {
     // Test iterator memory leak pattern: heavy iteration should not accumulate memory
     // The bug was iterators not cleaning up internal buffers on early return
 
-    var scan_memories = std.array_list.Managed(u64).init(testing.allocator);
-    defer scan_memories.deinit();
+    var scan_memories = std.ArrayList(u64){};
+    defer scan_memories.deinit(testing.allocator);
 
     // Populate with initial data
     try runner.run(100);
@@ -158,7 +158,7 @@ test "regression: issue #127 - block iterator memory leak" {
 
         // Measure memory after scanning
         const current_memory = runner.memory_stats();
-        try scan_memories.append(current_memory.total_allocated);
+        try scan_memories.append(testing.allocator, current_memory.total_allocated);
 
         log.info("Iteration {}: {} bytes", .{ iteration, current_memory.total_allocated });
     }

@@ -110,7 +110,7 @@ pub const TieredCompactionManager = struct {
 
     /// State tracking for each tier
     const TierState = struct {
-        sstables: std.array_list.Managed(SSTableInfo),
+        sstables: std.ArrayList(SSTableInfo),
         total_size: u64 = 0,
 
         const SSTableInfo = struct {
@@ -119,9 +119,9 @@ pub const TieredCompactionManager = struct {
             level: u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator) TierState {
+        pub fn init(_: std.mem.Allocator) TierState {
             return TierState{
-                .sstables = std.array_list.Managed(SSTableInfo).init(allocator),
+                .sstables = std.ArrayList(SSTableInfo){},
             };
         }
 
@@ -130,7 +130,7 @@ pub const TieredCompactionManager = struct {
             for (self.sstables.items) |info| {
                 allocator.free(info.path);
             }
-            self.sstables.deinit();
+            self.sstables.deinit(allocator);
         }
 
         /// Add an SSTable to this tier with size tracking for compaction decisions
@@ -147,7 +147,7 @@ pub const TieredCompactionManager = struct {
             // CRITICAL: Create owned copy to avoid ArrayList invalidation
             // SSTableManager's sstable_paths can be reallocated, invalidating slice references
             const path_copy = try allocator.dupe(u8, path);
-            try self.sstables.append(.{
+            try self.sstables.append(allocator, .{
                 .path = path_copy, // Store owned copy, not reference
                 .size = size,
                 .level = level,
@@ -223,15 +223,15 @@ pub const TieredCompactionManager = struct {
 
     /// Collect all SSTable paths across all tiers for iteration
     /// Returns array list that caller must free
-    pub fn collect_all_sstable_paths(self: *const TieredCompactionManager, allocator: std.mem.Allocator) !std.array_list.Managed([]const u8) {
-        var paths = std.array_list.Managed([]const u8).init(allocator);
+    pub fn collect_all_sstable_paths(self: *const TieredCompactionManager, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+        var paths = std.ArrayList([]const u8){};
 
         for (self.tiers) |tier| {
             // Within each tier, search newest SSTables first (reverse append order)
             var i: usize = tier.sstables.items.len;
             while (i > 0) {
                 i -= 1;
-                try paths.append(tier.sstables.items[i].path);
+                try paths.append(allocator, tier.sstables.items[i].path);
             }
         }
 
@@ -346,7 +346,7 @@ pub const TieredCompactionManager = struct {
         concurrency.assert_main_thread();
 
         var mutable_job = job;
-        defer mutable_job.deinit();
+        defer mutable_job.deinit(self.backing_allocator);
 
         switch (mutable_job.compaction_type) {
             .l0_to_l1 => try self.execute_l0_compaction(mutable_job),
@@ -355,11 +355,11 @@ pub const TieredCompactionManager = struct {
     }
 
     fn create_l0_compaction_job(self: *TieredCompactionManager) CompactionJob {
-        var input_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
+        var input_paths = std.ArrayList([]const u8){};
 
         for (self.tiers[0].sstables.items) |info| {
             // Safety: Paths are stable owned copies from TierState
-            input_paths.append(info.path) catch unreachable;
+            input_paths.append(self.backing_allocator, info.path) catch unreachable;
         }
 
         return CompactionJob{
@@ -373,25 +373,23 @@ pub const TieredCompactionManager = struct {
 
     fn create_tier_compaction_job(self: *TieredCompactionManager, level: u8) !CompactionJob {
         const tier = &self.tiers[level];
-        var candidates = std.array_list.Managed(usize).init(self.backing_allocator);
-        defer candidates.deinit();
-        try candidates.ensureTotalCapacity(self.config.max_sstables_per_tier);
+        var candidates = try std.ArrayList(usize).initCapacity(self.backing_allocator, self.config.max_sstables_per_tier);
+        defer candidates.deinit(self.backing_allocator);
 
         for (tier.sstables.items, 0..) |info, i| {
             _ = info;
-            candidates.append(i) catch unreachable; // Safety: capacity ensured above
+            candidates.append(self.backing_allocator, i) catch unreachable; // Safety: capacity ensured above
             if (candidates.items.len >= self.config.max_sstables_per_tier) break;
         }
 
-        var input_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
-        try input_paths.ensureTotalCapacity(candidates.items.len);
+        var input_paths = try std.ArrayList([]const u8).initCapacity(self.backing_allocator, candidates.items.len);
         var total_size: u64 = 0;
 
         for (candidates.items) |idx| {
             const info = tier.sstables.items[idx];
 
             // Safety: Capacity ensured above via ensureTotalCapacity call
-            input_paths.append(info.path) catch unreachable;
+            input_paths.append(self.backing_allocator, info.path) catch unreachable;
             total_size += info.size;
         }
 
@@ -430,8 +428,8 @@ pub const TieredCompactionManager = struct {
         defer self.backing_allocator.free(output_path);
 
         // Validate input files exist and filter out missing ones
-        var valid_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
-        defer valid_paths.deinit();
+        var valid_paths = std.ArrayList([]const u8){};
+        defer valid_paths.deinit(self.backing_allocator);
 
         for (job.input_paths.items) |path| {
             // Check if file exists by trying to get file info
@@ -445,7 +443,7 @@ pub const TieredCompactionManager = struct {
             };
 
             // File exists, add to valid paths
-            try valid_paths.append(path);
+            try valid_paths.append(self.backing_allocator, path);
         }
 
         // If no valid files or only one file, nothing to compact
@@ -477,8 +475,8 @@ pub const TieredCompactionManager = struct {
         defer self.backing_allocator.free(output_path);
 
         // Validate input files exist and filter out missing ones
-        var valid_paths = std.array_list.Managed([]const u8).init(self.backing_allocator);
-        defer valid_paths.deinit();
+        var valid_paths = std.ArrayList([]const u8){};
+        defer valid_paths.deinit(self.backing_allocator);
 
         for (job.input_paths.items) |path| {
             // Check if file exists by trying to get file info
@@ -492,7 +490,7 @@ pub const TieredCompactionManager = struct {
             };
 
             // File exists, add to valid paths
-            try valid_paths.append(path);
+            try valid_paths.append(self.backing_allocator, path);
         }
 
         // If no valid files or only one file, nothing to compact
@@ -519,7 +517,7 @@ pub const CompactionJob = struct {
     compaction_type: CompactionType,
     input_level: u8,
     output_level: u8,
-    input_paths: std.array_list.Managed([]const u8),
+    input_paths: std.ArrayList([]const u8),
     estimated_output_size: u64,
 
     pub const CompactionType = enum {
@@ -529,8 +527,8 @@ pub const CompactionJob = struct {
 
     /// Clean up CompactionJob resources including input_paths ArrayList.
     /// Path strings are owned by TierState, so only ArrayList cleanup is needed.
-    pub fn deinit(self: *CompactionJob) void {
-        self.input_paths.deinit();
+    pub fn deinit(self: *CompactionJob, allocator: std.mem.Allocator) void {
+        self.input_paths.deinit(allocator);
     }
 };
 

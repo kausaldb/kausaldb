@@ -64,8 +64,8 @@ pub const ZigParser = struct {
     ) IngestionError![]ParsedUnit {
         const file_path = content.metadata.get("file_path") orelse content.metadata.get("path") orelse "unknown.zig";
 
-        var units = std.array_list.Managed(ParsedUnit).init(allocator);
-        defer units.deinit();
+        var units = std.ArrayList(ParsedUnit){};
+        defer units.deinit(allocator);
 
         var lines = std.mem.splitSequence(u8, content.data, "\n");
         var line_num: u32 = 1;
@@ -75,12 +75,12 @@ pub const ZigParser = struct {
             try self.process_line(&units, allocator, line, file_path, line_num, content.data);
         }
 
-        return try units.toOwnedSlice();
+        return try units.toOwnedSlice(allocator);
     }
 
     fn process_line(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -96,7 +96,7 @@ pub const ZigParser = struct {
 
     fn try_parse_import(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -111,7 +111,7 @@ pub const ZigParser = struct {
 
     fn try_parse_function(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -125,7 +125,7 @@ pub const ZigParser = struct {
 
     fn try_parse_type(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -139,7 +139,7 @@ pub const ZigParser = struct {
 
     fn try_parse_constant(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -152,7 +152,7 @@ pub const ZigParser = struct {
 
     fn try_parse_test(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -165,7 +165,7 @@ pub const ZigParser = struct {
 
     fn add_import_unit(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -189,15 +189,15 @@ pub const ZigParser = struct {
                 .col_end = @intCast(line.len + 1),
             },
             .metadata = metadata,
-            .edges = std.array_list.Managed(ParsedEdge).init(allocator),
+            .edges = std.ArrayList(ParsedEdge){},
         };
 
-        try units.append(unit);
+        try units.append(allocator, unit);
     }
 
     fn add_function_unit(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -240,7 +240,7 @@ pub const ZigParser = struct {
             .edges = edges,
         };
 
-        try units.append(unit);
+        try units.append(allocator, unit);
     }
 
     fn extract_function_edges(
@@ -248,8 +248,8 @@ pub const ZigParser = struct {
         allocator: std.mem.Allocator,
         function_name: []const u8,
         full_content: []const u8,
-    ) !std.array_list.Managed(ParsedEdge) {
-        var edges = std.array_list.Managed(ParsedEdge).init(allocator);
+    ) !std.ArrayList(ParsedEdge) {
+        var edges = std.ArrayList(ParsedEdge){};
 
         // Look for function calls in the function body
         var call_lines = std.mem.splitSequence(u8, full_content, "\n");
@@ -290,7 +290,7 @@ pub const ZigParser = struct {
     fn parse_function_calls(
         self: *Self,
         allocator: std.mem.Allocator,
-        edges: *std.array_list.Managed(ParsedEdge),
+        edges: *std.ArrayList(ParsedEdge),
         line: []const u8,
     ) !void {
         _ = self;
@@ -344,7 +344,7 @@ pub const ZigParser = struct {
                             .target_id = try allocator.dupe(u8, target_name),
                             .metadata = std.StringHashMap([]const u8).init(allocator),
                         };
-                        try edges.append(edge);
+                        try edges.append(allocator, edge);
                     }
                 }
             }
@@ -354,7 +354,7 @@ pub const ZigParser = struct {
 
     fn add_type_unit(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -390,15 +390,15 @@ pub const ZigParser = struct {
                 .col_end = @intCast(line.len + 1),
             },
             .metadata = metadata,
-            .edges = std.array_list.Managed(ParsedEdge).init(allocator),
+            .edges = std.ArrayList(ParsedEdge){},
         };
 
-        try units.append(unit);
+        try units.append(allocator, unit);
     }
 
     fn add_constant_unit(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -434,15 +434,15 @@ pub const ZigParser = struct {
                 .col_end = @intCast(line.len + 1),
             },
             .metadata = metadata,
-            .edges = std.array_list.Managed(ParsedEdge).init(allocator),
+            .edges = std.ArrayList(ParsedEdge){},
         };
 
-        try units.append(unit);
+        try units.append(allocator, unit);
     }
 
     fn add_test_unit(
         self: *Self,
-        units: *std.array_list.Managed(ParsedUnit),
+        units: *std.ArrayList(ParsedUnit),
         allocator: std.mem.Allocator,
         line: []const u8,
         file_path: []const u8,
@@ -477,10 +477,10 @@ pub const ZigParser = struct {
                 .col_end = @intCast(line.len + 1),
             },
             .metadata = metadata,
-            .edges = std.array_list.Managed(ParsedEdge).init(allocator),
+            .edges = std.ArrayList(ParsedEdge){},
         };
 
-        try units.append(unit);
+        try units.append(allocator, unit);
     }
 
     /// Check if parser supports the given content type.

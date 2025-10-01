@@ -34,17 +34,17 @@ const Violation = struct {
 /// Simple string-based checker for KausalDB conventions
 const TidyChecker = struct {
     allocator: std.mem.Allocator,
-    violations: std.array_list.Managed(Violation),
+    violations: std.ArrayList(Violation),
 
     fn init(allocator: std.mem.Allocator) TidyChecker {
         return TidyChecker{
             .allocator = allocator,
-            .violations = std.array_list.Managed(Violation).init(allocator),
+            .violations = std.ArrayList(Violation){},
         };
     }
 
     fn deinit(self: *TidyChecker) void {
-        self.violations.deinit();
+        self.violations.deinit(self.allocator);
     }
 
     /// Check a single file for KausalDB-specific violations
@@ -273,7 +273,7 @@ const TidyChecker = struct {
             .line = line,
             .message = message,
         };
-        try self.violations.append(violation);
+        try self.violations.append(self.allocator, violation);
     }
 
     /// Print all violations to stderr
@@ -295,8 +295,8 @@ const TidyChecker = struct {
 };
 
 /// Recursively find all .zig files in the repository, excluding the zig/ compiler directory
-fn find_zig_files(allocator: std.mem.Allocator, dir_path: []const u8) !std.array_list.Managed([]u8) {
-    var files = std.array_list.Managed([]u8).init(allocator);
+fn find_zig_files(allocator: std.mem.Allocator, dir_path: []const u8) !std.ArrayList([]u8) {
+    var files = std.ArrayList([]u8){};
 
     var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return files, // Return empty list if directory doesn't exist
@@ -315,7 +315,7 @@ fn find_zig_files(allocator: std.mem.Allocator, dir_path: []const u8) !std.array
 
         if (entry.kind == .file and std.mem.endsWith(u8, entry.path, ".zig")) {
             const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.path });
-            try files.append(full_path);
+            try files.append(allocator, full_path);
         }
     }
 
@@ -331,7 +331,7 @@ pub fn main() !void {
     defer checker.deinit();
 
     // Find all .zig files in the repository (excluding zig/ compiler directory)
-    const zig_files = find_zig_files(allocator, ".") catch |err| {
+    var zig_files = find_zig_files(allocator, ".") catch |err| {
         std.debug.print("Error finding .zig files: {}\n", .{err});
         std.process.exit(@intFromEnum(ExitCode.error_occurred));
     };
@@ -339,7 +339,7 @@ pub fn main() !void {
         for (zig_files.items) |file_path| {
             allocator.free(file_path);
         }
-        zig_files.deinit();
+        zig_files.deinit(allocator);
     }
 
     // Check each file

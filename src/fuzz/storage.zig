@@ -203,7 +203,7 @@ fn fuzz_block_deserialization(allocator: std.mem.Allocator, input: []const u8) !
 
     // Test block deserialization with ownership tracking
     var collection = OwnedBlockCollection.init(allocator, .temporary);
-    defer collection.deinit();
+    defer collection.deinit(allocator);
 
     _ = ContextBlock.deserialize(allocator, input) catch {
         // Expected - malformed data should cause parsing to fail

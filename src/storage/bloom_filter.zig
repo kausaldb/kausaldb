@@ -286,8 +286,8 @@ test "Bloom filter false positive behavior" {
     var filter = try BloomFilter.init(allocator, params);
     defer filter.deinit();
 
-    var added_blocks = std.array_list.Managed(BlockId).init(allocator);
-    defer added_blocks.deinit();
+    var added_blocks = std.ArrayList(BlockId){};
+    defer added_blocks.deinit(allocator);
 
     var i: u8 = 0;
     while (i < 10) : (i += 1) {
@@ -295,7 +295,7 @@ test "Bloom filter false positive behavior" {
         @memset(&id_bytes, i);
         const block_id = BlockId{ .bytes = id_bytes };
         filter.add(block_id);
-        try added_blocks.append(block_id);
+        try added_blocks.append(allocator, block_id);
     }
 
     for (added_blocks.items) |block_id| {
@@ -598,8 +598,8 @@ test "Bloom filter SSTable integration scenarios" {
     var filter = try BloomFilter.init(allocator, BloomFilter.Params.medium);
     defer filter.deinit();
 
-    var sstable_blocks = std.array_list.Managed(BlockId).init(allocator);
-    defer sstable_blocks.deinit();
+    var sstable_blocks = std.ArrayList(BlockId){};
+    defer sstable_blocks.deinit(allocator);
 
     var i: u32 = 0;
     while (i < 1000) : (i += 1) {
@@ -608,7 +608,7 @@ test "Bloom filter SSTable integration scenarios" {
         const block_id = BlockId{ .bytes = id_bytes };
 
         filter.add(block_id);
-        try sstable_blocks.append(block_id);
+        try sstable_blocks.append(allocator, block_id);
     }
 
     for (sstable_blocks.items) |block_id| {

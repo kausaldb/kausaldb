@@ -145,7 +145,7 @@ pub const ModelState = struct {
 
     // Core state tracking structures
     blocks: std.HashMap(BlockId, ModelBlock, BlockIdContext, std.hash_map.default_max_load_percentage),
-    edges: std.array_list.Managed(GraphEdge),
+    edges: std.ArrayList(GraphEdge),
 
     // Mathematical operation sequencing
     operation_count: u64,
@@ -160,7 +160,7 @@ pub const ModelState = struct {
     creation_timestamp: u64,
     total_bytes_allocated: u64,
     peak_memory_usage: u64,
-    operation_history: std.array_list.Managed(OperationRecord),
+    operation_history: std.ArrayList(OperationRecord),
 
     // Cryptographic state verification
     state_checksum: u64,
@@ -212,7 +212,7 @@ pub const ModelState = struct {
                 BlockIdContext,
                 std.hash_map.default_max_load_percentage,
             ).init(arena_allocator),
-            .edges = std.array_list.Managed(GraphEdge).init(arena_allocator),
+            .edges = std.ArrayList(GraphEdge){},
             .operation_count = 0,
             .global_sequence = 0, // Start at 0 to match WorkloadGenerator.operation_count
             .last_flush_sequence = 0,
@@ -221,7 +221,7 @@ pub const ModelState = struct {
             .creation_timestamp = creation_timestamp,
             .total_bytes_allocated = 0,
             .peak_memory_usage = 0,
-            .operation_history = std.array_list.Managed(OperationRecord).init(arena_allocator),
+            .operation_history = std.ArrayList(OperationRecord){},
             .state_checksum = compute_initial_state_checksum(creation_timestamp),
             .last_validation_sequence = 0,
         };
@@ -249,6 +249,10 @@ pub const ModelState = struct {
                 log.warn("Model state inconsistency detected during cleanup: {}", .{err});
             };
         }
+
+        // Clean up ArrayList internal buffers (use backing_allocator)
+        self.edges.deinit(self.backing_allocator);
+        self.operation_history.deinit(self.backing_allocator);
 
         // O(1) arena cleanup - destroys all allocations simultaneously
         self.model_arena.deinit();
@@ -396,7 +400,7 @@ pub const ModelState = struct {
             }
         }
 
-        try self.edges.append(edge);
+        try self.edges.append(self.backing_allocator, edge);
         self.update_memory_tracking();
     }
 
@@ -421,7 +425,7 @@ pub const ModelState = struct {
             _ = self.operation_history.orderedRemove(0);
         }
 
-        try self.operation_history.append(record);
+        try self.operation_history.append(self.backing_allocator, record);
     }
 
     /// Update cryptographic state checksum for integrity verification
@@ -942,8 +946,8 @@ pub const ModelState = struct {
     /// Find edges by type with mathematical precision and memory safety
     /// Returns allocated slice that caller must free with backing_allocator.free()
     pub fn find_edges_by_type(self: *Self, source_id: BlockId, edge_type: EdgeType) []GraphEdge {
-        var filtered = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
-        defer filtered.deinit();
+        var filtered = std.ArrayList(GraphEdge){};
+        defer filtered.deinit(self.backing_allocator);
 
         // Validate source block exists before filtering
         if (!self.has_active_block(source_id)) {
@@ -956,7 +960,7 @@ pub const ModelState = struct {
                 edge.edge_type == edge_type and
                 self.has_active_block(edge.target_id))
             {
-                filtered.append(edge) catch {
+                filtered.append(self.backing_allocator, edge) catch {
                     // On allocation failure, return empty slice
                     return self.backing_allocator.alloc(GraphEdge, 0) catch &.{};
                 };
@@ -964,7 +968,7 @@ pub const ModelState = struct {
         }
 
         // Return owned slice with proper memory management
-        return filtered.toOwnedSlice() catch &.{};
+        return filtered.toOwnedSlice(self.backing_allocator) catch &.{};
     }
 
     /// Get comprehensive forensic state summary for debugging
@@ -1005,8 +1009,8 @@ pub const ModelState = struct {
     /// Synchronize model state with storage engine after crash recovery.
     /// Aligns model state with actual storage contents to prevent consistency violations.
     pub fn sync_with_storage(self: *Self, storage_engine: anytype) !void {
-        var blocks_to_remove = std.array_list.Managed(BlockId).init(self.backing_allocator);
-        defer blocks_to_remove.deinit();
+        var blocks_to_remove = std.ArrayList(BlockId){};
+        defer blocks_to_remove.deinit(self.backing_allocator);
 
         var block_iterator = self.blocks.iterator();
         while (block_iterator.next()) |entry| {
@@ -1023,7 +1027,7 @@ pub const ModelState = struct {
                 model_block.deleted = false;
             } else {
                 // Mark for removal instead of just setting deleted = true
-                try blocks_to_remove.append(block_id);
+                try blocks_to_remove.append(self.backing_allocator, block_id);
             }
         }
 
@@ -1033,12 +1037,12 @@ pub const ModelState = struct {
         }
 
         // Rebuild edge list from storage
-        self.edges.clearAndFree();
+        self.edges.clearAndFree(self.backing_allocator);
         const storage_edges = try self.load_all_edges_from_storage(storage_engine);
         defer self.backing_allocator.free(storage_edges);
 
         for (storage_edges) |edge| {
-            try self.edges.append(edge);
+            try self.edges.append(self.backing_allocator, edge);
         }
 
         self.update_state_checksum();
@@ -1046,7 +1050,7 @@ pub const ModelState = struct {
 
     /// Load all edges from storage engine for model synchronization
     fn load_all_edges_from_storage(self: *Self, storage_engine: anytype) ![]GraphEdge {
-        var all_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
+        var all_edges = std.ArrayList(GraphEdge){};
 
         // Iterate through all active blocks and collect their outgoing edges
         var block_iterator = self.blocks.iterator();
@@ -1071,26 +1075,26 @@ pub const ModelState = struct {
             }
             for (outgoing_edges) |owned_edge| {
                 const edge = owned_edge.read(.temporary);
-                try all_edges.append(edge.*);
+                try all_edges.append(self.backing_allocator, edge.*);
             }
         }
 
-        return all_edges.toOwnedSlice();
+        return all_edges.toOwnedSlice(self.backing_allocator);
     }
 
     /// Collect list of active (non-deleted) block IDs for safe edge generation
     pub fn collect_active_block_ids(self: *Self, allocator: std.mem.Allocator) ![]BlockId {
-        var active_ids = std.array_list.Managed(BlockId).init(allocator);
+        var active_ids = std.ArrayList(BlockId){};
 
         var block_iterator = self.blocks.iterator();
         while (block_iterator.next()) |entry| {
             const model_block = entry.value_ptr;
             if (!model_block.deleted) {
-                try active_ids.append(entry.key_ptr.*);
+                try active_ids.append(allocator, entry.key_ptr.*);
             }
         }
 
-        return active_ids.toOwnedSlice();
+        return active_ids.toOwnedSlice(allocator);
     }
 };
 

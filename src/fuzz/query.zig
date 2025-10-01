@@ -381,8 +381,8 @@ fn generate_test_graph(allocator: std.mem.Allocator, storage: *StorageEngine, mo
 
     // Generate blocks
     const num_blocks = 50 + random.uintLessThan(u32, 50);
-    var block_ids = std.array_list.Managed(BlockId).init(allocator);
-    defer block_ids.deinit();
+    var block_ids = std.ArrayList(BlockId){};
+    defer block_ids.deinit(allocator);
 
     for (0..num_blocks) |i| {
         const block = ContextBlock{
@@ -400,7 +400,7 @@ fn generate_test_graph(allocator: std.mem.Allocator, storage: *StorageEngine, mo
 
         try storage.put_block(block);
         try model.apply_put_block(block);
-        try block_ids.append(block.id);
+        try block_ids.append(allocator, block.id);
     }
 
     // Generate edges with various patterns

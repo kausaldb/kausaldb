@@ -22,20 +22,22 @@ const OwnedBlock = ownership.OwnedBlock;
 /// Secondary index entry mapping metadata value to block IDs
 const IndexEntry = struct {
     value: []const u8, // Metadata field value (e.g., "function", "struct")
-    block_ids: std.array_list.Managed(BlockId), // All blocks with this metadata value
+    block_ids: std.ArrayList(BlockId), // All blocks with this metadata value
+    allocator: std.mem.Allocator,
 
     /// Initialize new index entry with allocated value storage
     pub fn init(allocator: std.mem.Allocator, value: []const u8) IndexEntry {
         return IndexEntry{
             .value = value,
-            .block_ids = std.array_list.Managed(BlockId).init(allocator),
+            .block_ids = std.ArrayList(BlockId){},
+            .allocator = allocator,
         };
     }
 
     /// Clean up allocated memory for this index entry
     pub fn deinit(self: *IndexEntry, allocator: std.mem.Allocator) void {
         allocator.free(self.value);
-        self.block_ids.deinit();
+        self.block_ids.deinit(self.allocator);
     }
 
     /// Add a block ID to this index entry, avoiding duplicates
@@ -44,7 +46,7 @@ const IndexEntry = struct {
         for (self.block_ids.items) |existing_id| {
             if (existing_id.eql(block_id)) return;
         }
-        try self.block_ids.append(block_id);
+        try self.block_ids.append(self.allocator, block_id);
     }
 
     pub fn remove_block(self: *IndexEntry, block_id: BlockId) void {
@@ -153,15 +155,15 @@ pub const MetadataFieldIndex = struct {
 
     /// Calculate all unique values for this metadata field
     pub fn calculate_all_values(self: *const MetadataFieldIndex, allocator: std.mem.Allocator) ![][]const u8 {
-        var values = std.array_list.Managed([]const u8).init(allocator);
-        errdefer values.deinit();
+        var values = std.ArrayList([]const u8){};
+        errdefer values.deinit(allocator);
 
         var iterator = self.entries.iterator();
         while (iterator.next()) |entry| {
-            try values.append(entry.key_ptr.*);
+            try values.append(allocator, entry.key_ptr.*);
         }
 
-        return values.toOwnedSlice();
+        return values.toOwnedSlice(allocator);
     }
 
     /// Get statistics about this index
@@ -234,7 +236,7 @@ pub const IndexStatistics = struct {
 
 /// Multi-field metadata index manager
 pub const MetadataIndexManager = struct {
-    indexes: std.array_list.Managed(MetadataFieldIndex),
+    indexes: std.ArrayList(MetadataFieldIndex),
     arena_coordinator: *const ArenaCoordinator,
     backing_allocator: std.mem.Allocator,
 
@@ -243,7 +245,7 @@ pub const MetadataIndexManager = struct {
         arena_coordinator: *const ArenaCoordinator,
     ) MetadataIndexManager {
         return MetadataIndexManager{
-            .indexes = std.array_list.Managed(MetadataFieldIndex).init(allocator),
+            .indexes = std.ArrayList(MetadataFieldIndex){},
             .arena_coordinator = arena_coordinator,
             .backing_allocator = allocator,
         };
@@ -253,13 +255,13 @@ pub const MetadataIndexManager = struct {
         for (self.indexes.items) |*index| {
             index.deinit();
         }
-        self.indexes.deinit();
+        self.indexes.deinit(self.backing_allocator);
     }
 
     /// Add an index for a specific metadata field
     pub fn add_field_index(self: *MetadataIndexManager, field_name: []const u8) !void {
         const index = try MetadataFieldIndex.init(self.backing_allocator, self.arena_coordinator, field_name);
-        try self.indexes.append(index);
+        try self.indexes.append(self.backing_allocator, index);
     }
 
     /// Update all indexes when a block is added

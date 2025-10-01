@@ -32,20 +32,22 @@ const SecurityIssue = struct {
 };
 
 const SecurityReport = struct {
-    issues: std.array_list.Managed(SecurityIssue),
+    issues: std.ArrayList(SecurityIssue),
     scanned_files: u32,
     total_lines: u32,
+    allocator: std.mem.Allocator,
 
     fn init(allocator: std.mem.Allocator) SecurityReport {
         return SecurityReport{
-            .issues = std.array_list.Managed(SecurityIssue).init(allocator),
+            .issues = std.ArrayList(SecurityIssue){},
             .scanned_files = 0,
             .total_lines = 0,
+            .allocator = allocator,
         };
     }
 
     fn deinit(self: *SecurityReport) void {
-        self.issues.deinit();
+        self.issues.deinit(self.allocator);
     }
 
     fn count_by_severity(self: *const SecurityReport, severity: SecurityIssue.Severity) u32 {
@@ -167,7 +169,7 @@ fn scan_file_content(
 
             // Allow documented unsafe operations
             if (std.mem.indexOf(u8, line, "Safety:") == null and !is_test_file) {
-                try report.issues.append(SecurityIssue{
+                try report.issues.append(allocator, SecurityIssue{
                     .severity = .warning,
                     .category = .unsafe_operations,
                     .file = try allocator.dupe(u8, file_path),
@@ -180,7 +182,7 @@ fn scan_file_content(
         if (std.mem.indexOf(u8, line, "@memcpy") != null or
             std.mem.indexOf(u8, line, "@memset") != null)
         {
-            try report.issues.append(SecurityIssue{
+            try report.issues.append(allocator, SecurityIssue{
                 .severity = .info,
                 .category = .memory_safety,
                 .file = try allocator.dupe(u8, file_path),
@@ -216,7 +218,7 @@ fn scan_file_content(
                         std.mem.indexOf(u8, line, "std.") == null and
                         std.mem.indexOf(u8, line, "Potential hardcoded") == null)
                     {
-                        try report.issues.append(SecurityIssue{
+                        try report.issues.append(allocator, SecurityIssue{
                             .severity = .err,
                             .category = .secret_exposure,
                             .file = try allocator.dupe(u8, file_path),
@@ -247,7 +249,7 @@ fn scan_build_configuration(allocator: std.mem.Allocator, report: *SecurityRepor
     defer allocator.free(content);
 
     if (std.mem.indexOf(u8, content, "http://") != null) {
-        try report.issues.append(SecurityIssue{
+        try report.issues.append(allocator, SecurityIssue{
             .severity = .err,
             .category = .dependency_security,
             .file = try allocator.dupe(u8, "build.zig.zon"),
@@ -257,7 +259,7 @@ fn scan_build_configuration(allocator: std.mem.Allocator, report: *SecurityRepor
     }
 
     if (std.mem.indexOf(u8, content, "url") != null) {
-        try report.issues.append(SecurityIssue{
+        try report.issues.append(allocator, SecurityIssue{
             .severity = .info,
             .category = .dependency_security,
             .file = try allocator.dupe(u8, "build.zig.zon"),

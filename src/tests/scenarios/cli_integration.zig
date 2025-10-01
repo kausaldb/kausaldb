@@ -82,8 +82,8 @@ const MockServer = struct {
     socket_closed: bool,
 
     // Test data storage
-    blocks: std.array_list.Managed(ContextBlock),
-    edges: std.array_list.Managed(GraphEdge),
+    blocks: std.ArrayList(ContextBlock),
+    edges: std.ArrayList(GraphEdge),
 
     pub fn init(allocator: std.mem.Allocator, port: u16) !MockServer {
         const address = try std.net.Address.parseIp("127.0.0.1", port);
@@ -109,8 +109,8 @@ const MockServer = struct {
             .thread = null,
             .running = std.atomic.Value(bool).init(false),
             .socket_closed = false,
-            .blocks = std.array_list.Managed(ContextBlock).init(allocator),
-            .edges = std.array_list.Managed(GraphEdge).init(allocator),
+            .blocks = std.ArrayList(ContextBlock){},
+            .edges = std.ArrayList(GraphEdge){},
         };
     }
 
@@ -119,8 +119,8 @@ const MockServer = struct {
         if (!self.socket_closed) {
             self.server.deinit();
         }
-        self.blocks.deinit();
-        self.edges.deinit();
+        self.blocks.deinit(self.allocator);
+        self.edges.deinit(self.allocator);
     }
 
     pub fn start(self: *MockServer) !void {
@@ -499,7 +499,7 @@ const MockServer = struct {
     }
 
     pub fn add_test_data(self: *MockServer) !void {
-        try self.blocks.append(ContextBlock{
+        try self.blocks.append(self.allocator, ContextBlock{
             .id = BlockId.from_u64(1),
             .sequence = 1,
             .source_uri = "src/main.zig",
@@ -507,7 +507,7 @@ const MockServer = struct {
             .content = "pub fn main() !void { parse_command(); }",
         });
 
-        try self.blocks.append(ContextBlock{
+        try self.blocks.append(self.allocator, ContextBlock{
             .id = BlockId.from_u64(2),
             .sequence = 2,
             .source_uri = "src/parser.zig",
@@ -515,7 +515,7 @@ const MockServer = struct {
             .content = "pub fn parse_command() Command { }",
         });
 
-        try self.blocks.append(ContextBlock{
+        try self.blocks.append(self.allocator, ContextBlock{
             .id = BlockId.from_u64(3),
             .sequence = 3,
             .source_uri = "src/storage.zig",
@@ -523,13 +523,13 @@ const MockServer = struct {
             .content = "pub fn init_storage() !Storage { }",
         });
 
-        try self.edges.append(GraphEdge{
+        try self.edges.append(self.allocator, GraphEdge{
             .source_id = BlockId.from_u64(1),
             .target_id = BlockId.from_u64(2),
             .edge_type = .calls,
         });
 
-        try self.edges.append(GraphEdge{
+        try self.edges.append(self.allocator, GraphEdge{
             .source_id = BlockId.from_u64(1),
             .target_id = BlockId.from_u64(3),
             .edge_type = .calls,

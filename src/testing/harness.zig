@@ -1103,11 +1103,11 @@ pub const SimulationRunner = struct {
         if (!self.ingestion_config.allow_circular_imports) return;
 
         // Build a graph of import relationships and detect cycles
-        var import_graph = std.HashMap(BlockId, std.array_list.Managed(BlockId), model_mod.ModelState.BlockIdContext, std.hash_map.default_max_load_percentage).init(self.allocator);
+        var import_graph = std.AutoHashMap(BlockId, std.ArrayList(BlockId)).init(self.allocator);
         defer {
             var iterator = import_graph.iterator();
             while (iterator.next()) |entry| {
-                entry.value_ptr.deinit();
+                entry.value_ptr.deinit(self.allocator);
             }
             import_graph.deinit();
         }
@@ -1115,8 +1115,8 @@ pub const SimulationRunner = struct {
         // Build import graph from edges
         for (self.model.edges.items) |edge| {
             if (edge.edge_type == .imports) {
-                var imports = import_graph.get(edge.source_id) orelse std.array_list.Managed(BlockId).init(self.allocator);
-                try imports.append(edge.target_id);
+                var imports = import_graph.get(edge.source_id) orelse std.ArrayList(BlockId){};
+                try imports.append(self.allocator, edge.target_id);
                 try import_graph.put(edge.source_id, imports);
             }
         }
@@ -1144,7 +1144,7 @@ pub const SimulationRunner = struct {
     fn has_cycle_dfs(
         self: *Self,
         node: BlockId,
-        graph: *std.HashMap(BlockId, std.array_list.Managed(BlockId), model_mod.ModelState.BlockIdContext, std.hash_map.default_max_load_percentage),
+        graph: *std.AutoHashMap(BlockId, std.ArrayList(BlockId)),
         visited: *std.HashMap(BlockId, void, model_mod.ModelState.BlockIdContext, std.hash_map.default_max_load_percentage),
         rec_stack: *std.HashMap(BlockId, void, model_mod.ModelState.BlockIdContext, std.hash_map.default_max_load_percentage),
     ) !bool {

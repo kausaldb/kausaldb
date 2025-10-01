@@ -518,12 +518,12 @@ pub const MemtableManager = struct {
 
         if (self.block_index.blocks.count() == 0 and self.block_index.tombstones.count() == 0) return;
 
-        var owned_blocks = std.array_list.Managed(OwnedBlock).init(self.backing_allocator);
-        defer owned_blocks.deinit();
+        var owned_blocks = std.ArrayList(OwnedBlock){};
+        defer owned_blocks.deinit(self.backing_allocator);
 
         var block_iterator = self.iterator();
         while (block_iterator.next()) |owned_block_ptr| {
-            try owned_blocks.append(owned_block_ptr.*);
+            try owned_blocks.append(self.backing_allocator, owned_block_ptr.*);
         }
 
         // Get tombstones and edges before clearing memtable

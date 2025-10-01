@@ -41,13 +41,13 @@ pub const OwnedGraphEdge = struct {
 pub const GraphEdgeIndex = struct {
     outgoing_edges: std.HashMap(
         BlockId,
-        std.array_list.Managed(OwnedGraphEdge),
+        std.ArrayList(OwnedGraphEdge),
         BlockIdContext,
         std.hash_map.default_max_load_percentage,
     ),
     incoming_edges: std.HashMap(
         BlockId,
-        std.array_list.Managed(OwnedGraphEdge),
+        std.ArrayList(OwnedGraphEdge),
         BlockIdContext,
         std.hash_map.default_max_load_percentage,
     ),
@@ -74,13 +74,13 @@ pub const GraphEdgeIndex = struct {
         return GraphEdgeIndex{
             .outgoing_edges = std.HashMap(
                 BlockId,
-                std.array_list.Managed(OwnedGraphEdge),
+                std.ArrayList(OwnedGraphEdge),
                 BlockIdContext,
                 std.hash_map.default_max_load_percentage,
             ).init(backing),
             .incoming_edges = std.HashMap(
                 BlockId,
-                std.array_list.Managed(OwnedGraphEdge),
+                std.ArrayList(OwnedGraphEdge),
                 BlockIdContext,
                 std.hash_map.default_max_load_percentage,
             ).init(backing),
@@ -94,11 +94,11 @@ pub const GraphEdgeIndex = struct {
     pub fn deinit(self: *GraphEdgeIndex) void {
         var outgoing_iterator = self.outgoing_edges.valueIterator();
         while (outgoing_iterator.next()) |edge_list| {
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
         }
         var incoming_iterator = self.incoming_edges.valueIterator();
         while (incoming_iterator.next()) |edge_list| {
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
         }
         self.outgoing_edges.deinit();
         self.incoming_edges.deinit();
@@ -129,18 +129,18 @@ pub const GraphEdgeIndex = struct {
 
         var outgoing_result = try self.outgoing_edges.getOrPut(edge.source_id);
         if (!outgoing_result.found_existing) {
-            outgoing_result.value_ptr.* = std.array_list.Managed(OwnedGraphEdge).init(self.backing_allocator);
+            outgoing_result.value_ptr.* = std.ArrayList(OwnedGraphEdge){};
         }
         const outgoing_before = outgoing_result.value_ptr.items.len;
-        try outgoing_result.value_ptr.append(owned_edge);
+        try outgoing_result.value_ptr.append(self.backing_allocator, owned_edge);
         std.debug.assert(outgoing_result.value_ptr.items.len == outgoing_before + 1);
 
         var incoming_result = try self.incoming_edges.getOrPut(edge.target_id);
         if (!incoming_result.found_existing) {
-            incoming_result.value_ptr.* = std.array_list.Managed(OwnedGraphEdge).init(self.backing_allocator);
+            incoming_result.value_ptr.* = std.ArrayList(OwnedGraphEdge){};
         }
         const incoming_before = incoming_result.value_ptr.items.len;
-        try incoming_result.value_ptr.append(owned_edge);
+        try incoming_result.value_ptr.append(self.backing_allocator, owned_edge);
         std.debug.assert(incoming_result.value_ptr.items.len == incoming_before + 1);
     }
 
@@ -226,7 +226,7 @@ pub const GraphEdgeIndex = struct {
                             _ = target_incoming.swapRemove(i);
                             // Clean up HashMap entry if list becomes empty
                             if (target_incoming.items.len == 0) {
-                                target_incoming.deinit();
+                                target_incoming.deinit(self.backing_allocator);
                                 _ = self.incoming_edges.remove(edge.target_id);
                             }
                             break;
@@ -235,7 +235,7 @@ pub const GraphEdgeIndex = struct {
                     }
                 }
             }
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
             _ = self.outgoing_edges.remove(block_id);
         }
 
@@ -255,7 +255,7 @@ pub const GraphEdgeIndex = struct {
                             _ = source_outgoing.swapRemove(i);
                             // Clean up HashMap entry if list becomes empty
                             if (source_outgoing.items.len == 0) {
-                                source_outgoing.deinit();
+                                source_outgoing.deinit(self.backing_allocator);
                                 _ = self.outgoing_edges.remove(edge.source_id);
                             }
                             break;
@@ -264,7 +264,7 @@ pub const GraphEdgeIndex = struct {
                     }
                 }
             }
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
             _ = self.incoming_edges.remove(block_id);
         }
     }
@@ -324,11 +324,11 @@ pub const GraphEdgeIndex = struct {
         // Deinit all ArrayLists before clearing to prevent memory leaks
         var outgoing_iterator = self.outgoing_edges.valueIterator();
         while (outgoing_iterator.next()) |edge_list| {
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
         }
         var incoming_iterator = self.incoming_edges.valueIterator();
         while (incoming_iterator.next()) |edge_list| {
-            edge_list.deinit();
+            edge_list.deinit(self.backing_allocator);
         }
 
         self.outgoing_edges.clearRetainingCapacity();
@@ -344,8 +344,8 @@ pub const GraphEdgeIndex = struct {
         std.debug.assert(@intFromPtr(self) != 0);
 
         // Use direct iteration instead of edge_count() to avoid any counting bugs
-        var edges = std.array_list.Managed(GraphEdge).init(allocator);
-        defer edges.deinit();
+        var edges = std.ArrayList(GraphEdge){};
+        defer edges.deinit(allocator);
 
         // Iterate through outgoing edges only to avoid duplicates
         var iterator = self.outgoing_edges.iterator();
@@ -353,12 +353,12 @@ pub const GraphEdgeIndex = struct {
             // Ensure the edge list exists and has items
             if (entry.value_ptr.items.len > 0) {
                 for (entry.value_ptr.items) |owned_edge| {
-                    try edges.append(owned_edge.edge);
+                    try edges.append(allocator, owned_edge.edge);
                 }
             }
         }
 
-        return edges.toOwnedSlice();
+        return edges.toOwnedSlice(allocator);
     }
 };
 

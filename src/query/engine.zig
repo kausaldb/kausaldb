@@ -717,8 +717,8 @@ pub const QueryEngine = struct {
         entity_type: []const u8,
         name: []const u8,
     ) !SemanticQueryResult {
-        var results = std.array_list.Managed(SemanticResult).init(self.allocator);
-        defer results.deinit();
+        var results = std.ArrayList(SemanticResult){};
+        defer results.deinit(self.allocator);
 
         var iterator = self.storage_engine.iterate_all_blocks();
         defer iterator.deinit();
@@ -781,7 +781,7 @@ pub const QueryEngine = struct {
             if (is_match) {
                 matches_found += 1;
 
-                try results.append(SemanticResult{
+                try results.append(self.allocator, SemanticResult{
                     .block = OwnedBlock.take_ownership(&block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
@@ -797,8 +797,8 @@ pub const QueryEngine = struct {
         codebase: []const u8,
         file_path: []const u8,
     ) !SemanticQueryResult {
-        var results = std.array_list.Managed(SemanticResult).init(self.allocator);
-        defer results.deinit();
+        var results = std.ArrayList(SemanticResult){};
+        defer results.deinit(self.allocator);
 
         var iterator = self.storage_engine.iterate_all_blocks();
         defer iterator.deinit();
@@ -825,7 +825,7 @@ pub const QueryEngine = struct {
             if (std.mem.eql(u8, block_file_path, file_path)) {
                 matches_found += 1;
 
-                try results.append(SemanticResult{
+                try results.append(self.allocator, SemanticResult{
                     .block = OwnedBlock.take_ownership(&block, .query_engine),
                     .similarity_score = 1.0, // Exact match
                 });
@@ -865,9 +865,9 @@ pub const QueryEngine = struct {
     ) !TraversalResult {
         // Use the existing arena from the traversal result for consistency and proper lifecycle
         const arena_allocator = self.query_arena.allocator();
-        var filtered_blocks = std.array_list.Managed(OwnedBlock).init(arena_allocator);
-        var filtered_paths = std.array_list.Managed([]const BlockId).init(arena_allocator);
-        var filtered_depths = std.array_list.Managed(u32).init(arena_allocator);
+        var filtered_blocks = std.ArrayList(OwnedBlock){};
+        var filtered_paths = std.ArrayList([]const BlockId){};
+        var filtered_depths = std.ArrayList(u32){};
 
         for (traversal_result.blocks, 0..) |owned_query_block, i| {
             const block_data = owned_query_block.read(.query_engine);
@@ -882,18 +882,18 @@ pub const QueryEngine = struct {
             const metadata = parsed.value;
             const block_codebase = if (metadata.object.get("codebase")) |cb| cb.string else continue;
             if (std.mem.eql(u8, block_codebase, codebase)) {
-                try filtered_blocks.append(owned_query_block);
+                try filtered_blocks.append(arena_allocator, owned_query_block);
                 // Copy the path data using the arena allocator for consistent lifecycle
                 const path_copy = try arena_allocator.dupe(BlockId, traversal_result.paths[i]);
-                try filtered_paths.append(path_copy);
-                try filtered_depths.append(traversal_result.depths[i]);
+                try filtered_paths.append(arena_allocator, path_copy);
+                try filtered_depths.append(arena_allocator, traversal_result.depths[i]);
             }
         }
 
         // Transfer ownership to avoid use-after-free
-        const owned_blocks = try filtered_blocks.toOwnedSlice();
-        const owned_paths = try filtered_paths.toOwnedSlice();
-        const owned_depths = try filtered_depths.toOwnedSlice();
+        const owned_blocks = try filtered_blocks.toOwnedSlice(arena_allocator);
+        const owned_paths = try filtered_paths.toOwnedSlice(arena_allocator);
+        const owned_depths = try filtered_depths.toOwnedSlice(arena_allocator);
 
         // Create new result that reuses the same arena for consistent cleanup
         const filtered_result = TraversalResult.init(
@@ -1006,17 +1006,16 @@ pub const QueryEngine = struct {
         );
         defer full_result.deinit();
 
-        var streaming_blocks = std.array_list.Managed(ContextBlock).init(self.allocator);
-        defer streaming_blocks.deinit();
-
-        try streaming_blocks.ensureTotalCapacity(@min(FILTER_STREAMING_CHUNK_SIZE, full_result.blocks.len));
+        const initial_capacity = @min(FILTER_STREAMING_CHUNK_SIZE, full_result.blocks.len);
+        var streaming_blocks = try std.ArrayList(ContextBlock).initCapacity(self.allocator, initial_capacity);
+        defer streaming_blocks.deinit(self.allocator);
 
         var chunk_start: usize = 0;
         while (chunk_start < full_result.blocks.len) {
             const chunk_end = @min(chunk_start + FILTER_STREAMING_CHUNK_SIZE, full_result.blocks.len);
 
             for (full_result.blocks[chunk_start..chunk_end]) |block| {
-                try streaming_blocks.append(block);
+                try streaming_blocks.append(self.allocator, block);
                 blocks_evaluated += 1;
 
                 if (streaming_blocks.items.len >= 1000) break;

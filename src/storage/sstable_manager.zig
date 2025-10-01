@@ -75,10 +75,10 @@ pub const SSTableManager = struct {
     backing_allocator: std.mem.Allocator,
     vfs: VFS,
     data_dir: []const u8,
-    sstable_paths: std.array_list.Managed([]const u8),
+    sstable_paths: std.ArrayList([]const u8),
     next_sstable_id: u32,
     compaction_manager: TieredCompactionManager,
-    cached_metadata: std.array_list.Managed(SSTableMetadata),
+    cached_metadata: std.ArrayList(SSTableMetadata),
 
     /// Initialize SSTable manager following hierarchical memory model.
     /// Path ArrayList uses stable backing allocator while content uses parent's arena reference
@@ -95,7 +95,7 @@ pub const SSTableManager = struct {
             .backing_allocator = backing,
             .vfs = filesystem,
             .data_dir = data_dir,
-            .sstable_paths = std.array_list.Managed([]const u8).init(backing),
+            .sstable_paths = std.ArrayList([]const u8){},
             .next_sstable_id = 0,
             .compaction_manager = TieredCompactionManager.init(
                 coordinator,
@@ -103,7 +103,7 @@ pub const SSTableManager = struct {
                 filesystem,
                 data_dir,
             ),
-            .cached_metadata = std.array_list.Managed(SSTableMetadata).init(backing),
+            .cached_metadata = std.ArrayList(SSTableMetadata){},
         };
     }
 
@@ -116,12 +116,12 @@ pub const SSTableManager = struct {
         for (self.sstable_paths.items) |path| {
             self.backing_allocator.free(path);
         }
-        self.sstable_paths.deinit();
+        self.sstable_paths.deinit(self.backing_allocator);
 
         for (self.cached_metadata.items) |*metadata| {
             metadata.deinit();
         }
-        self.cached_metadata.deinit();
+        self.cached_metadata.deinit(self.backing_allocator);
 
         self.compaction_manager.deinit();
     }
@@ -140,9 +140,9 @@ pub const SSTableManager = struct {
     /// This is the ONLY way to add paths to the system, ensuring single ownership.
     /// Returns the index that other components can use to reference this path.
     fn register_sstable_path(self: *SSTableManager, path: []const u8) !u32 {
-        try self.sstable_paths.ensureTotalCapacity(self.sstable_paths.items.len + 1);
+        try self.sstable_paths.ensureTotalCapacity(self.backing_allocator, self.sstable_paths.items.len + 1);
         const path_copy = try self.backing_allocator.dupe(u8, path);
-        try self.sstable_paths.append(path_copy);
+        try self.sstable_paths.append(self.backing_allocator, path_copy);
         return @intCast(self.sstable_paths.items.len - 1);
     }
 
@@ -169,7 +169,7 @@ pub const SSTableManager = struct {
         temp_allocator: std.mem.Allocator,
     ) !?OwnedBlock {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
-        defer sstable_paths.deinit();
+        defer sstable_paths.deinit(temp_allocator);
 
         if (!(sstable_paths.items.len < 10000)) std.debug.panic(
             "Excessive SSTable count {} suggests corruption",
@@ -222,12 +222,12 @@ pub const SSTableManager = struct {
         );
         // Collect and load all SSTables upfront for proper tombstone precedence
         // This ensures tombstones from newer SSTables shadow blocks in older ones
-        var loaded_sstables = std.array_list.Managed(SSTable).init(self.backing_allocator);
+        var loaded_sstables = std.ArrayList(SSTable){};
         defer {
             for (loaded_sstables.items) |*loaded_sstable| {
                 loaded_sstable.deinit();
             }
-            loaded_sstables.deinit();
+            loaded_sstables.deinit(self.backing_allocator);
         }
 
         // Load all SSTables in correct LSM precedence order (newest first)
@@ -247,7 +247,7 @@ pub const SSTableManager = struct {
                 continue;
             };
 
-            try loaded_sstables.append(sstable_file);
+            try loaded_sstables.append(self.backing_allocator, sstable_file);
         }
 
         // FIRST PASS: Check ALL tombstones across ALL SSTables (newest to oldest)
@@ -390,7 +390,7 @@ pub const SSTableManager = struct {
 
         // Build metadata for performance optimization - skip if corrupted
         if (self.build_sstable_metadata(owned_path, file_size)) |new_metadata| {
-            try self.cached_metadata.append(new_metadata);
+            try self.cached_metadata.append(self.backing_allocator, new_metadata);
         } else |err| {
             log.warn(
                 "Failed to build metadata for new SSTable '{s}': {any} - continuing without cached metadata",
@@ -405,7 +405,7 @@ pub const SSTableManager = struct {
     pub fn should_compact(self: *SSTableManager) bool {
         if (self.compaction_manager.check_compaction_needed() catch null) |job| {
             var mutable_job = job;
-            defer mutable_job.deinit();
+            defer mutable_job.deinit(self.backing_allocator);
             return true;
         }
         return false;
@@ -603,7 +603,7 @@ pub const SSTableManager = struct {
 
             // Build metadata for performance optimization - skip if corrupted
             if (self.build_sstable_metadata(path_copy, file_size)) |metadata| {
-                try self.cached_metadata.append(metadata);
+                try self.cached_metadata.append(self.backing_allocator, metadata);
             } else |err| {
                 log.warn(
                     "Failed to build metadata for discovered SSTable '{s}': {any} - continuing without cached metadata",
@@ -985,15 +985,15 @@ pub const SSTableManager = struct {
         temp_allocator: std.mem.Allocator,
     ) ![]GraphEdge {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
-        defer sstable_paths.deinit();
+        defer sstable_paths.deinit(temp_allocator);
 
         // Collect all SSTables and tombstones for validation
-        var loaded_sstables = std.array_list.Managed(SSTable).init(temp_allocator);
+        var loaded_sstables = std.ArrayList(SSTable){};
         defer {
             for (loaded_sstables.items) |*loaded_sstable| {
                 loaded_sstable.deinit();
             }
-            loaded_sstables.deinit();
+            loaded_sstables.deinit(temp_allocator);
         }
 
         // Load all SSTables (newer files first for tombstone precedence)
@@ -1009,11 +1009,11 @@ pub const SSTableManager = struct {
                 continue;
             };
 
-            try loaded_sstables.append(sstable_file);
+            try loaded_sstables.append(temp_allocator, sstable_file);
         }
 
-        var all_edges = std.array_list.Managed(GraphEdge).init(temp_allocator);
-        defer all_edges.deinit();
+        var all_edges = std.ArrayList(GraphEdge){};
+        defer all_edges.deinit(temp_allocator);
 
         // Collect edges from all SSTables and filter against tombstones
         for (loaded_sstables.items) |*sstable_file| {
@@ -1065,11 +1065,11 @@ pub const SSTableManager = struct {
                 }
                 if (!target_exists) continue :edge_loop;
 
-                try all_edges.append(edge);
+                try all_edges.append(temp_allocator, edge);
             }
         }
 
-        return all_edges.toOwnedSlice();
+        return all_edges.toOwnedSlice(temp_allocator);
     }
 
     /// Find all incoming edges to a target block across all SSTables.
@@ -1080,15 +1080,15 @@ pub const SSTableManager = struct {
         temp_allocator: std.mem.Allocator,
     ) ![]GraphEdge {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
-        defer sstable_paths.deinit();
+        defer sstable_paths.deinit(temp_allocator);
 
         // Collect all SSTables and tombstones for validation
-        var loaded_sstables = std.array_list.Managed(SSTable).init(temp_allocator);
+        var loaded_sstables = std.ArrayList(SSTable){};
         defer {
             for (loaded_sstables.items) |*loaded_sstable| {
                 loaded_sstable.deinit();
             }
-            loaded_sstables.deinit();
+            loaded_sstables.deinit(temp_allocator);
         }
 
         // Load all SSTables (newer files first for tombstone precedence)
@@ -1104,11 +1104,11 @@ pub const SSTableManager = struct {
                 continue;
             };
 
-            try loaded_sstables.append(sstable_file);
+            try loaded_sstables.append(temp_allocator, sstable_file);
         }
 
-        var all_edges = std.array_list.Managed(GraphEdge).init(temp_allocator);
-        defer all_edges.deinit();
+        var all_edges = std.ArrayList(GraphEdge){};
+        defer all_edges.deinit(temp_allocator);
 
         // Collect edges from all SSTables and filter against tombstones
         for (loaded_sstables.items) |*sstable_file| {
@@ -1160,11 +1160,11 @@ pub const SSTableManager = struct {
                 }
                 if (!target_exists) continue :edge_loop;
 
-                try all_edges.append(edge);
+                try all_edges.append(temp_allocator, edge);
             }
         }
 
-        return all_edges.toOwnedSlice();
+        return all_edges.toOwnedSlice(temp_allocator);
     }
 };
 

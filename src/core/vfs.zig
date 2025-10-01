@@ -284,6 +284,7 @@ pub const VFile = struct {
         fault_injection_fn: *const fn (*anyopaque, usize) VFileError!usize,
         read_corruption_fn: *const fn (*anyopaque, []u8) void,
         disk_usage_update_fn: *const fn (*anyopaque, usize, usize) void,
+        allocator_fn: *const fn (*anyopaque) std.mem.Allocator,
     };
 
     pub const SeekFrom = enum(u8) {
@@ -371,7 +372,7 @@ pub const VFile = struct {
                         const new_len = sim.position + actual_write_size;
 
                         // ensureTotalCapacity preserves existing data automatically
-                        try file_data.content.ensureTotalCapacity(new_len);
+                        try file_data.content.ensureTotalCapacity(sim.allocator_fn(sim.vfs_ptr), new_len);
 
                         const fresh_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
 
@@ -610,7 +611,7 @@ pub const VFile = struct {
 /// Simulation file data structure used by VFile.
 /// This must match the structure used by SimulationVFS implementations.
 pub const SimulationFileData = struct {
-    content: std.array_list.Managed(u8),
+    content: std.ArrayList(u8),
     created_time: i64,
     modified_time: i64,
     is_directory: bool,

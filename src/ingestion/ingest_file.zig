@@ -65,8 +65,8 @@ fn parse_zig_file_to_blocks(
     codebase_name: []const u8,
     config: ParseConfig,
 ) ![]IngestionBlock {
-    var blocks = std.array_list.Managed(IngestionBlock).init(allocator);
-    defer blocks.deinit(); // Only on error
+    var blocks = std.ArrayList(IngestionBlock){};
+    defer blocks.deinit(allocator); // Only on error
 
     var lines = std.mem.splitSequence(u8, file_content.data, "\n");
     var line_num: u32 = 1;
@@ -86,7 +86,7 @@ fn parse_zig_file_to_blocks(
             std.mem.indexOf(u8, trimmed_line, "@import(") != null)
         {
             const import_block = try create_import_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
-            try blocks.append(import_block);
+            try blocks.append(allocator, import_block);
             continue;
         }
 
@@ -94,7 +94,7 @@ fn parse_zig_file_to_blocks(
         if (is_function_declaration(trimmed_line)) {
             if (current_function) |*func_info| {
                 const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num - 1);
-                try blocks.append(func_block);
+                try blocks.append(allocator, func_block);
                 func_info.deinit();
             }
             current_function = try parse_function_declaration(allocator, trimmed_line, line_num);
@@ -103,7 +103,7 @@ fn parse_zig_file_to_blocks(
             // Check if this is a single-line function (ends on same line)
             if (brace_depth <= 0 and trimmed_line.len > 0 and trimmed_line[trimmed_line.len - 1] == '}') {
                 const func_block = try create_function_block(allocator, file_content.path, codebase_name, current_function.?, line_num);
-                try blocks.append(func_block);
+                try blocks.append(allocator, func_block);
                 current_function.?.deinit();
                 current_function = null;
             }
@@ -111,11 +111,11 @@ fn parse_zig_file_to_blocks(
             if (config.include_function_bodies and
                 current_function.?.body_lines.items.len * 80 < config.max_function_body_size)
             {
-                try current_function.?.body_lines.append(try allocator.dupe(u8, trimmed_line));
+                try current_function.?.body_lines.append(allocator, try allocator.dupe(u8, trimmed_line));
             }
             if (brace_depth <= 0 and trimmed_line.len > 0 and trimmed_line[trimmed_line.len - 1] == '}') {
                 const func_block = try create_function_block(allocator, file_content.path, codebase_name, current_function.?, line_num);
-                try blocks.append(func_block);
+                try blocks.append(allocator, func_block);
                 current_function.?.deinit();
                 current_function = null;
             }
@@ -124,7 +124,7 @@ fn parse_zig_file_to_blocks(
         // Test blocks
         if (config.include_tests and std.mem.startsWith(u8, trimmed_line, "test ")) {
             const test_block = try create_test_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
-            try blocks.append(test_block);
+            try blocks.append(allocator, test_block);
         }
 
         // Struct/const declarations
@@ -136,7 +136,7 @@ fn parse_zig_file_to_blocks(
                 std.mem.indexOf(u8, trimmed_line, " = union {") != null)
             {
                 const struct_block = try create_struct_block(allocator, file_content.path, codebase_name, trimmed_line, line_num);
-                try blocks.append(struct_block);
+                try blocks.append(allocator, struct_block);
             }
         }
     }
@@ -144,11 +144,11 @@ fn parse_zig_file_to_blocks(
     // Final function if file ended mid-function
     if (current_function) |*func_info| {
         const func_block = try create_function_block(allocator, file_content.path, codebase_name, func_info.*, line_num);
-        try blocks.append(func_block);
+        try blocks.append(allocator, func_block);
         func_info.deinit();
     }
 
-    return blocks.toOwnedSlice();
+    return blocks.toOwnedSlice(allocator);
 }
 
 /// Parse non-Zig text files into a single documentation IngestionBlock
@@ -160,7 +160,7 @@ fn parse_text_file_to_blocks(
 ) ![]IngestionBlock {
     _ = config;
 
-    var blocks = std.array_list.Managed(IngestionBlock).init(allocator);
+    var blocks = std.ArrayList(IngestionBlock){};
 
     const block_id = BlockId.generate();
     const source_uri = try std.fmt.allocPrint(allocator, "file://{s}#L1-{d}", .{ file_content.path, count_lines(file_content.data) });
@@ -175,8 +175,8 @@ fn parse_text_file_to_blocks(
         .content = content,
     });
 
-    try blocks.append(block);
-    return blocks.toOwnedSlice();
+    try blocks.append(allocator, block);
+    return blocks.toOwnedSlice(allocator);
 }
 
 /// Information about a function being parsed (internal, not a ContextBlock)
@@ -186,7 +186,7 @@ const FunctionInfo = struct {
     start_line: u32,
     is_public: bool,
     is_test: bool,
-    body_lines: std.array_list.Managed([]const u8),
+    body_lines: std.ArrayList([]const u8),
     allocator: Allocator,
 
     pub fn deinit(self: *FunctionInfo) void {
@@ -195,7 +195,7 @@ const FunctionInfo = struct {
         for (self.body_lines.items) |line| {
             self.allocator.free(line);
         }
-        self.body_lines.deinit();
+        self.body_lines.deinit(self.allocator);
     }
 };
 
@@ -221,7 +221,7 @@ fn parse_function_declaration(allocator: Allocator, line: []const u8, line_num: 
         .start_line = line_num,
         .is_public = is_public,
         .is_test = false,
-        .body_lines = std.array_list.Managed([]const u8).init(allocator),
+        .body_lines = std.ArrayList([]const u8){},
         .allocator = allocator,
     };
 }
@@ -253,15 +253,15 @@ fn create_function_block(
         "}}" ++
         "}}", .{ file_path, func_info.name, codebase_name, file_path, func_info.start_line, end_line, if (func_info.is_public) "public" else "private" });
 
-    var content = std.array_list.Managed(u8).init(allocator);
-    defer content.deinit();
+    var content = std.ArrayList(u8){};
+    defer content.deinit(allocator);
 
-    try content.appendSlice(func_info.signature);
+    try content.appendSlice(allocator, func_info.signature);
 
     if (func_info.body_lines.items.len > 0) {
         for (func_info.body_lines.items) |body_line| {
-            try content.append('\n');
-            try content.appendSlice(body_line);
+            try content.append(allocator, '\n');
+            try content.appendSlice(allocator, body_line);
         }
     }
 
@@ -270,7 +270,7 @@ fn create_function_block(
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = source_uri,
         .metadata_json = metadata_json,
-        .content = try content.toOwnedSlice(),
+        .content = try content.toOwnedSlice(allocator),
     });
 }
 

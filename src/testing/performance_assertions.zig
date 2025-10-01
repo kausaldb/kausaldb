@@ -293,22 +293,22 @@ fn measure_storage_latency(
 
 /// Batch performance measurement for statistical validation
 pub const BatchPerformanceMeasurement = struct {
-    measurements: std.array_list.Managed(u64),
+    measurements: std.ArrayList(u64),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) BatchPerformanceMeasurement {
         return BatchPerformanceMeasurement{
-            .measurements = std.array_list.Managed(u64).init(allocator),
+            .measurements = std.ArrayList(u64){},
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *BatchPerformanceMeasurement) void {
-        self.measurements.deinit();
+        self.measurements.deinit(self.allocator);
     }
 
     pub fn add_measurement(self: *BatchPerformanceMeasurement, duration_ns: u64) !void {
-        try self.measurements.append(duration_ns);
+        try self.measurements.append(self.allocator, duration_ns);
     }
 
     /// Calculate basic statistics for the measurements
@@ -334,10 +334,10 @@ pub const BatchPerformanceMeasurement = struct {
         }
 
         // Calculate P99 - sort and find 99th percentile
-        var sorted_measurements = std.array_list.Managed(u64).init(self.allocator);
-        defer sorted_measurements.deinit();
+        var sorted_measurements = std.ArrayList(u64){};
+        defer sorted_measurements.deinit(self.allocator);
         // Safety: Operation guaranteed to succeed by preconditions
-        sorted_measurements.appendSlice(self.measurements.items) catch unreachable;
+        sorted_measurements.appendSlice(self.allocator, self.measurements.items) catch unreachable;
         std.mem.sort(u64, sorted_measurements.items, {}, comptime std.sort.asc(u64));
 
         const p99_index = (sorted_measurements.items.len * 99) / 100;
@@ -388,7 +388,7 @@ pub const BatchPerformanceMeasurement = struct {
 
         // Use the 95th percentile for performance validation (more robust than max)
         var sorted_measurements = try self.measurements.clone();
-        defer sorted_measurements.deinit();
+        defer sorted_measurements.deinit(self.allocator);
         std.mem.sort(u64, sorted_measurements.items, {}, std.sort.asc(u64));
 
         const p95_index = (sorted_measurements.items.len * 95) / 100;
@@ -399,14 +399,17 @@ pub const BatchPerformanceMeasurement = struct {
 
         // Optionally log statistical summary
         if (builtin.mode == .Debug) {
-            std.debug.print("[STATS] {s} statistics: mean={d}ns, p95={d}ns, max={d}ns, samples={d}\n", .{ operation_description, mean, p95_latency, max_val, self.measurements.items.len });
+            std.debug.print(
+                "[STATS] {s} statistics: mean={d}ns, p95={d}ns, max={d}ns, samples={d}\n",
+                .{ operation_description, mean, p95_latency, max_val, self.measurements.items.len },
+            );
         }
     }
 };
 
 /// Statistical performance sampling framework with warmup support
 pub const StatisticalSampler = struct {
-    measurements: std.array_list.Managed(u64),
+    measurements: std.ArrayList(u64),
     allocator: std.mem.Allocator,
     warmup_samples: u32,
     measurement_samples: u32,
@@ -420,7 +423,7 @@ pub const StatisticalSampler = struct {
         measurement_samples: u32,
     ) StatisticalSampler {
         return StatisticalSampler{
-            .measurements = std.array_list.Managed(u64).init(allocator),
+            .measurements = std.ArrayList(u64).initCapacity(allocator, measurement_samples),
             .allocator = allocator,
             .warmup_samples = warmup_samples,
             .measurement_samples = measurement_samples,
@@ -429,7 +432,7 @@ pub const StatisticalSampler = struct {
     }
 
     pub fn deinit(self: *StatisticalSampler) void {
-        self.measurements.deinit();
+        self.measurements.deinit(self.allocator);
     }
 
     /// Run operation with warmup period followed by statistical sampling
@@ -440,7 +443,10 @@ pub const StatisticalSampler = struct {
     ) !void {
         // Warmup phase - don't record these measurements
         if (builtin.mode == .Debug) {
-            std.debug.print("[WARMUP] Running {d} warmup samples for {s}...\n", .{ self.warmup_samples, self.operation_name });
+            std.debug.print(
+                "[WARMUP] Running {d} warmup samples for {s}...\n",
+                .{ self.warmup_samples, self.operation_name },
+            );
         }
 
         for (0..self.warmup_samples) |_| {
@@ -452,16 +458,17 @@ pub const StatisticalSampler = struct {
 
         // Measurement phase - record these samples
         if (builtin.mode == .Debug) {
-            std.debug.print("[MEASURE] Collecting {d} measurement samples for {s}...\n", .{ self.measurement_samples, self.operation_name });
+            std.debug.print(
+                "[MEASURE] Collecting {d} measurement samples for {s}...\n",
+                .{ self.measurement_samples, self.operation_name },
+            );
         }
-
-        try self.measurements.ensureTotalCapacity(self.measurement_samples);
 
         for (0..self.measurement_samples) |_| {
             const start_time = std.time.nanoTimestamp();
             _ = try operation_fn(context);
             const end_time = std.time.nanoTimestamp();
-            try self.measurements.append(@intCast(end_time - start_time));
+            try self.measurements.append(self.allocator, @intCast(end_time - start_time));
         }
     }
 

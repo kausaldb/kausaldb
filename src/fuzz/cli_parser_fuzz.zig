@@ -101,12 +101,12 @@ fn fuzz_long_arguments(allocator: std.mem.Allocator, input: []const u8) !void {
     }
 
     // Create an extremely long argument
-    var long_arg = std.array_list.Managed(u8).init(allocator);
-    defer long_arg.deinit();
+    var long_arg = std.ArrayList(u8){};
+    defer long_arg.deinit(allocator);
 
     const repeat_count = @min(input.len * 1000, 100000); // Cap at 100KB
     for (0..repeat_count) |i| {
-        try long_arg.append(input[i % input.len]);
+        try long_arg.append(allocator, input[i % input.len]);
     }
 
     args[base_args.len] = try allocator.dupe(u8, long_arg.items);
@@ -124,14 +124,14 @@ fn fuzz_unicode_input(allocator: std.mem.Allocator, input: []const u8) !void {
     args[1] = try allocator.dupe(u8, "find");
 
     // Mix input with unicode
-    var mixed = std.array_list.Managed(u8).init(allocator);
-    defer mixed.deinit();
+    var mixed = std.ArrayList(u8){};
+    defer mixed.deinit(allocator);
 
     for (input, 0..) |byte, i| {
-        try mixed.append(byte);
+        try mixed.append(allocator, byte);
         if (i % 5 == 0 and unicode_chars.len > 0) {
             const unicode_idx = byte % unicode_chars.len;
-            try mixed.append(unicode_chars[unicode_idx]);
+            try mixed.append(allocator, unicode_chars[unicode_idx]);
         }
     }
 
@@ -148,18 +148,18 @@ fn fuzz_control_characters(allocator: std.mem.Allocator, input: []const u8) !voi
     args[1] = try allocator.dupe(u8, "status");
 
     // Create argument with control characters
-    var controlled = std.array_list.Managed(u8).init(allocator);
-    defer controlled.deinit();
+    var controlled = std.ArrayList(u8){};
+    defer controlled.deinit(allocator);
 
     for (input) |byte| {
         // Mix input with various control characters
-        try controlled.append(byte);
+        try controlled.append(allocator, byte);
         if (byte % 10 == 0) {
-            try controlled.append(0x00); // NULL
+            try controlled.append(allocator, 0x00); // NULL
         } else if (byte % 7 == 0) {
-            try controlled.append(0x1B); // ESC
+            try controlled.append(allocator, 0x1B); // ESC
         } else if (byte % 5 == 0) {
-            try controlled.append(0x07); // BEL
+            try controlled.append(allocator, 0x07); // BEL
         }
     }
 

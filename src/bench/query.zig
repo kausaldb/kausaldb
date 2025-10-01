@@ -49,8 +49,8 @@ fn bench_traversal_bfs_depth3(bench_harness: *BenchmarkHarness, query_engine: *i
     const warmup = @min(20, bench_harness.config.warmup_iterations);
 
     // 3. COLLECT SAMPLES
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // 4. WARMUP
     for (0..warmup) |_| {
@@ -62,7 +62,7 @@ fn bench_traversal_bfs_depth3(bench_harness: *BenchmarkHarness, query_engine: *i
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_bfs_traversal(query_engine, 3);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     // 6. CALCULATE AND REPORT
@@ -75,8 +75,8 @@ fn bench_traversal_bfs_depth5(bench_harness: *BenchmarkHarness, query_engine: *i
     const iterations = @min(50, bench_harness.config.iterations); // Deeper traversal is more expensive
     const warmup = @min(10, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_bfs_traversal(query_engine, 5) catch continue;
@@ -86,7 +86,7 @@ fn bench_traversal_bfs_depth5(bench_harness: *BenchmarkHarness, query_engine: *i
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_bfs_traversal(query_engine, 5);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/traversal_bfs_depth5", samples.items);
@@ -98,8 +98,8 @@ fn bench_traversal_dfs_depth3(bench_harness: *BenchmarkHarness, query_engine: *i
     const iterations = @min(100, bench_harness.config.iterations);
     const warmup = @min(20, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_dfs_traversal(query_engine, 3) catch continue;
@@ -109,7 +109,7 @@ fn bench_traversal_dfs_depth3(bench_harness: *BenchmarkHarness, query_engine: *i
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_dfs_traversal(query_engine, 3);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/traversal_dfs_depth3", samples.items);
@@ -121,8 +121,8 @@ fn bench_traversal_dfs_depth5(bench_harness: *BenchmarkHarness, query_engine: *i
     const iterations = @min(50, bench_harness.config.iterations);
     const warmup = @min(10, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_dfs_traversal(query_engine, 5) catch continue;
@@ -132,7 +132,7 @@ fn bench_traversal_dfs_depth5(bench_harness: *BenchmarkHarness, query_engine: *i
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_dfs_traversal(query_engine, 5);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/traversal_dfs_depth5", samples.items);
@@ -144,8 +144,8 @@ fn bench_edge_filter_by_type(bench_harness: *BenchmarkHarness, query_engine: *in
     const iterations = bench_harness.config.iterations;
     const warmup = bench_harness.config.warmup_iterations;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_edge_filter(query_engine) catch continue;
@@ -155,7 +155,7 @@ fn bench_edge_filter_by_type(bench_harness: *BenchmarkHarness, query_engine: *in
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_edge_filter(query_engine);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/edge_filter_by_type", samples.items);
@@ -167,8 +167,8 @@ fn bench_multi_hop_query(bench_harness: *BenchmarkHarness, query_engine: *intern
     const iterations = @min(100, bench_harness.config.iterations);
     const warmup = @min(20, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_multi_hop_query(query_engine) catch continue;
@@ -178,7 +178,7 @@ fn bench_multi_hop_query(bench_harness: *BenchmarkHarness, query_engine: *intern
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_multi_hop_query(query_engine);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/multi_hop_query", samples.items);
@@ -190,8 +190,8 @@ fn bench_semantic_search(bench_harness: *BenchmarkHarness, query_engine: *intern
     const iterations = bench_harness.config.iterations;
     const warmup = bench_harness.config.warmup_iterations;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |_| {
         _ = perform_semantic_search(query_engine) catch continue;
@@ -201,7 +201,7 @@ fn bench_semantic_search(bench_harness: *BenchmarkHarness, query_engine: *intern
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_semantic_search(query_engine);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("query/semantic_search", samples.items);

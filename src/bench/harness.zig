@@ -76,7 +76,7 @@ pub const BenchmarkResult = struct {
 /// Statistical sampling and analysis tool
 pub const StatisticalSampler = struct {
     allocator: Allocator,
-    samples: std.array_list.Managed(u64),
+    samples: std.ArrayList(u64),
 
     const Statistics = struct {
         sample_count: u32,
@@ -92,16 +92,16 @@ pub const StatisticalSampler = struct {
     pub fn init(allocator: Allocator) StatisticalSampler {
         return StatisticalSampler{
             .allocator = allocator,
-            .samples = std.array_list.Managed(u64).init(allocator),
+            .samples = std.ArrayList(u64){},
         };
     }
 
     pub fn deinit(self: *StatisticalSampler) void {
-        self.samples.deinit();
+        self.samples.deinit(self.allocator);
     }
 
     pub fn add_sample(self: *StatisticalSampler, sample_ns: u64) !void {
-        try self.samples.append(sample_ns);
+        try self.samples.append(self.allocator, sample_ns);
     }
 
     pub fn calculate_stats(self: *StatisticalSampler) Statistics {
@@ -147,14 +147,14 @@ pub const BenchmarkHarness = struct {
     allocator: Allocator,
     config: BenchConfig,
     baseline: ?std.StringHashMap(BenchmarkResult),
-    results: std.array_list.Managed(BenchmarkResult),
+    results: std.ArrayList(BenchmarkResult),
 
     pub fn init(allocator: Allocator, config: BenchConfig) !BenchmarkHarness {
         var harness = BenchmarkHarness{
             .allocator = allocator,
             .config = config,
             .baseline = null,
-            .results = std.array_list.Managed(BenchmarkResult).init(allocator),
+            .results = std.ArrayList(BenchmarkResult){},
         };
 
         // Load baseline if specified
@@ -176,7 +176,7 @@ pub const BenchmarkHarness = struct {
     }
 
     pub fn deinit(self: *BenchmarkHarness) void {
-        self.results.deinit();
+        self.results.deinit(self.allocator);
         if (self.baseline) |*baseline| {
             var iterator = baseline.iterator();
             while (iterator.next()) |entry| {
@@ -198,7 +198,7 @@ pub const BenchmarkHarness = struct {
             }
         }
 
-        try self.results.append(final_result);
+        try self.results.append(self.allocator, final_result);
     }
 
     /// Print all results

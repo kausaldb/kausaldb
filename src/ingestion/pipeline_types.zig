@@ -76,7 +76,7 @@ pub const ParsedUnit = struct {
     /// Source location information
     location: SourceLocation,
     /// Relationships to other units
-    edges: std.array_list.Managed(ParsedEdge),
+    edges: std.ArrayList(ParsedEdge),
     /// Additional unit metadata
     metadata: std.StringHashMap([]const u8),
 
@@ -90,7 +90,7 @@ pub const ParsedUnit = struct {
         for (self.edges.items) |*edge| {
             edge.deinit(allocator);
         }
-        self.edges.deinit();
+        self.edges.deinit(allocator);
 
         var iter = self.metadata.iterator();
         while (iter.next()) |entry| {

@@ -280,7 +280,7 @@ fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !Exi
     defer coordinator.shutdown();
 
     // Create network server with coordinator dependency
-    var network_server = NetworkServer.init(allocator, config, &coordinator);
+    var network_server = try NetworkServer.init(allocator, config, &coordinator);
     defer network_server.deinit();
 
     // Phase 2: Start network server

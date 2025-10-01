@@ -612,7 +612,7 @@ pub const StorageEngine = struct {
 
         // Scan SSTables for highest sequence number
         var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
-        defer sstable_paths.deinit();
+        defer sstable_paths.deinit(self.backing_allocator);
 
         for (sstable_paths.items) |sstable_path| {
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
@@ -862,7 +862,7 @@ pub const StorageEngine = struct {
 
         // Check SSTables - need to search all of them to find highest sequence
         var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
-        defer sstable_paths.deinit();
+        defer sstable_paths.deinit(self.backing_allocator);
 
         for (sstable_paths.items) |sstable_path| {
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);

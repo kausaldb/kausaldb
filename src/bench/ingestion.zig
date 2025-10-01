@@ -64,8 +64,8 @@ fn bench_zig_parser_throughput(bench_harness: *BenchmarkHarness, allocator: std.
     ;
 
     // 3. COLLECT SAMPLES
-    var samples = std.array_list.Managed(u64).init(allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(allocator);
 
     // 4. WARMUP
     for (0..warmup) |_| {
@@ -77,7 +77,7 @@ fn bench_zig_parser_throughput(bench_harness: *BenchmarkHarness, allocator: std.
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_zig_parse(sample_code, allocator);
-        try samples.append(timer.read());
+        try samples.append(allocator, timer.read());
     }
 
     // 6. CALCULATE AND REPORT
@@ -90,8 +90,8 @@ fn bench_directory_traversal(bench_harness: *BenchmarkHarness, vfs: *internal.Si
     const iterations = @min(100, bench_harness.config.iterations); // Directory ops can be expensive
     const warmup = @min(20, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(allocator);
 
     for (0..warmup) |_| {
         _ = perform_directory_traversal(vfs, allocator) catch continue;
@@ -101,7 +101,7 @@ fn bench_directory_traversal(bench_harness: *BenchmarkHarness, vfs: *internal.Si
     for (0..iterations) |_| {
         timer.reset();
         _ = try perform_directory_traversal(vfs, allocator);
-        try samples.append(timer.read());
+        try samples.append(allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("ingestion/directory_traversal", samples.items);
@@ -114,8 +114,8 @@ fn bench_batch_ingestion_small(bench_harness: *BenchmarkHarness, storage: *inter
     const warmup = bench_harness.config.warmup_iterations;
     const batch_size = 10;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |i| {
         _ = perform_batch_ingestion(storage, batch_size, i * 1000) catch continue;
@@ -125,7 +125,7 @@ fn bench_batch_ingestion_small(bench_harness: *BenchmarkHarness, storage: *inter
     for (0..iterations) |i| {
         timer.reset();
         _ = try perform_batch_ingestion(storage, batch_size, (warmup + i) * 1000);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("ingestion/batch_small", samples.items);
@@ -138,8 +138,8 @@ fn bench_batch_ingestion_large(bench_harness: *BenchmarkHarness, storage: *inter
     const warmup = @min(10, bench_harness.config.warmup_iterations);
     const batch_size = 100;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |i| {
         _ = perform_batch_ingestion(storage, batch_size, i * 10000) catch continue;
@@ -149,7 +149,7 @@ fn bench_batch_ingestion_large(bench_harness: *BenchmarkHarness, storage: *inter
     for (0..iterations) |i| {
         timer.reset();
         _ = try perform_batch_ingestion(storage, batch_size, (warmup + i) * 10000);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("ingestion/batch_large", samples.items);
@@ -161,8 +161,8 @@ fn bench_incremental_ingestion(bench_harness: *BenchmarkHarness, storage: *inter
     const iterations = bench_harness.config.iterations;
     const warmup = bench_harness.config.warmup_iterations;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     for (0..warmup) |i| {
         _ = perform_single_file_ingestion(storage, i) catch continue;
@@ -172,7 +172,7 @@ fn bench_incremental_ingestion(bench_harness: *BenchmarkHarness, storage: *inter
     for (0..iterations) |i| {
         timer.reset();
         _ = try perform_single_file_ingestion(storage, warmup + i);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("ingestion/incremental", samples.items);

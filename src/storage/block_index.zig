@@ -250,14 +250,14 @@ pub const BlockIndex = struct {
     /// Collect all tombstones for compaction processing.
     /// Caller owns returned slice and must free with provided allocator.
     pub fn collect_tombstones(self: *const BlockIndex, allocator: std.mem.Allocator) ![]TombstoneRecord {
-        var tombstones_list = std.array_list.Managed(TombstoneRecord).init(allocator);
-        defer tombstones_list.deinit();
+        var tombstones_list = std.ArrayList(TombstoneRecord){};
+        defer tombstones_list.deinit(allocator);
 
         var iter = self.tombstones.iterator();
         while (iter.next()) |entry| {
-            try tombstones_list.append(entry.value_ptr.*);
+            try tombstones_list.append(allocator, entry.value_ptr.*);
         }
-        return tombstones_list.toOwnedSlice();
+        return tombstones_list.toOwnedSlice(allocator);
     }
 
     /// Large block cloning with chunked copy to improve cache locality.

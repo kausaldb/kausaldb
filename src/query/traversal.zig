@@ -38,18 +38,25 @@ const BlockIdHashContext = struct {
 
 /// Corruption-resistant visited tracker for fault injection scenarios
 const VisitedTracker = struct {
-    visited_ids: std.array_list.Managed(BlockId),
+    visited_ids: std.ArrayList(BlockId),
     allocator: std.mem.Allocator,
 
     fn init(allocator: std.mem.Allocator) VisitedTracker {
         return VisitedTracker{
-            .visited_ids = std.array_list.Managed(BlockId).init(allocator),
+            .visited_ids = std.ArrayList(BlockId){},
+            .allocator = allocator,
+        };
+    }
+
+    fn init_with_capacity(allocator: std.mem.Allocator, capacity: u16) !VisitedTracker {
+        return VisitedTracker{
+            .visited_ids = try std.ArrayList(BlockId).initCapacity(allocator, capacity),
             .allocator = allocator,
         };
     }
 
     fn deinit(self: *VisitedTracker) void {
-        self.visited_ids.deinit();
+        self.visited_ids.deinit(self.allocator);
     }
 
     fn put(self: *VisitedTracker, id: BlockId) !void {
@@ -57,7 +64,7 @@ const VisitedTracker = struct {
         for (self.visited_ids.items) |existing_id| {
             if (existing_id.eql(id)) return;
         }
-        try self.visited_ids.append(id);
+        try self.visited_ids.append(self.allocator, id);
     }
 
     fn contains(self: *const VisitedTracker, id: BlockId) bool {
@@ -341,26 +348,23 @@ fn traverse_breadth_first(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    var visited = VisitedTracker.init(allocator);
+    const initial_capacity = @min(query.max_results, 1000);
+    var visited = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited.deinit();
-    try visited.visited_ids.ensureTotalCapacity(@min(query.max_results, 1000));
 
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    try result_blocks.ensureTotalCapacity(query.max_results);
-    defer result_blocks.deinit();
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, query.max_results);
+    defer result_blocks.deinit(allocator);
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    try result_paths.ensureTotalCapacity(query.max_results);
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, query.max_results);
     defer {
         for (result_paths.items) |path| {
             allocator.free(path);
         }
-        result_paths.deinit();
+        result_paths.deinit(allocator);
     }
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    try result_depths.ensureTotalCapacity(query.max_results);
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, query.max_results);
+    defer result_depths.deinit(allocator);
 
     const QueueItem = struct {
         block_id: BlockId,
@@ -368,19 +372,18 @@ fn traverse_breadth_first(
         path: []BlockId,
     };
 
-    var queue = std.array_list.Managed(QueueItem).init(allocator);
-    try queue.ensureTotalCapacity(query.max_results);
+    var queue = try std.ArrayList(QueueItem).initCapacity(allocator, query.max_results);
     defer {
         for (queue.items) |item| {
             allocator.free(item.path);
         }
-        queue.deinit();
+        queue.deinit(allocator);
     }
 
     const start_path = try allocator.alloc(BlockId, 1);
     start_path[0] = query.start_block_id;
 
-    try queue.append(QueueItem{
+    try queue.append(allocator, QueueItem{
         .block_id = query.start_block_id,
         .depth = 0,
         .path = start_path,
@@ -403,12 +406,12 @@ fn traverse_breadth_first(
             .query_engine,
         )) orelse continue;
 
-        try result_blocks.append(current_block);
+        try result_blocks.append(allocator, current_block);
 
         const cloned_path = try allocator.dupe(BlockId, current.path);
-        try result_paths.append(cloned_path);
+        try result_paths.append(allocator, cloned_path);
 
-        try result_depths.append(current.depth);
+        try result_depths.append(allocator, current.depth);
 
         if (query.max_depth > 0 and current.depth >= query.max_depth) {
             continue;
@@ -426,9 +429,9 @@ fn traverse_breadth_first(
         );
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,
@@ -445,26 +448,23 @@ fn traverse_depth_first(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    var visited = VisitedTracker.init(allocator);
+    const initial_capacity = @min(query.max_results, 1000);
+    var visited = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited.deinit();
-    try visited.visited_ids.ensureTotalCapacity(@min(query.max_results, 1000));
 
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    try result_blocks.ensureTotalCapacity(query.max_results);
-    defer result_blocks.deinit();
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, query.max_results);
+    defer result_blocks.deinit(allocator);
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    try result_paths.ensureTotalCapacity(query.max_results);
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, query.max_results);
     defer {
         for (result_paths.items) |path| {
             allocator.free(path);
         }
-        result_paths.deinit();
+        result_paths.deinit(allocator);
     }
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    try result_depths.ensureTotalCapacity(query.max_results);
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, query.max_results);
+    defer result_depths.deinit(allocator);
 
     const StackItem = struct {
         block_id: BlockId,
@@ -472,19 +472,18 @@ fn traverse_depth_first(
         path: []BlockId,
     };
 
-    var stack = std.array_list.Managed(StackItem).init(allocator);
-    try stack.ensureTotalCapacity(query.max_results);
+    var stack = try std.ArrayList(StackItem).initCapacity(allocator, query.max_results);
     defer {
         for (stack.items) |item| {
             allocator.free(item.path);
         }
-        stack.deinit();
+        stack.deinit(allocator);
     }
 
     const start_path = try allocator.alloc(BlockId, 1);
     start_path[0] = query.start_block_id;
 
-    try stack.append(StackItem{
+    try stack.append(allocator, StackItem{
         .block_id = query.start_block_id,
         .depth = 0,
         .path = start_path,
@@ -511,12 +510,12 @@ fn traverse_depth_first(
             current.block_id,
         )) orelse continue;
 
-        try result_blocks.append(current_block);
+        try result_blocks.append(allocator, current_block);
 
         const cloned_path = try allocator.dupe(BlockId, current.path);
-        try result_paths.append(cloned_path);
+        try result_paths.append(allocator, cloned_path);
 
-        try result_depths.append(current.depth);
+        try result_depths.append(allocator, current.depth);
 
         if (query.max_depth > 0 and current.depth >= query.max_depth) {
             continue;
@@ -534,9 +533,9 @@ fn traverse_depth_first(
         );
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,
@@ -574,7 +573,7 @@ fn add_neighbors_to_queue(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.target_id;
 
-                    try queue.append(QueueItem{
+                    try queue.append(allocator, QueueItem{
                         .block_id = edge.target_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -596,7 +595,7 @@ fn add_neighbors_to_queue(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.source_id;
 
-                    try queue.append(QueueItem{
+                    try queue.append(allocator, QueueItem{
                         .block_id = edge.source_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -632,7 +631,7 @@ fn add_neighbors_to_stack(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.target_id;
 
-                    try stack.append(StackItem{
+                    try stack.append(allocator, StackItem{
                         .block_id = edge.target_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -654,7 +653,7 @@ fn add_neighbors_to_stack(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.source_id;
 
-                    try stack.append(StackItem{
+                    try stack.append(allocator, StackItem{
                         .block_id = edge.source_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -672,26 +671,23 @@ fn traverse_astar_search(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    var visited = VisitedTracker.init(allocator);
+    const initial_capacity = @min(query.max_results, 1000);
+    var visited = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited.deinit();
-    try visited.visited_ids.ensureTotalCapacity(@min(query.max_results, 1000));
 
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    try result_blocks.ensureTotalCapacity(query.max_results);
-    defer result_blocks.deinit();
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, query.max_results);
+    defer result_blocks.deinit(allocator);
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    try result_paths.ensureTotalCapacity(query.max_results);
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, query.max_results);
     defer {
         for (result_paths.items) |path| {
             allocator.free(path);
         }
-        result_paths.deinit();
+        result_paths.deinit(allocator);
     }
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    try result_depths.ensureTotalCapacity(query.max_results);
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, query.max_results);
+    defer result_depths.deinit(allocator);
 
     const AStarNode = struct {
         block_id: BlockId,
@@ -743,12 +739,12 @@ fn traverse_astar_search(
             current.block_id,
         )) orelse continue;
 
-        try result_blocks.append(current_block);
+        try result_blocks.append(allocator, current_block);
 
         const cloned_path = try allocator.dupe(BlockId, current.path);
-        try result_paths.append(cloned_path);
+        try result_paths.append(allocator, cloned_path);
 
-        try result_depths.append(current.depth);
+        try result_depths.append(allocator, current.depth);
 
         if (query.max_depth > 0 and current.depth >= query.max_depth) {
             continue;
@@ -768,9 +764,9 @@ fn traverse_astar_search(
         );
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,
@@ -788,30 +784,26 @@ fn traverse_bidirectional_search(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    var visited_forward = VisitedTracker.init(allocator);
+    const initial_capacity = @min(query.max_results / 2, 500);
+    var visited_forward = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited_forward.deinit();
-    try visited_forward.visited_ids.ensureTotalCapacity(@min(query.max_results / 2, 500));
 
-    var visited_backward = VisitedTracker.init(allocator);
+    var visited_backward = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited_backward.deinit();
-    try visited_backward.visited_ids.ensureTotalCapacity(@min(query.max_results / 2, 500));
 
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    try result_blocks.ensureTotalCapacity(query.max_results);
-    defer result_blocks.deinit();
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, query.max_results);
+    defer result_blocks.deinit(allocator);
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    try result_paths.ensureTotalCapacity(query.max_results);
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, query.max_results);
     defer {
         for (result_paths.items) |path| {
             allocator.free(path);
         }
-        result_paths.deinit();
+        result_paths.deinit(allocator);
     }
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    try result_depths.ensureTotalCapacity(query.max_results);
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, query.max_results);
+    defer result_depths.deinit(allocator);
 
     const QueueItem = struct {
         block_id: BlockId,
@@ -820,28 +812,26 @@ fn traverse_bidirectional_search(
         is_forward: bool, // true for forward search, false for backward
     };
 
-    var queue_forward = std.array_list.Managed(QueueItem).init(allocator);
-    try queue_forward.ensureTotalCapacity(query.max_results / 2);
+    var queue_forward = try std.ArrayList(QueueItem).initCapacity(allocator, query.max_results / 2);
     defer {
         for (queue_forward.items) |item| {
             allocator.free(item.path);
         }
-        queue_forward.deinit();
+        queue_forward.deinit(allocator);
     }
 
-    var queue_backward = std.array_list.Managed(QueueItem).init(allocator);
-    try queue_backward.ensureTotalCapacity(query.max_results / 2);
+    var queue_backward = try std.ArrayList(QueueItem).initCapacity(allocator, query.max_results / 2);
     defer {
         for (queue_backward.items) |item| {
             allocator.free(item.path);
         }
-        queue_backward.deinit();
+        queue_backward.deinit(allocator);
     }
 
     const start_path = try allocator.alloc(BlockId, 1);
     start_path[0] = query.start_block_id;
 
-    try queue_forward.append(QueueItem{
+    try queue_forward.append(allocator, QueueItem{
         .block_id = query.start_block_id,
         .depth = 0,
         .path = start_path,
@@ -855,7 +845,7 @@ fn traverse_bidirectional_search(
         const backward_path = try allocator.alloc(BlockId, 1);
         backward_path[0] = query.start_block_id;
 
-        try queue_backward.append(QueueItem{
+        try queue_backward.append(allocator, QueueItem{
             .block_id = query.start_block_id,
             .depth = 0,
             .path = backward_path,
@@ -882,12 +872,12 @@ fn traverse_bidirectional_search(
                 current.block_id,
             )) orelse continue;
 
-            try result_blocks.append(current_block);
+            try result_blocks.append(allocator, current_block);
 
             const cloned_path = try allocator.dupe(BlockId, current.path);
-            try result_paths.append(cloned_path);
+            try result_paths.append(allocator, cloned_path);
 
-            try result_depths.append(current.depth);
+            try result_depths.append(allocator, current.depth);
 
             if (query.max_depth > 0 and current.depth >= query.max_depth / 2) {
                 continue;
@@ -921,12 +911,12 @@ fn traverse_bidirectional_search(
                 current.block_id,
             )) orelse continue;
 
-            try result_blocks.append(current_block);
+            try result_blocks.append(allocator, current_block);
 
             const cloned_path = try allocator.dupe(BlockId, current.path);
-            try result_paths.append(cloned_path);
+            try result_paths.append(allocator, cloned_path);
 
-            try result_depths.append(current.depth);
+            try result_depths.append(allocator, current.depth);
 
             if (query.max_depth > 0 and current.depth >= query.max_depth / 2) {
                 continue;
@@ -946,9 +936,9 @@ fn traverse_bidirectional_search(
         }
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,
@@ -974,48 +964,45 @@ fn traverse_topological_sort(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    try result_blocks.ensureTotalCapacity(query.max_results); // Pre-allocate for expected result size
-    defer result_blocks.deinit();
+    const initial_level_capacity: usize = 16;
+    const initial_queue_capacity: usize = 32;
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    try result_paths.ensureTotalCapacity(query.max_results); // Pre-allocate for path tracking
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, query.max_results);
+    defer result_blocks.deinit(allocator);
+
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, query.max_results);
     defer {
         for (result_paths.items) |path| {
             allocator.free(path);
         }
-        result_paths.deinit();
+        result_paths.deinit(allocator);
     }
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    try result_depths.ensureTotalCapacity(query.max_results); // Pre-allocate for depth tracking
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, query.max_results);
+    defer result_depths.deinit(allocator);
 
     // Use Kahn's algorithm with cycle detection
-    var visited = VisitedTracker.init(allocator);
+    const initial_capacity = @min(query.max_results, 1000);
+    var visited = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited.deinit();
-    try visited.visited_ids.ensureTotalCapacity(@min(query.max_results, 1000));
 
     var in_degree = std.HashMap(BlockId, u32, BlockIdHashContext, std.hash_map.default_max_load_percentage).init(allocator);
     defer in_degree.deinit();
 
-    var queue = std.array_list.Managed(BlockId).init(allocator);
-    try queue.ensureTotalCapacity(32); // Pre-allocate for typical DAG breadth
-    defer queue.deinit();
+    var queue = try std.ArrayList(BlockId).initCapacity(allocator, initial_queue_capacity);
+    defer queue.deinit(allocator);
 
     // Start from the root node
-    var current_nodes = std.array_list.Managed(BlockId).init(allocator);
-    try current_nodes.ensureTotalCapacity(16); // Pre-allocate for typical graph exploration breadth
-    defer current_nodes.deinit();
-    try current_nodes.append(query.start_block_id);
+    var current_nodes = try std.ArrayList(BlockId).initCapacity(allocator, initial_level_capacity);
+    defer current_nodes.deinit(allocator);
+    try current_nodes.append(allocator, query.start_block_id);
 
     var depth: u32 = 0;
 
     // Build in-degree map for all reachable nodes
     while (current_nodes.items.len > 0 and depth < query.max_depth) {
-        var next_nodes = std.array_list.Managed(BlockId).init(allocator);
-        try next_nodes.ensureTotalCapacity(32); // Pre-allocate for next level expansion
-        defer next_nodes.deinit();
+        var next_nodes = try std.ArrayList(BlockId).initCapacity(allocator, initial_level_capacity);
+        defer next_nodes.deinit(allocator);
 
         for (current_nodes.items) |block_id| {
             if (visited.contains(block_id)) continue;
@@ -1037,12 +1024,12 @@ fn traverse_topological_sort(
                 const current_degree = in_degree.get(edge.target_id) orelse 0;
                 try in_degree.put(edge.target_id, current_degree + 1);
 
-                try next_nodes.append(edge.target_id);
+                try next_nodes.append(allocator, edge.target_id);
             }
         }
 
         current_nodes.clearRetainingCapacity();
-        try current_nodes.appendSlice(next_nodes.items);
+        try current_nodes.appendSlice(allocator, next_nodes.items);
         depth += 1;
     }
 
@@ -1050,19 +1037,19 @@ fn traverse_topological_sort(
     var in_degree_iter = in_degree.iterator();
     while (in_degree_iter.next()) |entry| {
         if (entry.value_ptr.* == 0) {
-            try queue.append(entry.key_ptr.*);
+            try queue.append(allocator, entry.key_ptr.*);
         }
     }
 
+    const initial_sorted_capacity: usize = 64;
     var sorted_count: usize = 0;
-    var path = std.array_list.Managed(BlockId).init(allocator);
-    try path.ensureTotalCapacity(64); // Pre-allocate for expected topological result size
-    defer path.deinit();
+    var path = try std.ArrayList(BlockId).initCapacity(allocator, initial_sorted_capacity);
+    defer path.deinit(allocator);
 
     // Kahn's algorithm
     while (queue.items.len > 0) {
         const current = queue.orderedRemove(0);
-        try path.append(current);
+        try path.append(allocator, current);
         sorted_count += 1;
 
         // Query dependencies to update in-degree counts for Kahn's algorithm
@@ -1078,7 +1065,7 @@ fn traverse_topological_sort(
             if (current_degree > 0) {
                 try in_degree.put(edge.target_id, current_degree - 1);
                 if (current_degree - 1 == 0) {
-                    try queue.append(edge.target_id);
+                    try queue.append(allocator, edge.target_id);
                 }
             }
         }
@@ -1087,9 +1074,9 @@ fn traverse_topological_sort(
     // Check for cycle: if sorted_count < total nodes, there's a cycle
     if (sorted_count < visited.count()) {
         // Cycle detected - return empty result
-        const owned_blocks = try result_blocks.toOwnedSlice();
-        const owned_paths = try result_paths.toOwnedSlice();
-        const owned_depths = try result_depths.toOwnedSlice();
+        const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+        const owned_paths = try result_paths.toOwnedSlice(allocator);
+        const owned_depths = try result_depths.toOwnedSlice(allocator);
 
         return TraversalResult.init(
             owned_blocks,
@@ -1105,21 +1092,21 @@ fn traverse_topological_sort(
         for (path.items, 0..) |block_id, i| {
             // Try to find the block
             if (storage_engine.find_query_block(block_id) catch null) |block| {
-                try result_blocks.append(block);
+                try result_blocks.append(allocator, block);
 
                 // Create path slice for this block (just itself in topological order)
                 const block_path = try allocator.alloc(BlockId, 1);
                 block_path[0] = block_id;
-                try result_paths.append(block_path);
+                try result_paths.append(allocator, block_path);
 
-                try result_depths.append(@intCast(i));
+                try result_depths.append(allocator, @intCast(i));
             }
         }
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,
@@ -1237,7 +1224,7 @@ fn add_neighbors_to_bidirectional_queue(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.target_id;
 
-                    try queue.append(QueueItem{
+                    try queue.append(allocator, QueueItem{
                         .block_id = edge.target_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -1262,7 +1249,7 @@ fn add_neighbors_to_bidirectional_queue(
                     @memcpy(new_path[0..current_path.len], current_path);
                     new_path[current_path.len] = edge.source_id;
 
-                    try queue.append(QueueItem{
+                    try queue.append(allocator, QueueItem{
                         .block_id = edge.source_id,
                         .depth = next_depth,
                         .path = new_path,
@@ -1367,6 +1354,8 @@ pub fn find_paths_between(
     target_id: BlockId,
     max_depth: u32,
 ) !TraversalResult {
+    const max_paths: u32 = 100;
+
     // Early exit if source equals target
     if (source_id.eql(target_id)) {
         const single_path = try allocator.alloc(BlockId, 1);
@@ -1385,18 +1374,18 @@ pub fn find_paths_between(
         return TraversalResult.init(blocks, paths, depths, 1, 0);
     }
 
-    var visited = VisitedTracker.init(allocator);
+    const initial_capacity = 1000;
+    var visited = try VisitedTracker.init_with_capacity(allocator, initial_capacity);
     defer visited.deinit();
-    try visited.visited_ids.ensureTotalCapacity(1000);
 
-    var result_blocks = std.array_list.Managed(OwnedBlock).init(allocator);
-    defer result_blocks.deinit();
+    var result_blocks = try std.ArrayList(OwnedBlock).initCapacity(allocator, max_paths);
+    defer result_blocks.deinit(allocator);
 
-    var result_paths = std.array_list.Managed([]BlockId).init(allocator);
-    defer result_paths.deinit();
+    var result_paths = try std.ArrayList([]BlockId).initCapacity(allocator, max_paths);
+    defer result_paths.deinit(allocator);
 
-    var result_depths = std.array_list.Managed(u32).init(allocator);
-    defer result_depths.deinit();
+    var result_depths = try std.ArrayList(u32).initCapacity(allocator, max_paths);
+    defer result_depths.deinit(allocator);
 
     // BFS queue with path tracking
     const QueueNode = struct {
@@ -1405,18 +1394,18 @@ pub fn find_paths_between(
         path: []BlockId,
     };
 
-    var queue = std.array_list.Managed(QueueNode).init(allocator);
+    var queue = try std.ArrayList(QueueNode).initCapacity(allocator, max_paths);
     defer {
         for (queue.items) |node| {
             allocator.free(node.path);
         }
-        queue.deinit();
+        queue.deinit(allocator);
     }
 
     // Initialize with source block
     const initial_path = try allocator.alloc(BlockId, 1);
     initial_path[0] = source_id;
-    try queue.append(QueueNode{
+    try queue.append(allocator, QueueNode{
         .block_id = source_id,
         .depth = 0,
         .path = initial_path,
@@ -1427,7 +1416,7 @@ pub fn find_paths_between(
     var max_depth_reached: u32 = 0;
     var paths_found: u32 = 0;
 
-    while (queue.items.len > 0 and paths_found < 100) { // Limit paths found
+    while (queue.items.len > 0 and paths_found < max_paths) {
         const current = queue.orderedRemove(0);
         defer allocator.free(current.path);
 
@@ -1450,9 +1439,9 @@ pub fn find_paths_between(
                 // Found target - add to results
                 const target_block = try storage_engine.find_block(target_id, .query_engine);
                 if (target_block) |block| {
-                    try result_blocks.append(block);
-                    try result_paths.append(try allocator.dupe(BlockId, new_path));
-                    try result_depths.append(current.depth + 1);
+                    try result_blocks.append(allocator, block);
+                    try result_paths.append(allocator, try allocator.dupe(BlockId, new_path));
+                    try result_depths.append(allocator, current.depth + 1);
                     paths_found += 1;
                 }
                 allocator.free(new_path);
@@ -1461,7 +1450,7 @@ pub fn find_paths_between(
 
             // Continue BFS if not visited and within depth limit
             if (!visited.contains(next_id) and current.depth + 1 <= max_depth) {
-                try queue.append(QueueNode{
+                try queue.append(allocator, QueueNode{
                     .block_id = next_id,
                     .depth = current.depth + 1,
                     .path = new_path,
@@ -1474,9 +1463,9 @@ pub fn find_paths_between(
         }
     }
 
-    const owned_blocks = try result_blocks.toOwnedSlice();
-    const owned_paths = try result_paths.toOwnedSlice();
-    const owned_depths = try result_depths.toOwnedSlice();
+    const owned_blocks = try result_blocks.toOwnedSlice(allocator);
+    const owned_paths = try result_paths.toOwnedSlice(allocator);
+    const owned_depths = try result_depths.toOwnedSlice(allocator);
 
     return TraversalResult.init(
         owned_blocks,

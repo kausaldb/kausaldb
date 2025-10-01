@@ -209,7 +209,7 @@ pub const Fuzzer = struct {
     arena: std.heap.ArenaAllocator,
     config: FuzzConfig,
     stats: FuzzStats,
-    crashes: std.array_list.Managed(CrashInfo),
+    crashes: std.ArrayList(CrashInfo),
     prng: std.Random.DefaultPrng,
     timer: std.time.Timer,
     coverage: CoverageTracker,
@@ -223,7 +223,7 @@ pub const Fuzzer = struct {
             .arena = std.heap.ArenaAllocator.init(allocator),
             .config = config,
             .stats = .{},
-            .crashes = std.array_list.Managed(CrashInfo).init(allocator),
+            .crashes = std.ArrayList(CrashInfo){},
             .prng = prng,
             .timer = try std.time.Timer.start(),
             .coverage = CoverageTracker.init(allocator),
@@ -242,7 +242,7 @@ pub const Fuzzer = struct {
             self.allocator.free(crash.error_name);
         }
 
-        self.crashes.deinit();
+        self.crashes.deinit(self.allocator);
         self.coverage.deinit();
         self.seen_crashes.deinit();
         self.arena.deinit();
@@ -345,7 +345,7 @@ pub const Fuzzer = struct {
                 .minimized = self.config.minimize_crashes,
             };
 
-            try self.crashes.append(crash);
+            try self.crashes.append(self.allocator, crash);
 
             // Update category stats
             switch (crash.error_type) {

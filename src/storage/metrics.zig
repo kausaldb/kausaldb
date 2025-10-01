@@ -316,10 +316,10 @@ test "human readable format contains key metrics" {
     metrics.blocks_written.add(100);
     metrics.blocks_read.add(200);
 
-    var buffer = std.array_list.Managed(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
 
-    try metrics.format_human_readable(buffer.writer());
+    try metrics.format_human_readable(buffer.writer(allocator));
     const output = buffer.items;
 
     try testing.expect(std.mem.indexOf(u8, output, "100 written") != null);
@@ -334,10 +334,10 @@ test "json format produces valid json structure" {
     metrics.blocks_written.add(50);
     metrics.wal_writes.add(75);
 
-    var buffer = std.array_list.Managed(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
 
-    try metrics.format_json(buffer.writer());
+    try metrics.format_json(buffer.writer(allocator));
     const output = buffer.items;
 
     try testing.expect(std.mem.indexOf(u8, output, "\"blocks_written\": 50") != null);

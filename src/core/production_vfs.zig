@@ -334,8 +334,8 @@ pub const ProductionVFS = struct {
             };
         defer dir.close();
 
-        var entries = std.array_list.Managed(DirectoryEntry).init(allocator);
-        errdefer entries.deinit();
+        var entries = std.ArrayList(DirectoryEntry){};
+        errdefer entries.deinit(allocator);
 
         var fs_iterator = dir.iterate();
         while (fs_iterator.next() catch |err| {
@@ -353,14 +353,14 @@ pub const ProductionVFS = struct {
             const name_copy = try allocator.dupe(u8, entry.name);
             const kind = DirectoryEntry.Kind.from_file_type(entry.kind);
 
-            try entries.append(DirectoryEntry{
+            try entries.append(allocator, DirectoryEntry{
                 .name = name_copy,
                 .kind = kind,
             });
         }
 
         return DirectoryIterator{
-            .entries = try entries.toOwnedSlice(),
+            .entries = try entries.toOwnedSlice(allocator),
             .index = 0,
         };
     }

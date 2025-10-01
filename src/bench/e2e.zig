@@ -29,7 +29,7 @@ const E2ETestHarness = struct {
     allocator: std.mem.Allocator,
     binary_path: []const u8,
     temp_dir: []const u8,
-    cleanup_paths: std.array_list.Managed([]const u8),
+    cleanup_paths: std.ArrayList([]const u8),
 
     pub fn init(allocator: std.mem.Allocator, test_name: []const u8) !E2ETestHarness {
         const temp_dir = try std.fmt.allocPrint(allocator, "/tmp/kausaldb_e2e_bench_{s}_{d}", .{ test_name, std.time.milliTimestamp() });
@@ -40,12 +40,7 @@ const E2ETestHarness = struct {
             return err;
         };
 
-        return E2ETestHarness{
-            .allocator = allocator,
-            .binary_path = "./zig-out/bin/kausaldb",
-            .temp_dir = temp_dir,
-            .cleanup_paths = std.array_list.Managed([]const u8).init(allocator),
-        };
+        return E2ETestHarness{ .allocator = allocator, .binary_path = "./zig-out/bin/kausaldb", .temp_dir = temp_dir, .cleanup_paths = std.ArrayList([]const u8){} };
     }
 
     pub fn deinit(self: *E2ETestHarness) void {
@@ -54,7 +49,7 @@ const E2ETestHarness = struct {
             std.fs.cwd().deleteTree(path) catch {};
             self.allocator.free(path);
         }
-        self.cleanup_paths.deinit();
+        self.cleanup_paths.deinit(self.allocator);
 
         // Clean up temp directory
         std.fs.cwd().deleteTree(self.temp_dir) catch {};
@@ -62,12 +57,12 @@ const E2ETestHarness = struct {
     }
 
     pub fn execute_command(self: *E2ETestHarness, args: []const []const u8) !CommandResult {
-        var argv = std.array_list.Managed([]const u8).init(self.allocator);
-        defer argv.deinit();
+        var argv = std.ArrayList([]const u8){};
+        defer argv.deinit(self.allocator);
 
-        try argv.append(self.binary_path);
+        try argv.append(self.allocator, self.binary_path);
         for (args) |arg| {
-            try argv.append(arg);
+            try argv.append(self.allocator, arg);
         }
 
         const result = std.process.Child.run(.{
@@ -93,7 +88,7 @@ const E2ETestHarness = struct {
 
     pub fn create_test_project(self: *E2ETestHarness, project_name: []const u8, config: E2EBenchmarkConfig) ![]const u8 {
         const project_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.temp_dir, project_name });
-        try self.cleanup_paths.append(project_path);
+        try self.cleanup_paths.append(self.allocator, project_path);
 
         // Create project structure
         try std.fs.cwd().makePath(project_path);
@@ -267,8 +262,8 @@ fn bench_codebase_ingestion(bench_harness: *BenchmarkHarness, e2e_harness: *E2ET
     defer sampler.deinit();
 
     // Create multiple test projects for repeated ingestion
-    var test_projects = std.array_list.Managed([]const u8).init(bench_harness.allocator);
-    defer test_projects.deinit();
+    var test_projects = std.ArrayList([]const u8){};
+    defer test_projects.deinit(bench_harness.allocator);
 
     // Create projects for warmup + measurement
     for (0..warmup + iterations) |i| {
@@ -276,7 +271,7 @@ fn bench_codebase_ingestion(bench_harness: *BenchmarkHarness, e2e_harness: *E2ET
         defer bench_harness.allocator.free(project_name);
 
         const project_path = try e2e_harness.create_test_project(project_name, config);
-        try test_projects.append(try bench_harness.allocator.dupe(u8, project_path));
+        try test_projects.append(bench_harness.allocator, try bench_harness.allocator.dupe(u8, project_path));
     }
 
     // Warmup runs
@@ -325,18 +320,18 @@ fn bench_block_lookup_queries(bench_harness: *BenchmarkHarness, e2e_harness: *E2
     defer sampler.deinit();
 
     // Generate realistic function names to search for
-    var function_names = std.array_list.Managed([]const u8).init(bench_harness.allocator);
+    var function_names = std.ArrayList([]const u8){};
     defer {
         for (function_names.items) |name| {
             bench_harness.allocator.free(name);
         }
-        function_names.deinit();
+        function_names.deinit(bench_harness.allocator);
     }
 
     for (0..config.codebase_size) |module_i| {
         for (0..config.functions_per_file) |func_i| {
             const name = try std.fmt.allocPrint(bench_harness.allocator, "benchmark_function_{d}_{d}", .{ module_i, func_i });
-            try function_names.append(name);
+            try function_names.append(bench_harness.allocator, name);
         }
     }
 

@@ -76,22 +76,22 @@ pub fn run_durability_testing(fuzzer: *main.Fuzzer) !void {
         try storage1.startup();
 
         // Track what we write
-        var written_blocks = std.array_list.Managed(ContextBlock).init(fuzzer.allocator);
-        defer written_blocks.deinit();
+        var written_blocks = std.ArrayList(ContextBlock){};
+        defer written_blocks.deinit(fuzzer.allocator);
 
         // Track allocated content strings to free them later
-        var allocated_content = std.array_list.Managed([]const u8).init(fuzzer.allocator);
+        var allocated_content = std.ArrayList([]const u8){};
         defer {
             for (allocated_content.items) |content| {
                 fuzzer.allocator.free(content);
             }
-            allocated_content.deinit();
+            allocated_content.deinit(fuzzer.allocator);
         }
 
         // Generate and write test data
         for (0..100) |i| {
             const content = try std.fmt.allocPrint(fuzzer.allocator, "durability_{}", .{i});
-            try allocated_content.append(content);
+            try allocated_content.append(fuzzer.allocator, content);
 
             const block = ContextBlock{
                 .id = BlockId.generate(),
@@ -103,7 +103,7 @@ pub fn run_durability_testing(fuzzer: *main.Fuzzer) !void {
             };
 
             try storage1.put_block(block);
-            try written_blocks.append(block);
+            try written_blocks.append(fuzzer.allocator, block);
             stats.operations_executed += 1;
 
             // Randomly flush to create SSTables
@@ -248,8 +248,8 @@ pub fn run_linearizability_testing(fuzzer: *main.Fuzzer) !void {
         defer storage.shutdown() catch {};
 
         // Track operation history for linearizability checking
-        var history = std.array_list.Managed(OperationHistoryEntry).init(fuzzer.allocator);
-        defer history.deinit();
+        var history = std.ArrayList(OperationHistoryEntry){};
+        defer history.deinit(fuzzer.allocator);
 
         // Generate concurrent-like operations
         var generator = WorkloadGenerator.init(
@@ -275,7 +275,7 @@ pub fn run_linearizability_testing(fuzzer: *main.Fuzzer) !void {
             const end_time = logical_time;
             logical_time += 1;
 
-            try history.append(.{
+            try history.append(fuzzer.allocator, .{
                 .op = op,
                 .start_time = start_time,
                 .end_time = end_time,
@@ -400,7 +400,7 @@ fn apply_to_storage(storage: *StorageEngine, op: *const Operation) !void {
     }
 }
 
-fn verify_linearizable(history: *const std.array_list.Managed(OperationHistoryEntry)) bool {
+fn verify_linearizable(history: *const std.ArrayList(OperationHistoryEntry)) bool {
     // Simplified linearizability check
     // In production, would use a proper linearizability checker
 

@@ -275,16 +275,16 @@ pub const QueryCache = struct {
     fn evict_lru_entries(self: *QueryCache) !void {
         const target_size = (self.max_entries * 3) / 4; // Evict 25% of entries
 
-        var eviction_candidates = try std.array_list.Managed(struct {
+        var eviction_candidates = try std.ArrayList(struct {
             key: CacheKey,
             last_access: i64,
             access_count: u32,
         }).initCapacity(self.arena.allocator(), self.cache.count());
-        defer eviction_candidates.deinit();
+        defer eviction_candidates.deinit(self.arena.allocator());
 
         var iterator = self.cache.iterator();
         while (iterator.next()) |entry| {
-            try eviction_candidates.append(.{
+            try eviction_candidates.append(self.arena.allocator(), .{
                 .key = entry.key_ptr.*,
                 .last_access = entry.value_ptr.last_access_time_ns,
                 .access_count = entry.value_ptr.access_count,

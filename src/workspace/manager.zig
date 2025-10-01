@@ -308,25 +308,25 @@ pub const WorkspaceManager = struct {
 
     /// Serialize workspace configuration to JSON for storage.
     fn serialize_workspace_config(self: *WorkspaceManager) ![]u8 {
-        var json_buffer = std.array_list.Managed(u8).init(self.coordinator.allocator());
-        defer json_buffer.deinit();
+        var json_buffer = std.ArrayList(u8){};
+        defer json_buffer.deinit(self.coordinator.allocator());
 
-        try json_buffer.appendSlice("{\"version\":");
-        try json_buffer.writer().print("{}", .{WorkspaceConfig.WORKSPACE_CONFIG_VERSION});
-        try json_buffer.appendSlice(",\"codebases\":[");
+        try json_buffer.appendSlice(self.coordinator.allocator(), "{\"version\":");
+        try json_buffer.writer(self.coordinator.allocator()).print("{}", .{WorkspaceConfig.WORKSPACE_CONFIG_VERSION});
+        try json_buffer.appendSlice(self.coordinator.allocator(), ",\"codebases\":[");
 
         var iterator = self.linked_codebases.iterator();
         var first = true;
         while (iterator.next()) |entry| {
-            if (!first) try json_buffer.appendSlice(",");
+            if (!first) try json_buffer.appendSlice(self.coordinator.allocator(), ",");
             first = false;
 
             const info = entry.value_ptr.*;
-            try json_buffer.writer().print("{{\"name\":\"{s}\",\"path\":\"{s}\",\"linked_timestamp\":{},\"last_sync_timestamp\":{},\"block_count\":{},\"edge_count\":{}}}", .{ info.name, info.path, info.linked_timestamp, info.last_sync_timestamp, info.block_count, info.edge_count });
+            try json_buffer.writer(self.coordinator.allocator()).print("{{\"name\":\"{s}\",\"path\":\"{s}\",\"linked_timestamp\":{},\"last_sync_timestamp\":{},\"block_count\":{},\"edge_count\":{}}}", .{ info.name, info.path, info.linked_timestamp, info.last_sync_timestamp, info.block_count, info.edge_count });
         }
 
-        try json_buffer.appendSlice("]}");
-        return json_buffer.toOwnedSlice();
+        try json_buffer.appendSlice(self.coordinator.allocator(), "]}");
+        return json_buffer.toOwnedSlice(self.coordinator.allocator());
     }
 
     /// Deserialize workspace configuration from JSON storage.

@@ -24,7 +24,7 @@ pub const Simulation = struct {
     allocator: std.mem.Allocator,
     prng: std.Random.DefaultPrng,
     tick_count: u64,
-    nodes: std.array_list.Managed(Node),
+    nodes: std.ArrayList(Node),
     network: Network,
     ownership_injector: OwnershipViolationInjector,
     logger: ?DeterministicLogger,
@@ -39,7 +39,7 @@ pub const Simulation = struct {
             .allocator = allocator,
             .prng = prng,
             .tick_count = 0,
-            .nodes = std.array_list.Managed(Node).init(allocator),
+            .nodes = std.ArrayList(Node){},
             .network = Network.init(allocator, &prng),
             .ownership_injector = OwnershipViolationInjector.init(seed),
             .logger = if (builtin.mode == .Debug) DeterministicLogger{ .sim = undefined } else null,
@@ -56,7 +56,7 @@ pub const Simulation = struct {
         for (self.nodes.items) |*node| {
             node.deinit();
         }
-        self.nodes.deinit();
+        self.nodes.deinit(self.allocator);
         self.network.deinit();
     }
 
@@ -64,7 +64,7 @@ pub const Simulation = struct {
     pub fn add_node(self: *Self) !NodeId {
         const node_id = NodeId{ .id = self.nodes.items.len };
         const node = try Node.init(self.allocator, node_id);
-        try self.nodes.append(node);
+        try self.nodes.append(self.allocator, node);
         try self.network.add_node(node_id);
         return node_id;
     }
@@ -196,7 +196,7 @@ pub const NodeId = struct {
 pub const Node = struct {
     id: NodeId,
     filesystem: *sim_vfs.SimulationVFS,
-    message_queue: std.array_list.Managed(Message),
+    message_queue: std.ArrayList(Message),
     allocator: std.mem.Allocator,
 
     const Self = @This();
@@ -207,7 +207,7 @@ pub const Node = struct {
         return Self{
             .id = id,
             .filesystem = filesystem_ptr,
-            .message_queue = std.array_list.Managed(Message).init(allocator),
+            .message_queue = std.ArrayList(Message){},
             .allocator = allocator,
         };
     }
@@ -215,7 +215,7 @@ pub const Node = struct {
     pub fn deinit(self: *Self) void {
         self.filesystem.deinit();
         self.allocator.destroy(self.filesystem);
-        self.message_queue.deinit();
+        self.message_queue.deinit(self.allocator);
     }
 
     /// Process one simulation tick for this node.
@@ -284,10 +284,10 @@ pub const MessageType = enum {
 pub const Network = struct {
     allocator: std.mem.Allocator,
     prng: *std.Random.DefaultPrng,
-    nodes: std.array_list.Managed(NodeId),
+    nodes: std.ArrayList(NodeId),
     message_queues: std.HashMap(
         NodeId,
-        std.array_list.Managed(DelayedMessage),
+        std.ArrayList(DelayedMessage),
         NodeIdContext,
         std.hash_map.default_max_load_percentage,
     ),
@@ -366,10 +366,10 @@ pub const Network = struct {
         return Self{
             .allocator = allocator,
             .prng = prng,
-            .nodes = std.array_list.Managed(NodeId).init(allocator),
+            .nodes = std.ArrayList(NodeId){},
             .message_queues = std.HashMap(
                 NodeId,
-                std.array_list.Managed(DelayedMessage),
+                std.ArrayList(DelayedMessage),
                 NodeIdContext,
                 std.hash_map.default_max_load_percentage,
             ).init(allocator),
@@ -400,11 +400,11 @@ pub const Network = struct {
             for (entry.value_ptr.items) |delayed_message| {
                 self.allocator.free(delayed_message.message.data);
             }
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(self.allocator);
         }
         self.message_queues.deinit();
 
-        self.nodes.deinit();
+        self.nodes.deinit(self.allocator);
         self.partitions.deinit();
         self.packet_loss.deinit();
         self.latencies.deinit();
@@ -415,10 +415,10 @@ pub const Network = struct {
     /// Sets up message queues and network state for the node.
     /// Needed to connect the node to the simulated network.
     pub fn add_node(self: *Self, node_id: NodeId) !void {
-        try self.nodes.append(node_id);
+        try self.nodes.append(self.allocator, node_id);
         try self.message_queues.put(
             node_id,
-            std.array_list.Managed(DelayedMessage).init(self.allocator),
+            std.ArrayList(DelayedMessage){},
         );
     }
 

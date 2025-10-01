@@ -7,8 +7,9 @@ const internal = @import("internal");
 
 const harness = @import("harness.zig");
 
-const BenchmarkHarness = harness.BenchmarkHarness;
 const Timer = std.time.Timer;
+const BenchmarkHarness = harness.BenchmarkHarness;
+const ContextBlock = internal.ContextBlock;
 
 /// Main entry point called by the benchmark runner.
 pub fn run_benchmarks(bench_harness: *BenchmarkHarness) !void {
@@ -31,8 +32,8 @@ fn bench_block_id_generation(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
 
     // 3. COLLECT SAMPLES
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // 4. WARMUP
     for (0..warmup) |_| {
@@ -44,7 +45,7 @@ fn bench_block_id_generation(bench_harness: *BenchmarkHarness) !void {
     for (0..iterations) |_| {
         timer.reset();
         _ = internal.BlockId.generate();
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     // 6. CALCULATE AND REPORT
@@ -58,16 +59,15 @@ fn bench_block_id_hashing(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
 
     // Pre-generate IDs to isolate hashing cost
-    var block_ids = std.array_list.Managed(internal.BlockId).init(bench_harness.allocator);
-    defer block_ids.deinit();
-    try block_ids.ensureTotalCapacity(iterations);
+    var block_ids = try std.ArrayList(internal.BlockId).initCapacity(bench_harness.allocator, iterations);
+    defer block_ids.deinit(bench_harness.allocator);
 
     for (0..iterations) |i| {
-        try block_ids.append(internal.BlockId.from_u64(i));
+        try block_ids.append(bench_harness.allocator, internal.BlockId.from_u64(i));
     }
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |i| {
@@ -80,7 +80,7 @@ fn bench_block_id_hashing(bench_harness: *BenchmarkHarness) !void {
     for (block_ids.items) |id| {
         timer.reset();
         _ = id.hash();
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("core/block_id_hashing", samples.items);
@@ -93,19 +93,24 @@ fn bench_block_id_comparison(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
 
     // Create pairs of IDs to compare
-    var id_pairs = std.array_list.Managed(struct { a: internal.BlockId, b: internal.BlockId }).init(bench_harness.allocator);
-    defer id_pairs.deinit();
-    try id_pairs.ensureTotalCapacity(iterations);
+    var id_pairs = try std.ArrayList(struct {
+        a: internal.BlockId,
+        b: internal.BlockId,
+    }).initCapacity(
+        bench_harness.allocator,
+        iterations,
+    );
+    defer id_pairs.deinit(bench_harness.allocator);
 
     for (0..iterations) |i| {
-        try id_pairs.append(.{
+        try id_pairs.append(bench_harness.allocator, .{
             .a = internal.BlockId.from_u64(i),
             .b = internal.BlockId.from_u64(if (i % 2 == 0) i else i + 1),
         });
     }
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |i| {
@@ -118,7 +123,7 @@ fn bench_block_id_comparison(bench_harness: *BenchmarkHarness) !void {
     for (id_pairs.items) |pair| {
         timer.reset();
         _ = pair.a.eql(pair.b);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("core/block_id_comparison", samples.items);
@@ -131,8 +136,8 @@ fn bench_arena_allocation_small(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
     const alloc_size = 64; // Small allocation
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Each iteration gets a fresh arena to measure allocation cost
     for (0..warmup + iterations) |i| {
@@ -149,7 +154,7 @@ fn bench_arena_allocation_small(bench_harness: *BenchmarkHarness) !void {
             // Measurement
             var timer = try Timer.start();
             _ = try arena_alloc.alloc(u8, alloc_size);
-            try samples.append(timer.read());
+            try samples.append(bench_harness.allocator, timer.read());
         }
     }
 
@@ -163,8 +168,8 @@ fn bench_arena_allocation_large(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
     const alloc_size = 64 * 1024; // 64KB large allocation
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Each iteration gets a fresh arena
     for (0..warmup + iterations) |i| {
@@ -181,7 +186,7 @@ fn bench_arena_allocation_large(bench_harness: *BenchmarkHarness) !void {
             // Measurement
             var timer = try Timer.start();
             _ = try arena_alloc.alloc(u8, alloc_size);
-            try samples.append(timer.read());
+            try samples.append(bench_harness.allocator, timer.read());
         }
     }
 
@@ -195,12 +200,11 @@ fn bench_context_block_clone(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
 
     // Create source blocks to clone
-    var source_blocks = std.array_list.Managed(internal.ContextBlock).init(bench_harness.allocator);
-    defer source_blocks.deinit();
-    try source_blocks.ensureTotalCapacity(iterations);
+    var source_blocks = try std.ArrayList(ContextBlock).initCapacity(bench_harness.allocator, iterations);
+    defer source_blocks.deinit(bench_harness.allocator);
 
     for (0..iterations) |i| {
-        try source_blocks.append(.{
+        try source_blocks.append(bench_harness.allocator, .{
             .id = internal.BlockId.from_u64(i),
             .sequence = @intCast(i),
             .source_uri = "bench://core/test.zig",
@@ -209,8 +213,8 @@ fn bench_context_block_clone(bench_harness: *BenchmarkHarness) !void {
         });
     }
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |i| {
@@ -225,7 +229,7 @@ fn bench_context_block_clone(bench_harness: *BenchmarkHarness) !void {
         timer.reset();
         const size = block.serialized_size();
         std.mem.doNotOptimizeAway(&size);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("core/context_block_size", samples.items);
@@ -238,13 +242,15 @@ fn bench_edge_comparison(bench_harness: *BenchmarkHarness) !void {
     const warmup = bench_harness.config.warmup_iterations;
 
     // Create edge pairs to compare
-    var edge_pairs = std.array_list.Managed(struct { a: internal.GraphEdge, b: internal.GraphEdge }).init(bench_harness.allocator);
-    defer edge_pairs.deinit();
-    try edge_pairs.ensureTotalCapacity(iterations);
+    var edge_pairs = try std.ArrayList(struct {
+        a: internal.GraphEdge,
+        b: internal.GraphEdge,
+    }).initCapacity(bench_harness.allocator, iterations);
+    defer edge_pairs.deinit(bench_harness.allocator);
 
     for (0..iterations) |i| {
         const same = i % 2 == 0;
-        try edge_pairs.append(.{
+        try edge_pairs.append(bench_harness.allocator, .{
             .a = .{
                 .source_id = internal.BlockId.from_u64(i),
                 .target_id = internal.BlockId.from_u64(i + 1),
@@ -258,8 +264,8 @@ fn bench_edge_comparison(bench_harness: *BenchmarkHarness) !void {
         });
     }
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |i| {
@@ -274,7 +280,7 @@ fn bench_edge_comparison(bench_harness: *BenchmarkHarness) !void {
         timer.reset();
         const is_less = internal.GraphEdge.less_than({}, pair.a, pair.b);
         std.mem.doNotOptimizeAway(&is_less);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("core/edge_comparison", samples.items);

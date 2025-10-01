@@ -98,7 +98,7 @@ pub const E2EHarness = struct {
     allocator: std.mem.Allocator,
     binary_path: []const u8,
     test_workspace: []const u8,
-    cleanup_paths: std.array_list.Managed([]const u8),
+    cleanup_paths: std.ArrayList([]const u8),
 
     const Self = @This();
 
@@ -116,7 +116,7 @@ pub const E2EHarness = struct {
 
         const test_workspace = try create_isolated_workspace(allocator, test_name);
 
-        const cleanup_paths = std.array_list.Managed([]const u8).init(allocator);
+        const cleanup_paths = std.ArrayList([]const u8){};
 
         return Self{
             .allocator = allocator,
@@ -136,7 +136,7 @@ pub const E2EHarness = struct {
             }
             self.allocator.free(path);
         }
-        self.cleanup_paths.deinit();
+        self.cleanup_paths.deinit(self.allocator);
 
         std.fs.deleteTreeAbsolute(self.test_workspace) catch {};
         self.allocator.free(self.binary_path);
@@ -145,10 +145,10 @@ pub const E2EHarness = struct {
 
     /// Execute a KausalDB command and return the result
     pub fn execute_command(self: *Self, args: []const []const u8) !CommandResult {
-        var argv_list = std.array_list.Managed([]const u8).init(self.allocator);
-        defer argv_list.deinit();
+        var argv_list = std.ArrayList([]const u8){};
+        defer argv_list.deinit(self.allocator);
 
-        try argv_list.append(self.binary_path);
+        try argv_list.append(self.allocator, self.binary_path);
 
         // Check if this command needs server connection
         // Commands that DON'T need server: help, version, and their flag variants
@@ -184,13 +184,13 @@ pub const E2EHarness = struct {
                     return err;
                 };
 
-                try argv_list.append("--port");
-                try argv_list.append(port_env);
+                try argv_list.append(self.allocator, "--port");
+                try argv_list.append(self.allocator, port_env);
             }
         }
 
         // Then add the command and its arguments
-        try argv_list.appendSlice(args);
+        try argv_list.appendSlice(self.allocator, args);
 
         if (args.len > 0) {
             log.info("Running: {s}", .{args[0]});
@@ -235,12 +235,12 @@ pub const E2EHarness = struct {
         const full_cmd = try std.fmt.allocPrint(arena_allocator, cmd_fmt, args);
 
         // Split command into argv
-        var argv = std.array_list.Managed([]const u8).init(arena_allocator);
-        defer argv.deinit();
+        var argv = std.ArrayList([]const u8){};
+        defer argv.deinit(arena_allocator);
 
         var arg_iter = std.mem.tokenizeAny(u8, full_cmd, " \t");
         while (arg_iter.next()) |arg| {
-            try argv.append(arg);
+            try argv.append(arena_allocator, arg);
         }
 
         if (argv.items.len == 0) return error.EmptyCommand;
@@ -272,11 +272,11 @@ pub const E2EHarness = struct {
         const cmd_string = try std.fmt.allocPrint(arena.allocator(), fmt, args);
 
         // Simple argument splitting on spaces (tests should use simple arguments)
-        var cmd_args = std.array_list.Managed([]const u8).init(arena.allocator());
-        defer cmd_args.deinit();
+        var cmd_args = std.ArrayList([]const u8){};
+        defer cmd_args.deinit(arena.allocator());
         var arg_iter = std.mem.tokenizeAny(u8, cmd_string, " \t");
         while (arg_iter.next()) |arg| {
-            try cmd_args.append(arg);
+            try cmd_args.append(arena.allocator(), arg);
         }
 
         return self.execute_command(cmd_args.items);
@@ -324,7 +324,7 @@ pub const E2EHarness = struct {
 
         // Don't register paths ending with "." for cleanup as they can't be deleted safely
         if (!std.mem.endsWith(u8, project_path, "/.") and !std.mem.eql(u8, std.fs.path.basename(project_path), ".")) {
-            try self.cleanup_paths.append(project_path);
+            try self.cleanup_paths.append(self.allocator, project_path);
         }
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
@@ -429,7 +429,7 @@ pub const E2EHarness = struct {
 
         // Register for cleanup
         if (!std.mem.endsWith(u8, project_path, "/.") and !std.mem.eql(u8, std.fs.path.basename(project_path), ".")) {
-            try self.cleanup_paths.append(project_path);
+            try self.cleanup_paths.append(self.allocator, project_path);
         }
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
@@ -466,7 +466,7 @@ pub const E2EHarness = struct {
     pub fn create_enhanced_test_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(project_path);
+        try self.cleanup_paths.append(self.allocator, project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
@@ -595,7 +595,7 @@ pub const E2EHarness = struct {
     pub fn create_large_test_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(project_path);
+        try self.cleanup_paths.append(self.allocator, project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
@@ -697,7 +697,7 @@ pub const E2EHarness = struct {
     pub fn create_substantial_content_project(self: *Self, project_name: []const u8) ![]const u8 {
         const project_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.test_workspace, project_name });
 
-        try self.cleanup_paths.append(project_path);
+        try self.cleanup_paths.append(self.allocator, project_path);
 
         std.fs.makeDirAbsolute(project_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},

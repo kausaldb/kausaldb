@@ -71,7 +71,7 @@ pub const LifecycleEvent = struct {
 
 pub const BlockLifecycle = struct {
     block_id: BlockId,
-    events: std.array_list.Managed(LifecycleEvent),
+    events: std.ArrayList(LifecycleEvent),
     event_count: u32,
     first_seen: u64,
     last_seen: u64,
@@ -81,7 +81,7 @@ pub const BlockLifecycle = struct {
         const now = @as(u64, @intCast(std.time.nanoTimestamp()));
         return BlockLifecycle{
             .block_id = block_id,
-            .events = std.array_list.Managed(LifecycleEvent){ .items = &[_]LifecycleEvent{}, .capacity = 0, .allocator = allocator },
+            .events = std.ArrayList(LifecycleEvent){},
             .event_count = 0,
             .first_seen = now,
             .last_seen = now,
@@ -90,11 +90,11 @@ pub const BlockLifecycle = struct {
     }
 
     pub fn deinit(self: *BlockLifecycle) void {
-        self.events.deinit();
+        self.events.deinit(self.allocator);
     }
 
     pub fn add_event(self: *BlockLifecycle, event: LifecycleEvent) !void {
-        try self.events.append(event);
+        try self.events.append(self.allocator, event);
         self.event_count += 1;
         self.last_seen = event.timestamp;
     }

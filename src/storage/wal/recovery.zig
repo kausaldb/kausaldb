@@ -178,8 +178,8 @@ pub fn recover_from_segments(
 
 /// List all WAL segment files in the directory, sorted in chronological order
 fn list_segment_files(allocator: std.mem.Allocator, filesystem: VFS, directory: []const u8) WALError![][]const u8 {
-    var file_list = std.array_list.Managed([]const u8).init(allocator);
-    defer file_list.deinit();
+    var file_list = std.ArrayList([]const u8){};
+    defer file_list.deinit(allocator);
 
     var dir_iter = filesystem.iterate_directory(directory, allocator) catch |err| switch (err) {
         error.FileNotFound => return WALError.FileNotFound,
@@ -196,11 +196,11 @@ fn list_segment_files(allocator: std.mem.Allocator, filesystem: VFS, directory: 
             std.mem.endsWith(u8, entry.name, types.WAL_FILE_SUFFIX))
         {
             const owned_name = allocator.dupe(u8, entry.name) catch return WALError.OutOfMemory;
-            file_list.append(owned_name) catch return WALError.OutOfMemory;
+            file_list.append(allocator, owned_name) catch return WALError.OutOfMemory;
         }
     }
 
-    const files = file_list.toOwnedSlice() catch return WALError.OutOfMemory;
+    const files = file_list.toOwnedSlice(allocator) catch return WALError.OutOfMemory;
 
     std.sort.insertion([]const u8, files, {}, struct {
         fn less_than(_: void, lhs: []const u8, rhs: []const u8) bool {
@@ -240,21 +240,23 @@ fn create_test_block() ContextBlock {
 }
 
 const TestRecoveryContext = struct {
-    entries_recovered: std.array_list.Managed(entry_mod.WALEntry),
+    entries_recovered: std.ArrayList(entry_mod.WALEntry),
     callback_errors: u32,
+    allocator: std.mem.Allocator,
 
     fn init(allocator: std.mem.Allocator) TestRecoveryContext {
         return TestRecoveryContext{
-            .entries_recovered = std.array_list.Managed(entry_mod.WALEntry).init(allocator),
+            .entries_recovered = std.ArrayList(entry_mod.WALEntry){},
             .callback_errors = 0,
+            .allocator = allocator,
         };
     }
 
     fn deinit(self: *TestRecoveryContext) void {
         for (self.entries_recovered.items) |entry| {
-            entry.deinit(self.entries_recovered.allocator);
+            entry.deinit(self.allocator);
         }
-        self.entries_recovered.deinit();
+        self.entries_recovered.deinit(self.allocator);
     }
 };
 
@@ -262,7 +264,10 @@ fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALErr
     // Safety: Pointer cast with alignment validation
     const test_context: *TestRecoveryContext = @ptrCast(@alignCast(context));
 
-    const cloned_payload = try test_context.entries_recovered.allocator.dupe(u8, entry.payload);
+    // TestRecoveryContext stores entries_recovered as ArrayList which needs allocator
+    // We need to track allocator in the context to use it here
+    const allocator = test_context.allocator;
+    const cloned_payload = try allocator.dupe(u8, entry.payload);
     const cloned_entry = entry_mod.WALEntry{
         .checksum = entry.checksum,
         .entry_type = entry.entry_type,
@@ -270,7 +275,7 @@ fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALErr
         .payload = cloned_payload,
     };
 
-    try test_context.entries_recovered.append(cloned_entry);
+    try test_context.entries_recovered.append(allocator, cloned_entry);
 }
 
 fn error_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALError!void {

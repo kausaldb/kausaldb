@@ -69,7 +69,7 @@ pub const WorkloadGenerator = struct {
     block_counter: u32,
     edge_counter: u32,
     config: WorkloadConfig,
-    created_blocks: std.array_list.Managed(BlockId),
+    created_blocks: std.ArrayList(BlockId),
 
     const Self = @This();
 
@@ -87,12 +87,12 @@ pub const WorkloadGenerator = struct {
             .block_counter = 0,
             .edge_counter = 0,
             .config = config,
-            .created_blocks = std.array_list.Managed(BlockId).init(allocator),
+            .created_blocks = std.ArrayList(BlockId){},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.created_blocks.deinit();
+        self.created_blocks.deinit(self.allocator);
     }
 
     /// Update workload configuration after initialization
@@ -148,7 +148,7 @@ pub const WorkloadGenerator = struct {
         const block = try self.create_test_block(self.block_counter);
 
         // Track this block so we can create edges to it later
-        try self.created_blocks.append(block.id);
+        try self.created_blocks.append(self.allocator, block.id);
 
         return Operation{
             .op_type = .put_block,

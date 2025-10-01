@@ -103,7 +103,7 @@ pub const NetworkServer = struct {
         allocator: std.mem.Allocator,
         server_config: ServerConfig,
         database_coordinator: *ServerCoordinator,
-    ) NetworkServer {
+    ) !NetworkServer {
         const conn_mgr_config = server_config.to_connection_manager_config();
 
         return NetworkServer{
@@ -112,7 +112,7 @@ pub const NetworkServer = struct {
             .coordinator = database_coordinator,
             .server_start_time = 0, // Will be set in startup()
             .listener = null,
-            .connection_manager = ConnectionManager.init(allocator, conn_mgr_config),
+            .connection_manager = try ConnectionManager.init(allocator, conn_mgr_config),
             .handler_context = null,
             .stats = NetworkStats{},
         };
@@ -341,7 +341,7 @@ test "NetworkServer initialization without I/O" {
     defer coordinator.deinit();
 
     // Phase 1: init() should not perform I/O
-    var server = NetworkServer.init(testing.allocator, test_config, &coordinator);
+    var server = try NetworkServer.init(testing.allocator, test_config, &coordinator);
     defer server.deinit();
 
     // Verify initial state
@@ -382,7 +382,7 @@ test "NetworkServer configuration is stored correctly" {
     var coordinator = ServerCoordinator.init(testing.allocator, test_config);
     defer coordinator.deinit();
 
-    var server = NetworkServer.init(testing.allocator, test_config, &coordinator);
+    var server = try NetworkServer.init(testing.allocator, test_config, &coordinator);
     defer server.deinit();
 
     try testing.expectEqualStrings("192.168.1.1", server.config.host);

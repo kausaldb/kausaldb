@@ -62,11 +62,11 @@ pub const SSTable = struct {
     filesystem: VFS,
     file_path: []const u8,
     block_count: u32,
-    index: std.array_list.Managed(IndexEntry),
+    index: std.ArrayList(IndexEntry),
     tombstone_count: u32,
-    tombstone_index: std.array_list.Managed(TombstoneRecord),
+    tombstone_index: std.ArrayList(TombstoneRecord),
     edge_count: u32,
-    edge_index: std.array_list.Managed(EdgeIndexEntry),
+    edge_index: std.ArrayList(EdgeIndexEntry),
     bloom_filter: ?BloomFilter,
 
     const MAGIC = [4]u8{ 'S', 'S', 'T', 'B' }; // "SSTB" for SSTable Blocks
@@ -355,11 +355,11 @@ pub const SSTable = struct {
             .filesystem = filesystem,
             .file_path = file_path,
             .block_count = 0,
-            .index = std.array_list.Managed(IndexEntry).init(backing),
+            .index = std.ArrayList(IndexEntry){},
             .tombstone_count = 0,
-            .tombstone_index = std.array_list.Managed(TombstoneRecord).init(backing),
+            .tombstone_index = std.ArrayList(TombstoneRecord){},
             .edge_count = 0,
-            .edge_index = std.array_list.Managed(EdgeIndexEntry).init(backing),
+            .edge_index = std.ArrayList(EdgeIndexEntry){},
             .bloom_filter = null,
         };
     }
@@ -367,9 +367,9 @@ pub const SSTable = struct {
     /// Clean up all allocated resources including the file path and index.
     /// Safe to call multiple times - subsequent calls are no-ops.
     pub fn deinit(self: *SSTable) void {
-        self.index.deinit();
-        self.tombstone_index.deinit();
-        self.edge_index.deinit();
+        self.index.deinit(self.backing_allocator);
+        self.tombstone_index.deinit(self.backing_allocator);
+        self.edge_index.deinit(self.backing_allocator);
     }
 
     /// Write blocks, tombstones, and edges to SSTable file in sorted order
@@ -395,7 +395,7 @@ pub const SSTable = struct {
         if (blocks.len == 0 and tombstones.len == 0) return;
         std.debug.assert(blocks.len <= 1000000);
 
-        self.index.clearAndFree();
+        self.index.clearAndFree(self.backing_allocator);
         // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(blocks.ptr) != 0);
 
@@ -475,7 +475,7 @@ pub const SSTable = struct {
 
             _ = try file.write(buffer);
 
-            try self.index.append(IndexEntry{
+            try self.index.append(self.backing_allocator, IndexEntry{
                 .block_id = block.id,
                 .offset = current_offset,
                 // Safety: Block size is bounded by SSTable format limits and fits in u32
@@ -495,7 +495,7 @@ pub const SSTable = struct {
             _ = try file.write(&tombstone_buffer);
             current_offset += tombstone.TOMBSTONE_SIZE;
 
-            try self.tombstone_index.append(tombstone_record);
+            try self.tombstone_index.append(self.backing_allocator, tombstone_record);
         }
 
         // Copy edges and sort them for deterministic storage order
@@ -521,7 +521,7 @@ pub const SSTable = struct {
             _ = try file.write(&edge_buffer);
             current_offset += EdgeIndexEntry.SERIALIZED_SIZE;
 
-            try self.edge_index.append(edge_entry);
+            try self.edge_index.append(self.backing_allocator, edge_entry);
         }
 
         const index_offset = current_offset;
@@ -618,7 +618,7 @@ pub const SSTable = struct {
             }
 
             const tombstone_record = try TombstoneRecord.deserialize(&tombstone_buffer);
-            try self.tombstone_index.append(tombstone_record);
+            try self.tombstone_index.append(self.backing_allocator, tombstone_record);
         }
 
         self.tombstone_count = header.tombstone_count;
@@ -678,13 +678,13 @@ pub const SSTable = struct {
         // Safety: Index offset is validated during header parsing and fits in seek position
         _ = try file.seek(@intCast(header.index_offset), .start);
 
-        try self.index.ensureTotalCapacity(header.block_count);
+        try self.index.ensureTotalCapacity(self.backing_allocator, header.block_count);
         for (0..header.block_count) |_| {
             var entry_buffer: [IndexEntry.SERIALIZED_SIZE]u8 = undefined;
             _ = try file.read(&entry_buffer);
 
             const entry = try IndexEntry.deserialize(&entry_buffer);
-            try self.index.append(entry);
+            try self.index.append(self.backing_allocator, entry);
         }
 
         // Skip per-operation index validation to prevent performance regression
@@ -709,14 +709,14 @@ pub const SSTable = struct {
             _ = try file.seek(@intCast(header.tombstone_offset), .start);
 
             self.tombstone_index.clearRetainingCapacity();
-            try self.tombstone_index.ensureTotalCapacity(header.tombstone_count);
+            try self.tombstone_index.ensureTotalCapacity(self.backing_allocator, header.tombstone_count);
 
             for (0..header.tombstone_count) |_| {
                 var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
                 _ = try file.read(&tombstone_buffer);
 
                 const tombstone_record = try TombstoneRecord.deserialize(&tombstone_buffer);
-                try self.tombstone_index.append(tombstone_record);
+                try self.tombstone_index.append(self.backing_allocator, tombstone_record);
             }
         }
 
@@ -726,14 +726,14 @@ pub const SSTable = struct {
             _ = try file.seek(header.edge_offset, .start);
 
             self.edge_index.clearRetainingCapacity();
-            try self.edge_index.ensureTotalCapacity(header.edge_count);
+            try self.edge_index.ensureTotalCapacity(self.backing_allocator, header.edge_count);
 
             for (0..header.edge_count) |_| {
                 var edge_buffer: [EdgeIndexEntry.SERIALIZED_SIZE]u8 = undefined;
                 _ = try file.read(&edge_buffer);
 
                 const edge_entry = try EdgeIndexEntry.deserialize(&edge_buffer);
-                try self.edge_index.append(edge_entry);
+                try self.edge_index.append(self.backing_allocator, edge_entry);
             }
         }
     }
@@ -896,8 +896,8 @@ pub const SSTable = struct {
     /// Find all outgoing edges from a source block in this SSTable.
     /// Returns edges as GraphEdge array that must be freed by caller.
     pub fn find_outgoing_edges(self: *const SSTable, source_id: BlockId, allocator: std.mem.Allocator) ![]GraphEdge {
-        var edges = std.array_list.Managed(GraphEdge).init(allocator);
-        defer edges.deinit();
+        var edges = std.ArrayList(GraphEdge){};
+        defer edges.deinit(allocator);
 
         for (self.edge_index.items) |edge_entry| {
             if (edge_entry.source_id.eql(source_id)) {
@@ -906,18 +906,18 @@ pub const SSTable = struct {
                     .target_id = edge_entry.target_id,
                     .edge_type = edge_entry.edge_type,
                 };
-                try edges.append(edge);
+                try edges.append(allocator, edge);
             }
         }
 
-        return edges.toOwnedSlice();
+        return edges.toOwnedSlice(allocator);
     }
 
     /// Find all incoming edges to a target block in this SSTable.
     /// Returns edges as GraphEdge array that must be freed by caller.
     pub fn find_incoming_edges(self: *const SSTable, target_id: BlockId, allocator: std.mem.Allocator) ![]GraphEdge {
-        var edges = std.array_list.Managed(GraphEdge).init(allocator);
-        defer edges.deinit();
+        var edges = std.ArrayList(GraphEdge){};
+        defer edges.deinit(allocator);
 
         for (self.edge_index.items) |edge_entry| {
             if (edge_entry.target_id.eql(target_id)) {
@@ -926,11 +926,11 @@ pub const SSTable = struct {
                     .target_id = edge_entry.target_id,
                     .edge_type = edge_entry.edge_type,
                 };
-                try edges.append(edge);
+                try edges.append(allocator, edge);
             }
         }
 
-        return edges.toOwnedSlice();
+        return edges.toOwnedSlice(allocator);
     }
 };
 
@@ -1053,22 +1053,23 @@ pub const Compactor = struct {
         var output_table = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.filesystem, output_path_copy);
         defer output_table.deinit();
 
-        var all_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
-        defer all_blocks.deinit();
-
-        // Collect tombstones from all input SSTables
-        var all_tombstones = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
-        defer all_tombstones.deinit();
-
-        // Collect edges from all input SSTables
-        var all_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
-        defer all_edges.deinit();
-
-        var total_capacity: u32 = 0;
+        var blocks_capacity: u32 = 0;
+        var tombstones_capacity: usize = 0;
+        var edges_capacity: usize = 0;
         for (input_tables) |table| {
-            total_capacity += table.block_count;
+            blocks_capacity += table.block_count;
+            tombstones_capacity += table.tombstone_index.items.len;
+            edges_capacity += table.edge_index.items.len;
         }
-        try all_blocks.ensureTotalCapacity(total_capacity);
+
+        var all_blocks = try std.ArrayList(ContextBlock).initCapacity(self.backing_allocator, blocks_capacity);
+        defer all_blocks.deinit(self.backing_allocator);
+
+        var all_tombstones = try std.ArrayList(TombstoneRecord).initCapacity(self.backing_allocator, tombstones_capacity);
+        defer all_tombstones.deinit(self.backing_allocator);
+
+        var all_edges = try std.ArrayList(GraphEdge).initCapacity(self.backing_allocator, edges_capacity);
+        defer all_edges.deinit(self.backing_allocator);
 
         for (input_tables) |table| {
             // Skip empty SSTables to avoid iterator assertion failure
@@ -1079,12 +1080,12 @@ pub const Compactor = struct {
             defer iter.deinit();
 
             while (try iter.next()) |block| {
-                try all_blocks.append(block);
+                try all_blocks.append(self.backing_allocator, block);
             }
 
             // Collect tombstones from this table
             for (table.tombstone_index.items) |tombstone_record| {
-                try all_tombstones.append(tombstone_record);
+                try all_tombstones.append(self.backing_allocator, tombstone_record);
             }
 
             // Collect edges from this table
@@ -1094,14 +1095,14 @@ pub const Compactor = struct {
                     .target_id = edge_entry.target_id,
                     .edge_type = edge_entry.edge_type,
                 };
-                try all_edges.append(edge);
+                try all_edges.append(self.backing_allocator, edge);
             }
         }
 
         // Apply MVCC filtering between blocks and tombstones
-        const mvcc_filtered = try self.apply_mvcc_filtering(all_blocks.items, all_tombstones.items);
-        defer mvcc_filtered.blocks.deinit();
-        defer mvcc_filtered.tombstones.deinit();
+        var mvcc_filtered = try self.apply_mvcc_filtering(all_blocks.items, all_tombstones.items);
+        defer mvcc_filtered.blocks.deinit(self.backing_allocator);
+        defer mvcc_filtered.tombstones.deinit(self.backing_allocator);
 
         const unique_blocks = try self.dedup_blocks(mvcc_filtered.blocks.items);
         const unique_tombstones = try self.dedup_and_gc_tombstones(mvcc_filtered.tombstones.items);
@@ -1143,10 +1144,8 @@ pub const Compactor = struct {
             }
         }.less_than);
 
-        var unique = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
-        defer unique.deinit();
-
-        try unique.ensureTotalCapacity(sorted.len);
+        var unique = try std.ArrayList(ContextBlock).initCapacity(self.backing_allocator, sorted.len);
+        defer unique.deinit(self.backing_allocator);
 
         var prev_id: ?BlockId = null;
         for (sorted) |block| {
@@ -1159,13 +1158,13 @@ pub const Compactor = struct {
                     .metadata_json = try self.arena_coordinator.allocator().dupe(u8, block_data.metadata_json),
                     .content = try self.arena_coordinator.allocator().dupe(u8, block_data.content),
                 };
-                try unique.append(cloned);
+                try unique.append(self.backing_allocator, cloned);
                 prev_id = block_data.id;
             }
         }
 
         self.backing_allocator.free(sorted);
-        return unique.toOwnedSlice();
+        return unique.toOwnedSlice(self.backing_allocator);
     }
 
     /// Remove duplicate tombstones, keeping the one with highest deletion sequence,
@@ -1185,10 +1184,8 @@ pub const Compactor = struct {
             }
         }.less_than);
 
-        var unique = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
-        defer unique.deinit();
-
-        try unique.ensureTotalCapacity(sorted.len);
+        var unique = try std.ArrayList(TombstoneRecord).initCapacity(self.backing_allocator, sorted.len);
+        defer unique.deinit(self.backing_allocator);
 
         // Get current timestamp for garbage collection
         const current_timestamp = @as(u64, @intCast(std.time.microTimestamp()));
@@ -1206,18 +1203,18 @@ pub const Compactor = struct {
                 continue;
             }
 
-            try unique.append(tombstone_record);
+            try unique.append(self.backing_allocator, tombstone_record);
             prev_id = tombstone_record.block_id;
         }
 
         self.backing_allocator.free(sorted);
-        return unique.toOwnedSlice();
+        return unique.toOwnedSlice(self.backing_allocator);
     }
 
     /// MVCC filtering result for compaction
     const MVCCFilterResult = struct {
-        blocks: std.array_list.Managed(ContextBlock),
-        tombstones: std.array_list.Managed(TombstoneRecord),
+        blocks: std.ArrayList(ContextBlock),
+        tombstones: std.ArrayList(TombstoneRecord),
     };
 
     /// Apply MVCC semantics during compaction: for each block ID, keep either
@@ -1244,14 +1241,14 @@ pub const Compactor = struct {
         }
 
         // Filter blocks and tombstones based on MVCC winners
-        var filtered_blocks = std.array_list.Managed(ContextBlock).init(self.backing_allocator);
-        var filtered_tombstones = std.array_list.Managed(TombstoneRecord).init(self.backing_allocator);
+        var filtered_blocks = try std.ArrayList(ContextBlock).initCapacity(self.backing_allocator, blocks.len);
+        var filtered_tombstones = try std.ArrayList(TombstoneRecord).initCapacity(self.backing_allocator, tombstones.len);
 
         for (blocks) |block| {
             const winner = highest_sequences.get(block.id).?;
             // Keep block only if THIS specific block is the winner
             if (!winner.is_tombstone and block.sequence == winner.sequence) {
-                try filtered_blocks.append(block);
+                try filtered_blocks.append(self.backing_allocator, block);
             }
         }
 
@@ -1259,7 +1256,7 @@ pub const Compactor = struct {
             const winner = highest_sequences.get(tombstone_record.block_id).?;
             // Keep tombstone only if THIS specific tombstone is the winner
             if (winner.is_tombstone and tombstone_record.sequence == winner.sequence) {
-                try filtered_tombstones.append(tombstone_record);
+                try filtered_tombstones.append(self.backing_allocator, tombstone_record);
             }
         }
 
@@ -1279,8 +1276,8 @@ pub const Compactor = struct {
             try block_ids.put(block.id, {});
         }
 
-        var filtered_edges = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
-        defer filtered_edges.deinit();
+        var filtered_edges = try std.ArrayList(GraphEdge).initCapacity(self.backing_allocator, edges.len);
+        defer filtered_edges.deinit(self.backing_allocator);
 
         var kept_count: usize = 0;
         var filtered_count: usize = 0;
@@ -1288,14 +1285,14 @@ pub const Compactor = struct {
         for (edges) |edge| {
             // Only keep edges where both source and target blocks exist
             if (block_ids.contains(edge.source_id) and block_ids.contains(edge.target_id)) {
-                try filtered_edges.append(edge);
+                try filtered_edges.append(self.backing_allocator, edge);
                 kept_count += 1;
             } else {
                 filtered_count += 1;
             }
         }
 
-        return filtered_edges.toOwnedSlice();
+        return filtered_edges.toOwnedSlice(self.backing_allocator);
     }
 
     /// Deduplicate edges during compaction.
@@ -1308,10 +1305,8 @@ pub const Compactor = struct {
 
         std.mem.sort(GraphEdge, sorted, {}, GraphEdge.less_than);
 
-        var unique = std.array_list.Managed(GraphEdge).init(self.backing_allocator);
-        defer unique.deinit();
-
-        try unique.ensureTotalCapacity(sorted.len);
+        var unique = try std.ArrayList(GraphEdge).initCapacity(self.backing_allocator, sorted.len);
+        defer unique.deinit(self.backing_allocator);
 
         var prev_edge: ?GraphEdge = null;
         for (sorted) |edge| {
@@ -1324,10 +1319,10 @@ pub const Compactor = struct {
                 continue;
             }
 
-            try unique.append(edge);
+            try unique.append(self.backing_allocator, edge);
             prev_edge = edge;
         }
 
-        return unique.toOwnedSlice();
+        return unique.toOwnedSlice(self.backing_allocator);
     }
 };

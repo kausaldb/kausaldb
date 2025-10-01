@@ -371,8 +371,8 @@ pub const WAL = struct {
 
     /// List all WAL segment files in the directory, sorted in chronological order
     pub fn list_segment_files(self: *WAL) WALError![][]const u8 {
-        var file_list = std.array_list.Managed([]const u8).init(self.allocator);
-        defer file_list.deinit();
+        var file_list = std.ArrayList([]const u8){};
+        defer file_list.deinit(self.allocator);
 
         var dir_iter = self.vfs.iterate_directory(self.directory, self.allocator) catch |err| switch (err) {
             error.FileNotFound => return WALError.FileNotFound,
@@ -389,11 +389,11 @@ pub const WAL = struct {
                 std.mem.endsWith(u8, entry.name, types.WAL_FILE_SUFFIX))
             {
                 const owned_name = self.allocator.dupe(u8, entry.name) catch return WALError.OutOfMemory;
-                file_list.append(owned_name) catch return WALError.OutOfMemory;
+                file_list.append(self.allocator, owned_name) catch return WALError.OutOfMemory;
             }
         }
 
-        const files = file_list.toOwnedSlice() catch return WALError.OutOfMemory;
+        const files = file_list.toOwnedSlice(self.allocator) catch return WALError.OutOfMemory;
 
         std.sort.insertion([]const u8, files, {}, struct {
             fn less_than(_: void, lhs: []const u8, rhs: []const u8) bool {

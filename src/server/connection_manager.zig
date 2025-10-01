@@ -51,7 +51,7 @@ pub const ConnectionManager = struct {
     /// Configuration controlling connection behavior
     config: ConnectionManagerConfig,
     /// Active connections owned by this manager
-    connections: std.array_list.Managed(*ClientConnection),
+    connections: std.ArrayList(*ClientConnection),
     /// Monotonic connection ID counter
     next_connection_id: u32,
     /// Poll file descriptors array for I/O event detection
@@ -61,12 +61,12 @@ pub const ConnectionManager = struct {
 
     /// Phase 1 initialization: Memory-only setup, no I/O operations.
     /// Follows KausalDB two-phase initialization pattern.
-    pub fn init(allocator: std.mem.Allocator, config: ConnectionManagerConfig) ConnectionManager {
+    pub fn init(allocator: std.mem.Allocator, config: ConnectionManagerConfig) !ConnectionManager {
         return ConnectionManager{
             .arena = std.heap.ArenaAllocator.init(allocator),
             .backing_allocator = allocator,
             .config = config,
-            .connections = std.array_list.Managed(*ClientConnection).init(allocator),
+            .connections = try std.ArrayList(*ClientConnection).initCapacity(allocator, config.max_connections),
             .next_connection_id = 1,
             .poll_fds = &[_]std.posix.pollfd{}, // Allocated in startup()
             .stats = ConnectionManagerStats{},
@@ -81,10 +81,10 @@ pub const ConnectionManager = struct {
         const poll_fds_size = self.config.max_connections + 1;
         self.poll_fds = try self.backing_allocator.alloc(std.posix.pollfd, poll_fds_size);
 
-        // Pre-allocate connection storage capacity to prevent reallocations
-        try self.connections.ensureTotalCapacity(self.config.max_connections);
-
-        log.info("ConnectionManager started: max_connections={}, timeout={}s", .{ self.config.max_connections, self.config.connection_timeout_sec });
+        log.info(
+            "ConnectionManager started: max_connections={}, timeout={}s",
+            .{ self.config.max_connections, self.config.connection_timeout_sec },
+        );
     }
 
     /// Clean up all resources including connections and poll_fds.
@@ -94,7 +94,7 @@ pub const ConnectionManager = struct {
             connection.deinit();
             // Connection memory is arena-allocated, cleaned up below
         }
-        self.connections.deinit();
+        self.connections.deinit(self.backing_allocator);
 
         if (self.poll_fds.len > 0) {
             self.backing_allocator.free(self.poll_fds);
@@ -151,7 +151,7 @@ pub const ConnectionManager = struct {
             _ = try std.posix.fcntl(connection.stream.handle, std.posix.F.SETFL, conn_flags | O_NONBLOCK);
 
             self.next_connection_id += 1;
-            try self.connections.append(connection);
+            try self.connections.append(self.backing_allocator, connection);
             accepted_count += 1;
 
             self.stats.connections_accepted += 1;
@@ -459,7 +459,7 @@ test "connection manager initialization follows two-phase pattern" {
     };
 
     // Phase 1: init() should not perform I/O
-    var manager = ConnectionManager.init(testing.allocator, config);
+    var manager = try ConnectionManager.init(testing.allocator, config);
     defer manager.deinit();
 
     // Verify initial state - no I/O resources allocated
@@ -481,7 +481,7 @@ test "connection manager initialization follows two-phase pattern" {
 }
 
 test "connection statistics track operations correctly" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+    var manager = try ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 3,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,
@@ -500,7 +500,7 @@ test "connection statistics track operations correctly" {
 }
 
 test "arena cleanup handles connection memory automatically" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+    var manager = try ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 2,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,
@@ -527,7 +527,7 @@ test "poll_fds array sizing respects max_connections limit" {
     };
 
     for (configs) |config| {
-        var manager = ConnectionManager.init(testing.allocator, config);
+        var manager = try ConnectionManager.init(testing.allocator, config);
         defer manager.deinit();
         try manager.startup();
 
@@ -543,7 +543,7 @@ test "connection manager configuration validation" {
         .poll_timeout_ms = 1000,
     };
 
-    var manager = ConnectionManager.init(testing.allocator, config);
+    var manager = try ConnectionManager.init(testing.allocator, config);
     defer manager.deinit();
 
     // Verify configuration is stored correctly
@@ -553,7 +553,7 @@ test "connection manager configuration validation" {
 }
 
 test "connection ID assignment is monotonic" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+    var manager = try ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 10,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,
@@ -578,7 +578,7 @@ test "connection manager enforces resource limits" {
         .poll_timeout_ms = 1000,
     };
 
-    var manager = ConnectionManager.init(testing.allocator, config);
+    var manager = try ConnectionManager.init(testing.allocator, config);
     defer manager.deinit();
     try manager.startup();
 
@@ -594,7 +594,7 @@ test "timeout configuration affects cleanup behavior" {
         .poll_timeout_ms = 1000,
     };
 
-    var manager = ConnectionManager.init(testing.allocator, short_timeout_config);
+    var manager = try ConnectionManager.init(testing.allocator, short_timeout_config);
     defer manager.deinit();
     try manager.startup();
 
@@ -611,7 +611,7 @@ test "poll timeout affects blocking behavior" {
         .poll_timeout_ms = 50, // Short timeout for testing
     };
 
-    var manager = ConnectionManager.init(testing.allocator, config);
+    var manager = try ConnectionManager.init(testing.allocator, config);
     defer manager.deinit();
     try manager.startup();
 
@@ -619,7 +619,7 @@ test "poll timeout affects blocking behavior" {
 }
 
 test "backing allocator vs arena allocator usage" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+    var manager = try ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 10,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,
@@ -640,7 +640,7 @@ test "backing allocator vs arena allocator usage" {
 }
 
 test "deinit cleans up all resources properly" {
-    var manager = ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
+    var manager = try ConnectionManager.init(testing.allocator, ConnectionManagerConfig{
         .max_connections = 5,
         .connection_timeout_sec = 60,
         .poll_timeout_ms = 1000,

@@ -23,8 +23,8 @@ fn bench_connection_overhead_simulation(bench_harness: *BenchmarkHarness) !void 
     const iterations = bench_harness.config.iterations;
     const warmup = bench_harness.config.warmup_iterations;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |_| {
@@ -36,7 +36,7 @@ fn bench_connection_overhead_simulation(bench_harness: *BenchmarkHarness) !void 
     for (0..iterations) |_| {
         timer.reset();
         _ = simulate_connection();
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("network/connection_overhead_simulation", samples.items);
@@ -48,8 +48,8 @@ fn bench_message_serialization_cpu_cost(bench_harness: *BenchmarkHarness) !void 
     const iterations = bench_harness.config.iterations;
     const warmup = bench_harness.config.warmup_iterations;
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |_| {
@@ -63,7 +63,7 @@ fn bench_message_serialization_cpu_cost(bench_harness: *BenchmarkHarness) !void 
         timer.reset();
         const serialized = simulate_message_serialization(bench_harness.allocator) catch continue;
         bench_harness.allocator.free(serialized);
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("network/message_serialization_cpu_cost", samples.items);
@@ -75,8 +75,8 @@ fn bench_concurrent_overhead_simulation(bench_harness: *BenchmarkHarness) !void 
     const iterations = @min(100, bench_harness.config.iterations); // Concurrent ops are expensive
     const warmup = @min(20, bench_harness.config.warmup_iterations);
 
-    var samples = std.array_list.Managed(u64).init(bench_harness.allocator);
-    defer samples.deinit();
+    var samples = std.ArrayList(u64){};
+    defer samples.deinit(bench_harness.allocator);
 
     // Warmup
     for (0..warmup) |_| {
@@ -88,7 +88,7 @@ fn bench_concurrent_overhead_simulation(bench_harness: *BenchmarkHarness) !void 
     for (0..iterations) |_| {
         timer.reset();
         _ = simulate_concurrent_connections();
-        try samples.append(timer.read());
+        try samples.append(bench_harness.allocator, timer.read());
     }
 
     const result = harness.calculate_benchmark_result("network/concurrent_overhead_simulation", samples.items);

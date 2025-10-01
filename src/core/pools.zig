@@ -23,7 +23,7 @@ fn DebugTrackerType(comptime T: type) type {
         peak_usage: u32,
         total_acquisitions: u64,
         total_releases: u64,
-        current_allocations: std.array_list.Managed(AllocationInfo),
+        current_allocations: std.ArrayList(AllocationInfo),
 
         const AllocationInfo = struct {
             ptr: *T,
@@ -31,12 +31,12 @@ fn DebugTrackerType(comptime T: type) type {
             source_location: std.builtin.SourceLocation,
         };
 
-        fn init(allocator: std.mem.Allocator) Self {
+        fn init(_: std.mem.Allocator) Self {
             return Self{
                 .peak_usage = 0,
                 .total_acquisitions = 0,
                 .total_releases = 0,
-                .current_allocations = std.array_list.Managed(AllocationInfo).init(allocator),
+                .current_allocations = std.ArrayList(AllocationInfo){},
             };
         }
 
@@ -46,7 +46,7 @@ fn DebugTrackerType(comptime T: type) type {
                 .timestamp = std.time.milliTimestamp(),
                 .source_location = @src(),
             };
-            self.current_allocations.append(info) catch return; // Don't fail on tracking
+            self.current_allocations.append(std.heap.page_allocator, info) catch return; // Don't fail on tracking
             self.total_acquisitions += 1;
         }
 
@@ -87,7 +87,7 @@ fn DebugTrackerType(comptime T: type) type {
 
         fn deinit(self: *Self) void {
             self.report_leaks_only();
-            self.current_allocations.deinit();
+            self.current_allocations.deinit(std.heap.page_allocator);
         }
     };
 }
@@ -469,21 +469,21 @@ test "ObjectPool exhaustion handling" {
 }
 
 test "ObjectPool with initialization function" {
-    var pool = try ObjectPoolType(std.array_list.Managed(u8)).init(testing.allocator, 2);
+    var pool = try ObjectPoolType(std.ArrayList(u8)).init(testing.allocator, 4);
     defer pool.deinit();
 
     const init_fn = struct {
-        fn init(list: *std.array_list.Managed(u8)) void {
-            list.* = std.array_list.Managed(u8).init(testing.allocator);
+        fn init(list: *std.ArrayList(u8)) void {
+            list.* = std.ArrayList(u8){};
         }
     }.init;
 
     const list = pool.acquire_with_init(init_fn) orelse return error.PoolExhausted;
-    try list.append(42);
+    try list.append(testing.allocator, 42);
     try testing.expect(list.items[0] == 42);
 
     // Clean up before release
-    list.deinit();
+    list.deinit(testing.allocator);
     pool.release(list);
 }
 
@@ -564,8 +564,8 @@ test "pool performance characteristics" {
     defer pool.deinit();
 
     // Track items to ensure they're all released
-    var acquired_items = std.array_list.Managed(*u64).init(testing.allocator);
-    defer acquired_items.deinit();
+    var acquired_items = std.ArrayList(*u64){};
+    defer acquired_items.deinit(testing.allocator);
 
     // Measure allocation performance
     const start_time = std.time.nanoTimestamp();
@@ -578,7 +578,7 @@ test "pool performance characteristics" {
         };
 
         item.* = i;
-        try acquired_items.append(item);
+        try acquired_items.append(testing.allocator, item);
 
         if (i % 2 == 0) {
             pool.release(item);

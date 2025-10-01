@@ -43,12 +43,12 @@ pub fn ingest_directory_to_blocks(
         return error.DirectoryNotFound;
     }
 
-    var file_paths = std.array_list.Managed([]const u8).init(backing);
+    var file_paths = std.ArrayList([]const u8){};
     defer {
         for (file_paths.items) |path| {
             backing.free(path);
         }
-        file_paths.deinit();
+        file_paths.deinit(backing);
     }
 
     try collect_git_tracked_files(
@@ -60,7 +60,7 @@ pub fn ingest_directory_to_blocks(
         &file_paths,
     );
 
-    var all_blocks = std.array_list.Managed(IngestionBlock).init(coordinator.allocator());
+    var all_blocks = std.ArrayList(IngestionBlock){};
     var stats = IngestionStats{ .files_processed = 0, .blocks_generated = 0, .errors_encountered = 0 };
 
     for (file_paths.items) |file_path| {
@@ -121,14 +121,14 @@ pub fn ingest_directory_to_blocks(
             // Convert each ContextBlock to IngestionBlock for ownership tracking
             for (file_blocks) |block| {
                 const ingestion_block = IngestionBlock.take_ownership(block);
-                try all_blocks.append(ingestion_block);
+                try all_blocks.append(coordinator.allocator(), ingestion_block);
             }
             stats.blocks_generated += @intCast(file_blocks.len);
         }
     }
 
     // Convert to []ContextBlock at API boundary
-    const owned_blocks = try all_blocks.toOwnedSlice();
+    const owned_blocks = try all_blocks.toOwnedSlice(coordinator.allocator());
     var blocks = try coordinator.allocator().alloc(ContextBlock, owned_blocks.len);
     for (owned_blocks, 0..) |owned, i| {
         blocks[i] = owned.block;
@@ -146,7 +146,7 @@ fn collect_git_tracked_files(
     directory_path: []const u8,
     include_patterns: [][]const u8,
     exclude_patterns: [][]const u8,
-    out_paths: *std.array_list.Managed([]const u8),
+    out_paths: *std.ArrayList([]const u8),
 ) !void {
     const git_result = std.process.Child.run(.{
         .allocator = allocator,
@@ -200,7 +200,7 @@ fn collect_git_tracked_files(
 
         if (matches_include and !matches_exclude) {
             const absolute_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, trimmed_line });
-            try out_paths.append(absolute_path);
+            try out_paths.append(allocator, absolute_path);
         }
     }
 
@@ -216,7 +216,7 @@ fn collect_filesystem_files(
     directory_path: []const u8,
     include_patterns: [][]const u8,
     exclude_patterns: [][]const u8,
-    out_paths: *std.array_list.Managed([]const u8),
+    out_paths: *std.ArrayList([]const u8),
 ) !void {
     var iterator = try file_system.iterate_directory(directory_path, allocator);
     defer iterator.deinit(allocator);
@@ -268,7 +268,7 @@ fn collect_filesystem_files(
         if (should_exclude) continue;
 
         const absolute_path = try allocator.dupe(u8, file_path);
-        try out_paths.append(absolute_path);
+        try out_paths.append(allocator, absolute_path);
     }
 }
 

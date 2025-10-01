@@ -148,7 +148,7 @@ pub const TombstoneRecord = struct {
 /// Used during compaction to efficiently apply deletion semantics.
 pub const TombstoneSet = struct {
     /// Sorted array for binary search during compaction
-    tombstones: std.array_list.Managed(TombstoneRecord),
+    tombstones: std.ArrayList(TombstoneRecord),
 
     /// Allocator for dynamic operations
     allocator: std.mem.Allocator,
@@ -158,19 +158,19 @@ pub const TombstoneSet = struct {
 
     pub fn init(allocator: std.mem.Allocator) TombstoneSet {
         return .{
-            .tombstones = std.array_list.Managed(TombstoneRecord).init(allocator),
+            .tombstones = std.ArrayList(TombstoneRecord){},
             .allocator = allocator,
             .is_sorted = true,
         };
     }
 
     pub fn deinit(self: *TombstoneSet) void {
-        self.tombstones.deinit();
+        self.tombstones.deinit(self.allocator);
     }
 
     /// Add tombstone to set. Sort is deferred until first query for better batch performance.
     pub fn add_tombstone(self: *TombstoneSet, tombstone: TombstoneRecord) !void {
-        try self.tombstones.append(tombstone);
+        try self.tombstones.append(self.allocator, tombstone);
         self.is_sorted = false; // Defer sorting until needed
     }
 

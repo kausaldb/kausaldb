@@ -357,9 +357,8 @@ pub fn execute_keyword_query(
 ) !SemanticQueryResult {
     try query.validate();
 
-    var results = std.array_list.Managed(SemanticResult).init(allocator);
-    defer results.deinit();
-    try results.ensureTotalCapacity(query.max_results);
+    var results = try std.ArrayList(SemanticResult).initCapacity(allocator, query.max_results);
+    defer results.deinit(allocator);
 
     var iterator = storage_engine.iterate_all_blocks();
     defer iterator.deinit();
@@ -372,7 +371,7 @@ pub fn execute_keyword_query(
             matches_found += 1;
 
             if (results.items.len < query.max_results) {
-                try results.append(SemanticResult{
+                try results.append(allocator, SemanticResult{
                     .block = block,
                     .similarity_score = similarity,
                 });

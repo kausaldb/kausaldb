@@ -109,7 +109,7 @@ pub const SimulationVFS = struct {
     allocator: std.mem.Allocator,
     file_arena: std.heap.ArenaAllocator,
     files: std.StringHashMap(FileHandleId),
-    file_storage: std.array_list.Managed(FileStorage),
+    file_storage: std.ArrayList(FileStorage),
     // Direct handle-to-storage mapping for O(1) lookups - eliminates linear search
     handle_to_storage: std.HashMap(
         FileHandleId,
@@ -308,8 +308,8 @@ pub const SimulationVFS = struct {
         errdefer file_arena.deinit();
 
         const files = std.StringHashMap(FileHandleId).init(allocator);
-        var file_storage = std.array_list.Managed(FileStorage).init(allocator);
-        file_storage.ensureTotalCapacity(512) catch unreachable; // Safety: generous initial capacity for testing
+        var file_storage = std.ArrayList(FileStorage){};
+        try file_storage.ensureTotalCapacity(allocator, 512);
 
         var handle_to_storage = std.HashMap(
             FileHandleId,
@@ -317,7 +317,7 @@ pub const SimulationVFS = struct {
             FileHandleIdContext,
             std.hash_map.default_max_load_percentage,
         ).init(allocator);
-        handle_to_storage.ensureTotalCapacity(512) catch unreachable; // Safety: generous initial capacity for testing
+        try handle_to_storage.ensureTotalCapacity(512);
 
         return SimulationVFS{
             .magic = MAGIC_NUMBER,
@@ -352,8 +352,8 @@ pub const SimulationVFS = struct {
         sim_vfs.magic = MAGIC_NUMBER;
         sim_vfs.allocator = allocator;
         sim_vfs.files = std.StringHashMap(FileHandleId).init(allocator);
-        sim_vfs.file_storage = std.array_list.Managed(FileStorage).init(allocator);
-        sim_vfs.file_storage.ensureTotalCapacity(512) catch unreachable; // Safety: generous initial capacity for testing
+        sim_vfs.file_storage = std.ArrayList(FileStorage){};
+        try sim_vfs.file_storage.ensureTotalCapacity(allocator, 512);
 
         sim_vfs.handle_to_storage = std.HashMap(
             FileHandleId,
@@ -361,7 +361,7 @@ pub const SimulationVFS = struct {
             FileHandleIdContext,
             std.hash_map.default_max_load_percentage,
         ).init(allocator);
-        sim_vfs.handle_to_storage.ensureTotalCapacity(512) catch unreachable; // Safety: generous initial capacity for testing
+        try sim_vfs.handle_to_storage.ensureTotalCapacity(512);
 
         sim_vfs.handle_registry = FileHandleRegistry.init(allocator);
         sim_vfs.current_time_ns = 1_700_000_000_000_000_000; // Fixed epoch for determinism
@@ -550,6 +550,15 @@ pub const SimulationVFS = struct {
         return self.current_time_ns;
     }
 
+    /// Retrieve allocator for VFile operations that need to resize file content
+    fn allocator_fn(vfs_ptr: *anyopaque) std.mem.Allocator {
+        std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
+
+        // Safety: VFS pointer guaranteed by interface contract
+        const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
+        return self.file_arena.allocator();
+    }
+
     /// Apply read corruption fault injection to buffer
     fn read_corruption_fn(vfs_ptr: *anyopaque, buffer: []u8) void {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
@@ -614,7 +623,7 @@ pub const SimulationVFS = struct {
 
         // Store index in handle mapping for O(1) lookups
         const storage_index = self.file_storage.items.len;
-        try self.file_storage.append(file_storage);
+        try self.file_storage.append(self.allocator, file_storage);
         try self.handle_to_storage.put(handle_id, storage_index);
 
         return handle_id;
@@ -642,7 +651,7 @@ pub const SimulationVFS = struct {
         // Clean up non-arena resources
         self.handle_to_storage.deinit();
         self.handle_registry.deinit();
-        self.file_storage.deinit();
+        self.file_storage.deinit(self.allocator);
 
         var file_iter = self.files.iterator();
         while (file_iter.next()) |entry| {
@@ -692,8 +701,8 @@ pub const SimulationVFS = struct {
 
     /// Export filesystem state for deterministic testing verification
     pub fn state(self: *SimulationVFS, allocator: std.mem.Allocator) ![]SimulationFileState {
-        var states = std.array_list.Managed(SimulationFileState).init(allocator);
-        try states.ensureTotalCapacity(self.files.count()); // Pre-allocate for known file count
+        var states = std.ArrayList(SimulationFileState){};
+        try states.ensureTotalCapacity(allocator, self.files.count()); // Pre-allocate for known file count
         errdefer {
             for (states.items) |file_state| {
                 allocator.free(file_state.path);
@@ -701,7 +710,7 @@ pub const SimulationVFS = struct {
                     allocator.free(content);
                 }
             }
-            states.deinit();
+            states.deinit(allocator);
         }
 
         var iterator = self.files.iterator();
@@ -715,7 +724,7 @@ pub const SimulationVFS = struct {
             else
                 null;
 
-            try states.append(SimulationFileState{
+            try states.append(allocator, SimulationFileState{
                 .path = path,
                 .content = content,
                 .is_directory = file_data.is_directory,
@@ -725,7 +734,7 @@ pub const SimulationVFS = struct {
             });
         }
 
-        const result = try states.toOwnedSlice();
+        const result = try states.toOwnedSlice(allocator);
         std.mem.sort(SimulationFileState, result, {}, compare_file_states);
         return result;
     }
@@ -787,6 +796,7 @@ pub const SimulationVFS = struct {
                 .fault_injection_fn = fault_injection_fn,
                 .read_corruption_fn = read_corruption_fn,
                 .disk_usage_update_fn = disk_usage_update_fn,
+                .allocator_fn = allocator_fn,
             } },
         };
     }
@@ -805,8 +815,8 @@ pub const SimulationVFS = struct {
         }
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
-        var file_content = std.array_list.Managed(u8).init(self.file_arena.allocator());
-        file_content.ensureTotalCapacity(4096) catch {}; // Pre-allocate 4KB for typical file content
+        var file_content = std.ArrayList(u8){};
+        file_content.ensureTotalCapacity(self.file_arena.allocator(), 4096) catch {}; // Pre-allocate 4KB for typical file content
 
         const file_data = FileData{
             .content = file_content,
@@ -838,6 +848,7 @@ pub const SimulationVFS = struct {
                 .fault_injection_fn = fault_injection_fn,
                 .read_corruption_fn = read_corruption_fn,
                 .disk_usage_update_fn = disk_usage_update_fn,
+                .allocator_fn = allocator_fn,
             } },
         };
     }
@@ -889,8 +900,8 @@ pub const SimulationVFS = struct {
             return VFSError.FileExists;
         }
 
-        var dir_content = std.array_list.Managed(u8).init(self.file_arena.allocator());
-        dir_content.ensureTotalCapacity(1024) catch {}; // Pre-allocate 1KB for directory metadata
+        var dir_content = std.ArrayList(u8){};
+        dir_content.ensureTotalCapacity(self.file_arena.allocator(), 1024) catch {}; // Pre-allocate 1KB for directory metadata
 
         const dir_data = FileData{
             .content = dir_content,
@@ -988,9 +999,9 @@ pub const SimulationVFS = struct {
             return VFSError.NotDirectory;
         }
 
-        var entries = std.array_list.Managed(DirectoryEntry).init(allocator);
-        try entries.ensureTotalCapacity(self.files.count()); // Pre-allocate for known directory entry count
-        errdefer entries.deinit();
+        var entries = std.ArrayList(DirectoryEntry){};
+        try entries.ensureTotalCapacity(allocator, self.files.count()); // Pre-allocate for known directory entry count
+        errdefer entries.deinit(allocator);
 
         var iterator = self.files.iterator();
         while (iterator.next()) |entry| {
@@ -1010,7 +1021,7 @@ pub const SimulationVFS = struct {
                     else
                         DirectoryEntry.Kind.file;
 
-                    try entries.append(DirectoryEntry{
+                    try entries.append(allocator, DirectoryEntry{
                         .name = name,
                         .kind = kind,
                     });
@@ -1018,7 +1029,7 @@ pub const SimulationVFS = struct {
             }
         }
 
-        const entries_slice = try entries.toOwnedSlice();
+        const entries_slice = try entries.toOwnedSlice(allocator);
         std.sort.block(DirectoryEntry, entries_slice, {}, struct {
             fn less_than(context: void, lhs: DirectoryEntry, rhs: DirectoryEntry) bool {
                 _ = context;
