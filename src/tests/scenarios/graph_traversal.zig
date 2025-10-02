@@ -338,3 +338,206 @@ test "scenario: repeated traversal queries maintain consistency" {
     // Repeated queries must return identical results
     try runner.verify_consistency();
 }
+
+// ============================================================================
+// Edge Case Tests: Pathological Graph Structures
+// ============================================================================
+//
+// These tests explicitly construct and verify traversal behavior on edge cases
+// that could expose off-by-one errors, infinite loops, or stack overflows.
+//
+// Note: Self-loops (A -> A) are rejected by design at the storage layer
+// (see storage/engine.zig:1025), so we test 2-node cycles as the minimal cycle.
+
+const storage_mod = @import("../../storage/engine.zig");
+const query_mod = @import("../../query/engine.zig");
+const simulation_vfs = @import("../../sim/simulation_vfs.zig");
+
+const StorageEngine = storage_mod.StorageEngine;
+const QueryEngine = query_mod.QueryEngine;
+const SimulationVFS = simulation_vfs.SimulationVFS;
+
+test "scenario: immediate two-node cycle detection" {
+    const allocator = testing.allocator;
+
+    var vfs = try SimulationVFS.init(allocator);
+    defer vfs.deinit();
+
+    const config = storage_mod.Config{};
+    var storage = try StorageEngine.init(allocator, vfs.vfs(), "/test_db", config);
+    defer storage.deinit();
+
+    try storage.startup();
+    defer storage.shutdown() catch {};
+
+    var query = QueryEngine.init(allocator, &storage);
+    defer query.deinit();
+
+    // Create blocks A and B with immediate cycle: A -> B -> A
+    const block_a_id = BlockId.from_u64(10);
+    const block_b_id = BlockId.from_u64(20);
+
+    const block_a = ContextBlock{
+        .id = block_a_id,
+        .sequence = 1,
+        .source_uri = "test://block_a",
+        .metadata_json = "{}",
+        .content = "Block A in cycle",
+    };
+    const block_b = ContextBlock{
+        .id = block_b_id,
+        .sequence = 2,
+        .source_uri = "test://block_b",
+        .metadata_json = "{}",
+        .content = "Block B in cycle",
+    };
+
+    try storage.put_block(block_a);
+    try storage.put_block(block_b);
+
+    // Create cycle: A -> B -> A
+    try storage.put_edge(GraphEdge{
+        .source_id = block_a_id,
+        .target_id = block_b_id,
+        .edge_type = .calls,
+    });
+    try storage.put_edge(GraphEdge{
+        .source_id = block_b_id,
+        .target_id = block_a_id,
+        .edge_type = .calls,
+    });
+
+    // CRITICAL ASSERTION 1: Traversal terminates even with large depth
+    const result = try query.traverse_outgoing(block_a_id, 10);
+
+    // CRITICAL ASSERTION 2: Both nodes appear exactly once (no duplicates)
+    try testing.expect(result.blocks.len == 2);
+
+    // Verify both blocks are present (order doesn't matter)
+    var found_a = false;
+    var found_b = false;
+    for (result.blocks) |block| {
+        if (block.block.id.eql(block_a_id)) found_a = true;
+        if (block.block.id.eql(block_b_id)) found_b = true;
+    }
+    try testing.expect(found_a and found_b);
+
+    // PROOF COMPLETE: Immediate cycles detected, no infinite loops or duplicates
+}
+
+test "scenario: extreme fan-out from hub node" {
+    const allocator = testing.allocator;
+
+    var vfs = try SimulationVFS.init(allocator);
+    defer vfs.deinit();
+
+    const config = storage_mod.Config{};
+    var storage = try StorageEngine.init(allocator, vfs.vfs(), "/test_db", config);
+    defer storage.deinit();
+
+    try storage.startup();
+    defer storage.shutdown() catch {};
+
+    var query = QueryEngine.init(allocator, &storage);
+    defer query.deinit();
+
+    // Create hub node with 200 outbound edges (star topology)
+    const hub_id = BlockId.from_u64(1);
+    const hub_block = ContextBlock{
+        .id = hub_id,
+        .sequence = 1,
+        .source_uri = "test://hub",
+        .metadata_json = "{}",
+        .content = "Hub node with high fan-out",
+    };
+    try storage.put_block(hub_block);
+
+    // Create 200 leaf nodes
+    const fan_out_count = 200;
+    var i: u64 = 0;
+    while (i < fan_out_count) : (i += 1) {
+        const leaf_id = BlockId.from_u64(100 + i);
+        const leaf_block = ContextBlock{
+            .id = leaf_id,
+            .sequence = 2 + i,
+            .source_uri = "test://leaf",
+            .metadata_json = "{}",
+            .content = "Leaf node",
+        };
+        try storage.put_block(leaf_block);
+
+        // Create edge from hub to leaf
+        try storage.put_edge(GraphEdge{
+            .source_id = hub_id,
+            .target_id = leaf_id,
+            .edge_type = .calls,
+        });
+    }
+
+    // CRITICAL ASSERTION 1: Traversal doesn't OOM or crash
+    const result = try query.traverse_outgoing(hub_id, 2);
+
+    // CRITICAL ASSERTION 2: All 200 leaf nodes are returned (plus hub = 201 total)
+    try testing.expect(result.blocks.len == fan_out_count + 1);
+
+    // PROOF COMPLETE: Extreme fan-out handled without memory exhaustion
+}
+
+test "scenario: exact depth boundary behavior" {
+    const allocator = testing.allocator;
+
+    var vfs = try SimulationVFS.init(allocator);
+    defer vfs.deinit();
+
+    const config = storage_mod.Config{};
+    var storage = try StorageEngine.init(allocator, vfs.vfs(), "/test_db", config);
+    defer storage.deinit();
+
+    try storage.startup();
+    defer storage.shutdown() catch {};
+
+    var query = QueryEngine.init(allocator, &storage);
+    defer query.deinit();
+
+    // Create chain: A -> B -> C -> D -> E (4 hops from A)
+    const ids = [_]u64{ 1, 2, 3, 4, 5 };
+    const names = [_][]const u8{ "A", "B", "C", "D", "E" };
+
+    // Create all blocks
+    for (ids, names, 0..) |id, name, seq| {
+        const block = ContextBlock{
+            .id = BlockId.from_u64(id),
+            .sequence = seq,
+            .source_uri = "test://chain",
+            .metadata_json = "{}",
+            .content = name,
+        };
+        try storage.put_block(block);
+    }
+
+    // Create edges: A->B, B->C, C->D, D->E
+    for (0..ids.len - 1) |idx| {
+        try storage.put_edge(GraphEdge{
+            .source_id = BlockId.from_u64(ids[idx]),
+            .target_id = BlockId.from_u64(ids[idx + 1]),
+            .edge_type = .calls,
+        });
+    }
+
+    // CRITICAL ASSERTION 1: depth=3 returns A, B, C, D (4 nodes, 3 hops)
+    const result_depth_3 = try query.traverse_outgoing(BlockId.from_u64(1), 3);
+    try testing.expect(result_depth_3.blocks.len == 4);
+
+    // Verify E is NOT included (requires 4 hops)
+    var found_e = false;
+    for (result_depth_3.blocks) |block| {
+        if (block.block.id.eql(BlockId.from_u64(5))) found_e = true;
+    }
+    try testing.expect(!found_e);
+
+    // CRITICAL ASSERTION 2: depth=4 returns all 5 nodes
+    const result_depth_4 = try query.traverse_outgoing(BlockId.from_u64(1), 4);
+    try testing.expect(result_depth_4.blocks.len == 5);
+
+    // PROOF COMPLETE: Depth boundaries are exact (off-by-one would fail)
+}
