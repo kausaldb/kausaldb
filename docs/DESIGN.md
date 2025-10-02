@@ -24,6 +24,14 @@ Our implementation consists of:
 *   **SSTables (Sorted String Tables):** When the memtable fills, its contents are flushed to immutable, sorted files on disk. See `src/storage/sstable.zig`.
 *   **Size-Tiered Compaction:** A background process merges SSTables to reduce read amplification and reclaim space from deleted or updated entries. See `src/storage/tiered_compaction.zig`.
 
+#### Core Correctness Guarantees
+
+The storage engine provides the following guarantees, proven by explicit tests in `src/tests/scenarios/explicit_correctness.zig`:
+
+*   **Tombstone Permanence:** Deleted blocks cannot be resurrected after flushing to SSTables. Tombstones with higher sequence numbers correctly shadow blocks in older SSTables, ensuring deletions are permanent even before compaction physically removes the data.
+*   **MVCC Semantics:** Tombstones correctly shadow blocks based on sequence ordering: `tombstone(seq=N)` shadows `block(seq=M)` if and only if `N > M`. This implements proper Multi-Version Concurrency Control.
+*   **LSM Read Precedence:** The memtable strictly takes precedence over SSTables in reads. Higher sequence numbers always win, and tombstones in memory correctly shadow all older data on disk.
+
 ---
 
 ### 2. Single-Threaded Core
