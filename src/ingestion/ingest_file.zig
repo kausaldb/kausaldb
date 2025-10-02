@@ -41,13 +41,12 @@ pub fn parse_file_to_blocks(
     codebase_name: []const u8,
     config: ParseConfig,
 ) ![]ContextBlock {
-    const owned_blocks = if (std.mem.eql(u8, file_content.content_type, "text/zig")) {
-        try parse_zig_file(allocator, file_content, codebase_name);
-    } else if (std.mem.startsWith(u8, file_content.content_type, "text/")) {
-        try parse_text_file(allocator, file_content, codebase_name, config);
-    } else {
+    const owned_blocks = if (std.mem.eql(u8, file_content.content_type, "text/zig"))
+        try parse_zig_file(allocator, file_content, codebase_name)
+    else if (std.mem.startsWith(u8, file_content.content_type, "text/"))
+        try parse_text_file(allocator, file_content, codebase_name, config)
+    else
         return allocator.alloc(ContextBlock, 0);
-    };
 
     defer allocator.free(owned_blocks);
 
