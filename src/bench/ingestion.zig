@@ -261,13 +261,13 @@ fn create_test_files(vfs: *internal.SimulationVFS, _: std.mem.Allocator) !void {
 
     // Create Zig files
     const files = [_]struct { path: []const u8, content: []const u8 }{
-        .{ .path = "test_project/src/main.zig", .content =
+        .{ .path = "test_project/src/main.zig", .content = 
         \\const std = @import("std");
         \\pub fn main() !void {
         \\    std.debug.print("Hello, world!\n", .{});
         \\}
         },
-        .{ .path = "test_project/src/core/types.zig", .content =
+        .{ .path = "test_project/src/core/types.zig", .content = 
         \\pub const MyType = struct {
         \\    value: u32,
         \\    pub fn init(v: u32) MyType {
@@ -275,7 +275,7 @@ fn create_test_files(vfs: *internal.SimulationVFS, _: std.mem.Allocator) !void {
         \\    }
         \\};
         },
-        .{ .path = "test_project/tests/test.zig", .content =
+        .{ .path = "test_project/tests/test.zig", .content = 
         \\const std = @import("std");
         \\test "basic test" {
         \\    try std.testing.expectEqual(@as(u32, 42), 42);
