@@ -402,3 +402,126 @@ test "semantic resolver: handles unresolved external symbols" {
     for (&units) |*unit| cleanup_resolved_unit(unit, std.testing.allocator);
     resolver.deinit();
 }
+
+test "semantic resolver: string pool memory safety with pointer lifetime validation" {
+    // This test proves the string pool correctly manages memory ownership and prevents
+    // use-after-free bugs when ParsedUnits hold non-owned slices.
+    //
+    // Memory contract validation:
+    // 1. Edge target_ids point into string pool (non-owned slices)
+    // 2. ParsedUnits can be safely cleaned up while resolver stays alive
+    // 3. String pool owns all interned strings and frees them exactly once in deinit()
+    // 4. Pointer stability: Pool strings remain valid for resolver's lifetime
+
+    var resolver = SemanticResolver.init(std.testing.allocator);
+    defer resolver.deinit();
+
+    var units = [_]ParsedUnit{
+        ParsedUnit{
+            .id = try std.testing.allocator.dupe(u8, "init"),
+            .unit_type = try std.testing.allocator.dupe(u8, "function"),
+            .content = "fn init() { deinit(); run(); }",
+            .parent_container = null,
+            .location = SourceLocation{
+                .file_path = try std.testing.allocator.dupe(u8, "test.zig"),
+                .line_start = 1,
+                .line_end = 1,
+                .col_start = 1,
+                .col_end = 1,
+            },
+            .edges = std.ArrayList(ParsedEdge){},
+            .metadata = std.StringHashMap([]const u8).init(std.testing.allocator),
+        },
+        ParsedUnit{
+            .id = try std.testing.allocator.dupe(u8, "deinit"),
+            .unit_type = try std.testing.allocator.dupe(u8, "function"),
+            .content = "fn deinit() {}",
+            .parent_container = null,
+            .location = SourceLocation{
+                .file_path = try std.testing.allocator.dupe(u8, "test.zig"),
+                .line_start = 2,
+                .line_end = 2,
+                .col_start = 1,
+                .col_end = 1,
+            },
+            .edges = std.ArrayList(ParsedEdge){},
+            .metadata = std.StringHashMap([]const u8).init(std.testing.allocator),
+        },
+        ParsedUnit{
+            .id = try std.testing.allocator.dupe(u8, "run"),
+            .unit_type = try std.testing.allocator.dupe(u8, "function"),
+            .content = "fn run() {}",
+            .parent_container = null,
+            .location = SourceLocation{
+                .file_path = try std.testing.allocator.dupe(u8, "test.zig"),
+                .line_start = 3,
+                .line_end = 3,
+                .col_start = 1,
+                .col_end = 1,
+            },
+            .edges = std.ArrayList(ParsedEdge){},
+            .metadata = std.StringHashMap([]const u8).init(std.testing.allocator),
+        },
+    };
+
+    // init() calls both deinit() and run()
+    try units[0].edges.append(std.testing.allocator, ParsedEdge{
+        .edge_type = .calls,
+        .target_id = try std.testing.allocator.dupe(u8, "deinit"),
+        .metadata = std.StringHashMap([]const u8).init(std.testing.allocator),
+    });
+    try units[0].edges.append(std.testing.allocator, ParsedEdge{
+        .edge_type = .calls,
+        .target_id = try std.testing.allocator.dupe(u8, "run"),
+        .metadata = std.StringHashMap([]const u8).init(std.testing.allocator),
+    });
+
+    // Store original target pointers BEFORE resolution
+    const original_target_ptrs = [2]usize{
+        @intFromPtr(units[0].edges.items[0].target_id.ptr),
+        @intFromPtr(units[0].edges.items[1].target_id.ptr),
+    };
+
+    try resolver.resolve_symbols(&units);
+
+    // CRITICAL ASSERTION 1: String pool contains exactly 3 unique strings
+    try std.testing.expectEqual(@as(usize, 3), resolver.string_pool.items.len);
+
+    // CRITICAL ASSERTION 2: Edge target_ids now point into string pool (ownership transferred)
+    // Original pointers (from allocator.dupe) were freed at line 99 in resolve_symbols
+    const resolved_target_ptrs = [2]usize{
+        @intFromPtr(units[0].edges.items[0].target_id.ptr),
+        @intFromPtr(units[0].edges.items[1].target_id.ptr),
+    };
+
+    // Prove pointers changed (old ones freed, new ones from pool)
+    try std.testing.expect(resolved_target_ptrs[0] != original_target_ptrs[0]);
+    try std.testing.expect(resolved_target_ptrs[1] != original_target_ptrs[1]);
+
+    // CRITICAL ASSERTION 3: Both resolved targets point into string pool
+    var first_points_to_pool = false;
+    var second_points_to_pool = false;
+    for (resolver.string_pool.items) |pool_str| {
+        if (@intFromPtr(pool_str.ptr) == resolved_target_ptrs[0]) first_points_to_pool = true;
+        if (@intFromPtr(pool_str.ptr) == resolved_target_ptrs[1]) second_points_to_pool = true;
+    }
+    try std.testing.expect(first_points_to_pool);
+    try std.testing.expect(second_points_to_pool);
+
+    // CRITICAL ASSERTION 4: ParsedUnits can be cleaned up safely while resolver stays alive
+    // This proves the memory contract: units hold non-owned slices into the pool
+    for (&units) |*unit| cleanup_resolved_unit(unit, std.testing.allocator);
+
+    // CRITICAL ASSERTION 5: String pool remains valid after ParsedUnit cleanup
+    // Pool still contains ["init", "deinit", "run"] and will be freed in resolver.deinit()
+    try std.testing.expectEqual(@as(usize, 3), resolver.string_pool.items.len);
+    try std.testing.expect(std.mem.eql(u8, resolver.string_pool.items[0], "init"));
+    try std.testing.expect(std.mem.eql(u8, resolver.string_pool.items[1], "deinit"));
+    try std.testing.expect(std.mem.eql(u8, resolver.string_pool.items[2], "run"));
+
+    // PROOF COMPLETE: String pool memory safety validated
+    // - Original target_id strings are freed during resolution (line 99)
+    // - Resolved target_ids point into string pool (non-owned slices)
+    // - ParsedUnits can be cleaned up safely (don't double-free pool strings)
+    // - String pool owns all interned strings and frees them exactly once in deinit()
+}
