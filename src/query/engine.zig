@@ -1462,3 +1462,303 @@ test "query engine zero-copy read operations" {
 
     try testing.expect(failing_allocator.allocations == 0);
 }
+
+test "find_by_name with simple name matching" {
+    const allocator = testing.allocator;
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_simple_name");
+    defer storage_engine.deinit();
+    defer {
+        storage_engine.shutdown() catch {};
+    }
+    try storage_engine.startup();
+
+    var query_engine = QueryEngine.init(allocator, &storage_engine);
+    query_engine.startup();
+    defer query_engine.deinit();
+
+    // Create test blocks with simple function names
+    const init_block = ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0,
+        .source_uri = "test://simple.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/simple.zig:init", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn init() void {}",
+    };
+
+    const deinit_block = ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .sequence = 0,
+        .source_uri = "test://simple.zig#L11-20",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/simple.zig:deinit", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn deinit() void {}",
+    };
+
+    try storage_engine.put_block(init_block);
+    try storage_engine.put_block(deinit_block);
+
+    // Test simple name matching
+    const init_result = try query_engine.find_by_name("test_codebase", "function", "init");
+    defer init_result.deinit();
+    try testing.expectEqual(@as(u32, 1), init_result.total_matches);
+    try testing.expect(init_result.results.len == 1);
+
+    const deinit_result = try query_engine.find_by_name("test_codebase", "function", "deinit");
+    defer deinit_result.deinit();
+    try testing.expectEqual(@as(u32, 1), deinit_result.total_matches);
+
+    // Test non-existent function
+    const missing_result = try query_engine.find_by_name("test_codebase", "function", "nonexistent");
+    defer missing_result.deinit();
+    try testing.expectEqual(@as(u32, 0), missing_result.total_matches);
+}
+
+test "find_by_name with qualified name matching" {
+    const allocator = testing.allocator;
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_qualified_name");
+    defer storage_engine.deinit();
+    defer {
+        storage_engine.shutdown() catch {};
+    }
+    try storage_engine.startup();
+
+    var query_engine = QueryEngine.init(allocator, &storage_engine);
+    query_engine.startup();
+    defer query_engine.deinit();
+
+    // Create test blocks with qualified names (struct methods)
+    const storage_init_block = ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0,
+        .source_uri = "test://storage.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/storage.zig:StorageEngine:init", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn init() StorageEngine {}",
+    };
+
+    const storage_deinit_block = ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .sequence = 0,
+        .source_uri = "test://storage.zig#L11-20",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/storage.zig:StorageEngine:deinit", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn deinit(self: *StorageEngine) void {}",
+    };
+
+    const query_init_block = ContextBlock{
+        .id = try BlockId.from_hex("33333333333333333333333333333333"),
+        .sequence = 0,
+        .source_uri = "test://query.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/query.zig:QueryEngine:init", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn init() QueryEngine {}",
+    };
+
+    try storage_engine.put_block(storage_init_block);
+    try storage_engine.put_block(storage_deinit_block);
+    try storage_engine.put_block(query_init_block);
+
+    // Test qualified name matching: "StorageEngine.init"
+    const storage_init_result = try query_engine.find_by_name("test_codebase", "function", "StorageEngine.init");
+    defer storage_init_result.deinit();
+    try testing.expectEqual(@as(u32, 1), storage_init_result.total_matches);
+    try testing.expect(storage_init_result.results.len == 1);
+    try testing.expect(storage_init_result.results[0].block.read_immutable().id.eql(storage_init_block.id));
+
+    // Test qualified name matching: "StorageEngine.deinit"
+    const storage_deinit_result = try query_engine.find_by_name("test_codebase", "function", "StorageEngine.deinit");
+    defer storage_deinit_result.deinit();
+    try testing.expectEqual(@as(u32, 1), storage_deinit_result.total_matches);
+    try testing.expect(storage_deinit_result.results[0].block.read_immutable().id.eql(storage_deinit_block.id));
+
+    // Test qualified name matching: "QueryEngine.init"
+    const query_init_result = try query_engine.find_by_name("test_codebase", "function", "QueryEngine.init");
+    defer query_init_result.deinit();
+    try testing.expectEqual(@as(u32, 1), query_init_result.total_matches);
+    try testing.expect(query_init_result.results[0].block.read_immutable().id.eql(query_init_block.id));
+
+    // Test that simple "init" doesn't match when we have multiple init methods
+    const simple_init_result = try query_engine.find_by_name("test_codebase", "function", "init");
+    defer simple_init_result.deinit();
+    // Should match all init methods (both StorageEngine.init and QueryEngine.init)
+    try testing.expectEqual(@as(u32, 2), simple_init_result.total_matches);
+}
+
+test "find_by_name qualified name does not match wrong struct" {
+    const allocator = testing.allocator;
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_wrong_struct");
+    defer storage_engine.deinit();
+    defer {
+        storage_engine.shutdown() catch {};
+    }
+    try storage_engine.startup();
+
+    var query_engine = QueryEngine.init(allocator, &storage_engine);
+    query_engine.startup();
+    defer query_engine.deinit();
+
+    // Create blocks with different struct methods
+    const storage_init_block = ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0,
+        .source_uri = "test://storage.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/storage.zig:StorageEngine:init", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn init() StorageEngine {}",
+    };
+
+    const query_init_block = ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .sequence = 0,
+        .source_uri = "test://query.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/query.zig:QueryEngine:init", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn init() QueryEngine {}",
+    };
+
+    try storage_engine.put_block(storage_init_block);
+    try storage_engine.put_block(query_init_block);
+
+    // Query for "StorageEngine.init" should NOT match "QueryEngine.init"
+    const storage_result = try query_engine.find_by_name("test_codebase", "function", "StorageEngine.init");
+    defer storage_result.deinit();
+    try testing.expectEqual(@as(u32, 1), storage_result.total_matches);
+    try testing.expect(storage_result.results[0].block.read_immutable().id.eql(storage_init_block.id));
+
+    // Query for "QueryEngine.init" should NOT match "StorageEngine.init"
+    const query_result = try query_engine.find_by_name("test_codebase", "function", "QueryEngine.init");
+    defer query_result.deinit();
+    try testing.expectEqual(@as(u32, 1), query_result.total_matches);
+    try testing.expect(query_result.results[0].block.read_immutable().id.eql(query_init_block.id));
+
+    // Query for non-existent qualified name
+    const missing_result = try query_engine.find_by_name("test_codebase", "function", "NonExistent.init");
+    defer missing_result.deinit();
+    try testing.expectEqual(@as(u32, 0), missing_result.total_matches);
+}
+
+test "find_by_name qualified name with nested structures" {
+    const allocator = testing.allocator;
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_nested");
+    defer storage_engine.deinit();
+    defer {
+        storage_engine.shutdown() catch {};
+    }
+    try storage_engine.startup();
+
+    var query_engine = QueryEngine.init(allocator, &storage_engine);
+    query_engine.startup();
+    defer query_engine.deinit();
+
+    // Create blocks with nested structure paths
+    const nested_method_block = ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0,
+        .source_uri = "test://nested.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/nested.zig:OuterStruct:InnerStruct:process", "codebase": "test_codebase"}
+        ,
+        .content = "pub fn process() void {}",
+    };
+
+    try storage_engine.put_block(nested_method_block);
+
+    // Query for the innermost struct method
+    const result = try query_engine.find_by_name("test_codebase", "function", "InnerStruct.process");
+    defer result.deinit();
+    try testing.expectEqual(@as(u32, 1), result.total_matches);
+    try testing.expect(result.results[0].block.read_immutable().id.eql(nested_method_block.id));
+}
+
+test "find_by_name codebase filtering with qualified names" {
+    const allocator = testing.allocator;
+    var sim_vfs = try simulation_vfs.SimulationVFS.heap_init(allocator);
+    defer {
+        sim_vfs.deinit();
+        allocator.destroy(sim_vfs);
+    }
+
+    var storage_engine = try StorageEngine.init_default(allocator, sim_vfs.vfs(), "test_codebase_filter");
+    defer storage_engine.deinit();
+    defer {
+        storage_engine.shutdown() catch {};
+    }
+    try storage_engine.startup();
+
+    var query_engine = QueryEngine.init(allocator, &storage_engine);
+    query_engine.startup();
+    defer query_engine.deinit();
+
+    // Create blocks in different codebases with same qualified name
+    const codebase_a_block = ContextBlock{
+        .id = try BlockId.from_hex("11111111111111111111111111111111"),
+        .sequence = 0,
+        .source_uri = "test://a.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/a.zig:Engine:init", "codebase": "codebase_a"}
+        ,
+        .content = "pub fn init() Engine {}",
+    };
+
+    const codebase_b_block = ContextBlock{
+        .id = try BlockId.from_hex("22222222222222222222222222222222"),
+        .sequence = 0,
+        .source_uri = "test://b.zig#L1-10",
+        .metadata_json =
+        \\{"unit_type": "function", "unit_id": "src/b.zig:Engine:init", "codebase": "codebase_b"}
+        ,
+        .content = "pub fn init() Engine {}",
+    };
+
+    try storage_engine.put_block(codebase_a_block);
+    try storage_engine.put_block(codebase_b_block);
+
+    // Query codebase_a only
+    const result_a = try query_engine.find_by_name("codebase_a", "function", "Engine.init");
+    defer result_a.deinit();
+    try testing.expectEqual(@as(u32, 1), result_a.total_matches);
+    try testing.expect(result_a.results[0].block.read_immutable().id.eql(codebase_a_block.id));
+
+    // Query codebase_b only
+    const result_b = try query_engine.find_by_name("codebase_b", "function", "Engine.init");
+    defer result_b.deinit();
+    try testing.expectEqual(@as(u32, 1), result_b.total_matches);
+    try testing.expect(result_b.results[0].block.read_immutable().id.eql(codebase_b_block.id));
+
+    // Query non-existent codebase
+    const result_c = try query_engine.find_by_name("codebase_c", "function", "Engine.init");
+    defer result_c.deinit();
+    try testing.expectEqual(@as(u32, 0), result_c.total_matches);
+}

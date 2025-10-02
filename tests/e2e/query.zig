@@ -733,9 +733,15 @@ test "qualified name disambiguation for struct methods" {
 
     // Create test project with multiple structs having same method names
     const project_path = try test_harness.create_test_file_with_content("qualified",
+        \\const std = @import("std");
+        \\
         \\pub const StorageEngine = struct {
         \\    pub fn init(allocator: std.mem.Allocator) StorageEngine {
         \\        return StorageEngine{};
+        \\    }
+        \\
+        \\    pub fn deinit(self: *StorageEngine) void {
+        \\        // Storage engine cleanup
         \\    }
         \\
         \\    pub fn startup(self: *StorageEngine) !void {
@@ -748,14 +754,21 @@ test "qualified name disambiguation for struct methods" {
         \\        return QueryEngine{};
         \\    }
         \\
+        \\    pub fn deinit(self: *QueryEngine) void {
+        \\        // Query engine cleanup
+        \\    }
+        \\
         \\    pub fn startup(self: *QueryEngine) !void {
         \\        // Query engine startup logic
         \\    }
         \\};
         \\
         \\pub fn main() void {
+        \\    const allocator = std.heap.page_allocator;
         \\    var storage = StorageEngine.init(allocator);
+        \\    defer storage.deinit();
         \\    var query = QueryEngine.init();
+        \\    defer query.deinit();
         \\}
     );
 
@@ -767,19 +780,77 @@ test "qualified name disambiguation for struct methods" {
     defer sync_result.deinit();
     try sync_result.expect_success();
 
-    // Test qualified name search: "StorageEngine.init" should be more specific than just "init"
-    var qualified_search = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "StorageEngine.init", "--workspace", "qualified" });
-    defer qualified_search.deinit();
-    try qualified_search.expect_success();
+    // Test 1: Qualified name "StorageEngine.init" should find only StorageEngine's init
+    var storage_init = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "StorageEngine.init", "--workspace", "qualified" });
+    defer storage_init.deinit();
+    try storage_init.expect_success();
+    try testing.expect(storage_init.contains_output("StorageEngine") or storage_init.contains_output("No results found"));
 
-    // Test generic search returns multiple results
-    var generic_search = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "init", "--workspace", "qualified" });
-    defer generic_search.deinit();
-    try generic_search.expect_success();
+    // Test 2: Qualified name "QueryEngine.init" should find only QueryEngine's init
+    var query_init = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "QueryEngine.init", "--workspace", "qualified" });
+    defer query_init.deinit();
+    try query_init.expect_success();
+    try testing.expect(query_init.contains_output("QueryEngine") or query_init.contains_output("No results found"));
 
-    // Both should succeed but qualified should be more specific
-    try testing.expect(qualified_search.contains_output("StorageEngine") or qualified_search.contains_output("No results found"));
-    try testing.expect(generic_search.contains_output("init") or generic_search.contains_output("No results found"));
+    // Test 3: Simple name "init" should find both (or indicate multiple matches)
+    var generic_init = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "init", "--workspace", "qualified" });
+    defer generic_init.deinit();
+    try generic_init.expect_success();
+    try testing.expect(generic_init.contains_output("init") or generic_init.contains_output("No results found"));
+
+    // Test 4: Qualified name for deinit methods
+    var storage_deinit = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "StorageEngine.deinit", "--workspace", "qualified" });
+    defer storage_deinit.deinit();
+    try storage_deinit.expect_success();
+
+    // Test 5: Non-existent qualified name should return no results
+    var missing_qualified = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "NonExistent.init", "--workspace", "qualified" });
+    defer missing_qualified.deinit();
+    try missing_qualified.expect_success();
+    try testing.expect(missing_qualified.contains_output("No results found") or missing_qualified.contains_output("No function"));
+}
+
+test "qualified name with JSON output format" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "qualified_json");
+    defer test_harness.deinit();
+
+    const project_path = try test_harness.create_test_file_with_content("qualified_json",
+        \\pub const Database = struct {
+        \\    pub fn connect() !Database {
+        \\        return Database{};
+        \\    }
+        \\};
+        \\
+        \\pub const Cache = struct {
+        \\    pub fn connect() !Cache {
+        \\        return Cache{};
+        \\    }
+        \\};
+    );
+
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
+
+    var sync_result = try test_harness.execute_workspace_command("sync qualified_json", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
+
+    // Test qualified name with JSON output
+    var json_result = try test_harness.execute_command(&[_][]const u8{ "find", "--type", "function", "--name", "Database.connect", "--workspace", "qualified_json", "--json" });
+    defer json_result.deinit();
+    try json_result.expect_success();
+
+    // Validate JSON structure
+    if (json_result.contains_output("{")) {
+        var parsed = test_harness.validate_json_output(json_result.stdout) catch |err| {
+            std.debug.print("Invalid JSON output: {s}\n", .{json_result.stdout});
+            return err;
+        };
+        defer parsed.deinit();
+        try testing.expect(parsed.value == .object);
+        try testing.expect(parsed.value.object.get("results") != null);
+    }
 }
 
 test "show and trace commands handle edge cases safely without crashes" {

@@ -101,7 +101,7 @@ fn render_general_help(ctx: *RenderContext) !void {
     try ctx.write("  ping                   Check server connectivity\n\n");
 
     try ctx.write_colored(RenderContext.Color.yellow, "Query Commands:\n");
-    try ctx.write("  find --type <type> --name <name>         Find entities by type and name\n");
+    try ctx.write("  find --type <type> --name <name>         Find entities (supports qualified names: Struct.method)\n");
     try ctx.write("  show --relation <dir> --target <name>    Show relationships (callers/callees/imports/exports)\n");
     try ctx.write("  trace --direction <dir> --target <name>  Trace paths from target\n\n");
 
@@ -127,6 +127,10 @@ fn render_command_help(ctx: *RenderContext, command: []const u8) !void {
         try ctx.write("  struct             Find struct types\n");
         try ctx.write("  constant           Find constants\n");
         try ctx.write("  variable           Find variables\n\n");
+        try ctx.write("Name Syntax:\n");
+        try ctx.write("  Simple names:      parse_command, init, deinit\n");
+        try ctx.write("  Qualified names:   StorageEngine.init, QueryEngine.deinit\n");
+        try ctx.write("                     Use 'StructName.method_name' to disambiguate methods\n\n");
         try ctx.write("Options:\n");
         try ctx.write("  --workspace <name> Search in specific workspace\n");
         try ctx.write("  --format <fmt>     Output format: text, json (default: text)\n");
@@ -134,6 +138,7 @@ fn render_command_help(ctx: *RenderContext, command: []const u8) !void {
         try ctx.write("  --show-metadata    Include block metadata in output\n\n");
         try ctx.write("Examples:\n");
         try ctx.write("  kausal find --type function --name parse_command\n");
+        try ctx.write("  kausal find --type function --name StorageEngine.init\n");
         try ctx.write("  kausal find --type struct --name StorageEngine --workspace myproject\n");
     } else if (std.mem.eql(u8, command, "server")) {
         try ctx.write_colored(RenderContext.Color.bold, "kausal server - Manage the KausalDB server\n\n");
