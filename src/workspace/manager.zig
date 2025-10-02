@@ -96,7 +96,6 @@ pub const WorkspaceManager = struct {
     pub fn shutdown(self: *WorkspaceManager) void {
         if (!self.initialized) return;
 
-        // Workspace metadata is already persisted on each operation
         self.initialized = false;
     }
 
@@ -136,7 +135,6 @@ pub const WorkspaceManager = struct {
             return WorkspaceError.CodebaseAlreadyLinked;
         }
 
-        // Create codebase info entry
         const current_time = std.time.timestamp();
         const codebase_info = CodebaseInfo{
             .name = try self.coordinator.allocator().dupe(u8, codebase_name),
@@ -147,7 +145,6 @@ pub const WorkspaceManager = struct {
             .edge_count = 0,
         };
 
-        // Store in memory and persist to storage
         try self.linked_codebases.put(codebase_info.name, codebase_info);
         try self.persist_workspace_metadata();
 
@@ -170,9 +167,7 @@ pub const WorkspaceManager = struct {
             };
         };
 
-        // Update block count with actual statistics from ingestion
         // Edge count estimation: assume average of 2 edges per block (imports, calls)
-        // Get the entry again since we need a mutable reference
         var codebase_entry = self.linked_codebases.getEntry(codebase_info.name).?;
         codebase_entry.value_ptr.block_count = @intCast(ingestion_stats.blocks_generated);
         codebase_entry.value_ptr.edge_count = @intCast(ingestion_stats.blocks_generated * 2);

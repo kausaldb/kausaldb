@@ -89,19 +89,13 @@ const Walker = struct {
     /// context upon returning. This guarantees complete traversal and correct
     /// context propagation.
     fn walk(self: *Walker, node: Ast.Node.Index) IngestionError!void {
-        // --- Phase 1: Save Parent Context ---
         const saved_function = self.current_function;
         const saved_container = self.current_container;
 
-        // --- Phase 2: Process the Current Node ---
-        // This may create ParsedUnit/ParsedEdge and update context for children
         try self.process_node(node);
 
-        // --- Phase 3: Recursively Walk ALL Children ---
-        // Generic traversal that visits every child node
         try self.walk_children(node);
 
-        // --- Phase 4: Restore Parent Context ---
         self.current_function = saved_function;
         self.current_container = saved_container;
     }

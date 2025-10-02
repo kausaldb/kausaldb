@@ -90,7 +90,6 @@ pub fn ingest_directory_to_blocks(
             continue;
         }
 
-        // Read file into temporary buffer using backing allocator
         const temp_content = file_system.read_file_alloc(
             backing,
             file_path,
@@ -134,7 +133,6 @@ pub fn ingest_directory_to_blocks(
                 .timestamp_ns = @intCast(std.time.nanoTimestamp()),
             };
 
-            // Get context blocks and convert to owned ingestion blocks
             const file_blocks = parse_file_to_blocks.parse_file_to_blocks(
                 coordinator.allocator(),
                 file_content_struct,
@@ -154,7 +152,6 @@ pub fn ingest_directory_to_blocks(
                 continue;
             };
 
-            // Convert each ContextBlock to IngestionBlock for ownership tracking
             for (file_blocks) |block| {
                 const ingestion_block = IngestionBlock.take_ownership(block);
                 try all_blocks.append(coordinator.allocator(), ingestion_block);

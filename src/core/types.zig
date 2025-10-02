@@ -552,7 +552,7 @@ pub const GraphEdge = struct {
     /// Type of relationship
     edge_type: EdgeType,
 
-    pub const SERIALIZED_SIZE: usize = 40; // 16 + 16 + 8 bytes
+    pub const SERIALIZED_SIZE: usize = 40; // 16 (source_id) + 16 (target_id) + 2 (edge_type) + 6 (reserved)
 
     comptime {
         if (!(SERIALIZED_SIZE == 40)) @compileError("GraphEdge SERIALIZED_SIZE must be 40 bytes (16 + 16 + 2 + 6 reserved)");

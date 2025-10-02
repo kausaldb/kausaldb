@@ -108,7 +108,6 @@ fn build_kausal_binaries(context: BuildContext) void {
     context.b.installArtifact(kausal_cli);
     context.b.installArtifact(kausal_server);
 
-    // Default run target points to `kausal` (CLI)
     const run_cli = context.b.addRunArtifact(kausal_cli);
     run_cli.step.dependOn(context.b.getInstallStep());
     if (context.b.args) |args| {
@@ -172,8 +171,6 @@ fn build_lint(context: BuildContext) void {
 }
 
 fn build_performance_tools(context: BuildContext) void {
-
-    // Create benchmark executable
     const benchmark_exe = create_executable(context, .{
         .name = "benchmark",
         .root_source = "src/bench/main.zig",
@@ -181,7 +178,6 @@ fn build_performance_tools(context: BuildContext) void {
     });
     context.b.installArtifact(benchmark_exe);
 
-    // Create fuzzing executable
     const fuzz_exe = create_executable(context, .{
         .name = "fuzz",
         .root_source = "src/fuzz/main.zig",
@@ -189,7 +185,6 @@ fn build_performance_tools(context: BuildContext) void {
     });
     context.b.installArtifact(fuzz_exe);
 
-    // Benchmark step - the executable will read build options and handle CLI args
     const run_bench = context.b.addRunArtifact(benchmark_exe);
     if (context.b.args) |args| {
         run_bench.addArgs(args);
@@ -198,7 +193,6 @@ fn build_performance_tools(context: BuildContext) void {
     const bench_step = context.b.step("bench", "Run performance benchmarks");
     bench_step.dependOn(&run_bench.step);
 
-    // Fuzzing steps - the executable will read build options and handle CLI args
     const run_fuzz = context.b.addRunArtifact(fuzz_exe);
     if (context.b.args) |args| {
         run_fuzz.addArgs(args);
@@ -206,8 +200,6 @@ fn build_performance_tools(context: BuildContext) void {
 
     const fuzz_step = context.b.step("fuzz", "Run extensive fuzzing tests");
     fuzz_step.dependOn(&run_fuzz.step);
-
-    // Quick fuzzing for CI with reduced iterations
     const run_fuzz_quick = context.b.addRunArtifact(fuzz_exe);
     run_fuzz_quick.addArg("--iterations");
     run_fuzz_quick.addArg("1000");

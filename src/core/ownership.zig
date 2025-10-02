@@ -145,7 +145,7 @@ pub const OwnedBlock = struct {
     }
 
     /// Clone block with new ownership for transfer between subsystems.
-    /// The original block remains valid and owned by the original subsystem.
+    /// Creates a deep copy, ensuring caller and receiver have independent objects.
     pub fn clone_with_ownership(
         self: *const OwnedBlock,
         allocator: std.mem.Allocator,
@@ -174,8 +174,8 @@ pub const OwnedBlock = struct {
     }
 
     /// Transfer ownership without cloning data - SAFE version with move semantics.
-    /// The original block is marked as moved and cannot be used after this call.
-    /// Returns a new OwnedBlock with the transferred ownership.
+    /// To prevent use-after-transfer bugs, the original block is invalidated.
+    /// This enforces move semantics at runtime.
     pub fn transfer(
         self: *OwnedBlock,
         new_ownership: BlockOwnership,
