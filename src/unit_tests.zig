@@ -73,4 +73,5 @@ comptime {
     _ = @import("storage/wal/recovery.zig");
     _ = @import("storage/wal/stream.zig");
     _ = @import("storage/wal/types.zig");
+    _ = @import("ingestion/semantic_resolver.zig");
 }

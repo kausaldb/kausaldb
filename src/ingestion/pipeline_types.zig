@@ -62,6 +62,10 @@ pub const ParsedUnit = struct {
     // Its ownership is transferred to the final ContextBlock, it is NOT freed here.
     content: []const u8,
 
+    // Parent container for scoping (e.g., "Foo" for method "Foo.bar")
+    // Used by semantic resolver for qualified name resolution
+    parent_container: ?[]const u8, // Owned if non-null
+
     location: SourceLocation,
     edges: std.ArrayList(ParsedEdge),
     metadata: std.StringHashMap([]const u8),
@@ -70,6 +74,9 @@ pub const ParsedUnit = struct {
         allocator.free(self.id);
         allocator.free(self.unit_type);
         // NOTE: `content` is a non-owned slice and is NOT freed here.
+        if (self.parent_container) |parent| {
+            allocator.free(parent);
+        }
 
         self.location.deinit(allocator);
 
