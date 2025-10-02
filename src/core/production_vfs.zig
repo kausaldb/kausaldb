@@ -14,6 +14,7 @@ const std = @import("std");
 const vfs = @import("vfs.zig");
 
 const testing = std.testing;
+const log = std.log.scoped(.production_vfs);
 
 const DirectoryEntry = vfs.DirectoryEntry;
 const DirectoryIterator = vfs.DirectoryIterator;
@@ -60,7 +61,7 @@ fn platform_global_sync() PlatformSyncError!void {
             @as(u64, @intCast(end_time - start_time))
         else
             0;
-        std.debug.print("platform_global_sync failed on {s} after {}ns ({}µs)\n", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
+        log.warn("platform_global_sync failed on {s} after {}ns ({}µs)", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
     }
 
     switch (builtin.os.tag) {
@@ -94,7 +95,7 @@ fn platform_global_sync() PlatformSyncError!void {
         @as(u64, @intCast(end_time - start_time))
     else
         0;
-    std.debug.print("platform_global_sync completed on {s} in {}ns ({}µs)\n", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
+    log.debug("platform_global_sync completed on {s} in {}ns ({}µs)", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
 }
 
 /// Production VFS implementation using real OS filesystem operations
