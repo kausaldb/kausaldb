@@ -16,6 +16,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 
 const block_index_mod = @import("block_index.zig");
+const bloom_filter = @import("bloom_filter.zig");
 const concurrency = @import("../core/concurrency.zig");
 const config_mod = @import("config.zig");
 const context_block = @import("../core/types.zig");
@@ -48,6 +49,7 @@ const BlockHashMapIterator = BlockHashMap.Iterator;
 const ArenaCoordinator = memory.ArenaCoordinator;
 const BlockId = context_block.BlockId;
 const BlockOwnership = ownership.BlockOwnership;
+const BloomFilter = bloom_filter.BloomFilter;
 const ComptimeOwnedBlock = ownership.ComptimeOwnedBlock;
 const ContextBlock = context_block.ContextBlock;
 
@@ -851,11 +853,28 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Check SSTables - need to search all of them to find highest sequence
+        // Check SSTables using cached metadata for bloom filter optimization
+        // This avoids loading full index for blocks that definitely don't exist
         var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit(self.backing_allocator);
 
         for (sstable_paths.items) |sstable_path| {
+            // Try to find cached bloom filter for this SSTable
+            var cached_bloom: ?*const BloomFilter = null;
+            for (self.sstable_manager.cached_metadata.items) |*metadata| {
+                if (std.mem.eql(u8, metadata.path, sstable_path)) {
+                    cached_bloom = &metadata.bloom_filter;
+                    break;
+                }
+            }
+
+            // If we have cached bloom filter, check it first to avoid disk I/O
+            if (cached_bloom) |bloom| {
+                if (!bloom.might_contain(block_id)) {
+                    continue; // Bloom filter proves block is not in this SSTable
+                }
+            }
+
             const sstable_path_copy = try self.arena_coordinator.allocator().dupe(u8, sstable_path);
             var sstable_file = SSTable.init(
                 self.arena_coordinator,
@@ -865,7 +884,7 @@ pub const StorageEngine = struct {
             );
             defer sstable_file.deinit();
 
-            // Load index - skip corrupted SSTables
+            // Load index only after bloom filter check (or if no cached bloom filter)
             sstable_file.read_index() catch continue;
 
             // Check for tombstones in this SSTable
