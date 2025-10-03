@@ -321,8 +321,32 @@ pub const Fuzzer = struct {
         }
     }
 
+    /// Check if error is expected fuzzing behavior, not a bug
+    fn is_expected_error(err: anyerror) bool {
+        return switch (err) {
+            // File system errors are expected when fuzzing with random paths
+            error.FileNotFound,
+            error.PathNotFound,
+            error.AccessDenied,
+            error.NotDir,
+            error.IsDir,
+            // Parse errors are expected when fuzzing with random input
+            error.InvalidUtf8,
+            error.UnexpectedEndOfFile,
+            error.InvalidFormat,
+            error.InvalidData,
+            // Resource errors are expected under fuzzing stress
+            error.OutOfMemory,
+            => true,
+            else => false,
+        };
+    }
+
     /// Handle a crash with deduplication and categorization
     pub fn handle_crash(self: *Fuzzer, input: []const u8, err: anyerror) !void {
+        // Filter out expected errors - these are normal fuzzing results, not bugs
+        if (is_expected_error(err)) return;
+
         const stack_hash = self.hash_stack_trace();
 
         // Deduplicate crashes
