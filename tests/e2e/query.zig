@@ -83,60 +83,58 @@ test "show callers command with real functionality" {
     try testing.expect(result.contains_output("main") or result.contains_output("No callers found"));
 }
 
-// SKIP: InvalidMagic error in storage layer during trace operations
-// test "trace callees command shows actual call graph" {
-//     var test_harness = try harness.E2EHarness.init(testing.allocator, "trace_callees");
-//     defer test_harness.deinit();
+test "trace callees command shows actual call graph" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "trace_callees");
+    defer test_harness.deinit();
 
-//     const project_path = try test_harness.create_test_project("trace_test");
-//     var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
-//     defer link_result.deinit();
-//     try link_result.expect_success();
+    const project_path = try test_harness.create_test_project("trace_test");
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
 
-//     // Sync to index the codebase
-//     var sync_result = try test_harness.execute_workspace_command("sync trace_test", .{});
-//     defer sync_result.deinit();
-//     try sync_result.expect_success();
+    // Sync to index the codebase
+    var sync_result = try test_harness.execute_workspace_command("sync trace_test", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
 
-//     // Test trace callees for main (should show functions called by main)
-//     // In test project: main -> helper_function -> calculate_value
-//     var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--depth", "2", "--workspace", "trace_test" });
-//     defer result.deinit();
+    // Test trace callees for main (should show functions called by main)
+    // In test project: main -> helper_function -> calculate_value
+    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callees", "--target", "main", "--depth", "2", "--workspace", "trace_test" });
+    defer result.deinit();
 
-//     try result.expect_success();
-//     // Should show call relationships or provide clear "not found" message
-//     try testing.expect(result.contains_output("helper_function") or
-//         result.contains_output("calculate_value") or
-//         result.contains_output("No paths found"));
-// }
+    try result.expect_success();
+    // Should show call relationships or provide clear "not found" message
+    try testing.expect(result.contains_output("helper_function") or
+        result.contains_output("calculate_value") or
+        result.contains_output("No paths found"));
+}
 
-// SKIP: InvalidMagic error in storage layer during trace operations
-// test "trace callers command shows upstream dependencies" {
-//     var test_harness = try harness.E2EHarness.init(testing.allocator, "trace_callers");
-//     defer test_harness.deinit();
+test "trace callers command shows upstream dependencies" {
+    var test_harness = try harness.E2EHarness.init(testing.allocator, "trace_callers");
+    defer test_harness.deinit();
 
-//     const project_path = try test_harness.create_test_project("upstream_test");
-//     var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
-//     defer link_result.deinit();
-//     try link_result.expect_success();
+    const project_path = try test_harness.create_test_project("upstream_test");
+    var link_result = try test_harness.execute_workspace_command("link --path {s}", .{project_path});
+    defer link_result.deinit();
+    try link_result.expect_success();
 
-//     // Sync to index the codebase
-//     var sync_result = try test_harness.execute_workspace_command("sync upstream_test", .{});
-//     defer sync_result.deinit();
-//     try sync_result.expect_success();
+    // Sync to index the codebase
+    var sync_result = try test_harness.execute_workspace_command("sync upstream_test", .{});
+    defer sync_result.deinit();
+    try sync_result.expect_success();
 
-//     // Test trace callers for calculate_value (called by helper_function)
-//     var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callers", "--target", "calculate_value", "--workspace", "upstream_test" });
-//     defer result.deinit();
+    // Test trace callers for calculate_value (called by helper_function)
+    var result = try test_harness.execute_command(&[_][]const u8{ "trace", "--direction", "callers", "--target", "calculate_value", "--workspace", "upstream_test" });
+    defer result.deinit();
 
-//     try result.expect_success();
-//     // Should provide meaningful output about callers or indicate none found
-//     try testing.expect(result.contains_output("helper_function") or
-//         result.contains_output("No paths found") or
-//         result.contains_output("No") or
-//         result.contains_output("Found") or
-//         result.stdout.len > 5); // Should have some meaningful output
-// }
+    try result.expect_success();
+    // Should provide meaningful output about callers or indicate none found
+    try testing.expect(result.contains_output("helper_function") or
+        result.contains_output("No paths found") or
+        result.contains_output("No") or
+        result.contains_output("Found") or
+        result.stdout.len > 5); // Should have some meaningful output
+}
 
 test "query commands with JSON output format" {
     var test_harness = try harness.E2EHarness.init(testing.allocator, "json_queries");

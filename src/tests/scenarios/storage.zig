@@ -119,36 +119,35 @@ test "scenario: read-heavy workload with cache behavior" {
 // Memtable Flush Scenarios
 // ====================================================================
 
-// TEMPORARY: Commenting out failing test to isolate the issue
-// test "scenario: memtable flush at size threshold preserves data" {
-//     const allocator = testing.allocator;
-//
-//     const operation_mix = OperationMix{
-//         .put_block_weight = 60,
-//         .find_block_weight = 25,
-//         .delete_block_weight = 5,
-//         .put_edge_weight = 7,
-//         .find_edges_weight = 3,
-//     };
-//
-//     var runner = try SimulationRunner.init(
-//         allocator,
-//         0x1003,
-//         operation_mix,
-//         &.{},
-//     );
-//     defer runner.deinit();
-//
-//     // Configure aggressive flush threshold
-//     runner.flush_config.operation_threshold = 50;
-//     runner.flush_config.enable_operation_trigger = true;
-//
-//     // Run enough operations to trigger multiple flushes
-//     try runner.run(300);
-//
-//     // Verify all data is still accessible after flushes
-//     try runner.verify_consistency();
-// }
+test "scenario: memtable flush at size threshold preserves data" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 60,
+        .find_block_weight = 25,
+        .delete_block_weight = 5,
+        .put_edge_weight = 7,
+        .find_edges_weight = 3,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x1003,
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Configure aggressive flush threshold
+    runner.flush_config.operation_threshold = 50;
+    runner.flush_config.enable_operation_trigger = true;
+
+    // Run enough operations to trigger multiple flushes
+    try runner.run(300);
+
+    // Verify all data is still accessible after flushes
+    try runner.verify_consistency();
+}
 
 test "scenario: concurrent operations during flush cycle" {
     const allocator = testing.allocator;
