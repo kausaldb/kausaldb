@@ -56,8 +56,8 @@ pub const CachedSSTableIndex = struct {
     /// Initialize cached index from SSTable
     pub fn init(allocator: std.mem.Allocator, sstable: *SSTable) !CachedSSTableIndex {
         // Clone the index entries for independent ownership
-        var entries = std.ArrayList(SSTable.IndexEntry).init(allocator);
-        try entries.appendSlice(sstable.index.items);
+        var entries = try std.ArrayList(SSTable.IndexEntry).initCapacity(allocator, sstable.index.items.len);
+        try entries.appendSlice(allocator, sstable.index.items);
 
         const memory_bytes = @sizeOf(SSTable.IndexEntry) * entries.items.len;
 
@@ -65,7 +65,7 @@ pub const CachedSSTableIndex = struct {
             .entries = entries,
             .allocator = allocator,
             .memory_bytes = memory_bytes,
-            .last_access_ns = std.time.nanoTimestamp(),
+            .last_access_ns = @intCast(std.time.nanoTimestamp()),
             .access_count = 0,
         };
     }
@@ -78,7 +78,7 @@ pub const CachedSSTableIndex = struct {
     /// Mark index as accessed for LRU tracking
     pub fn mark_accessed(self: *CachedSSTableIndex) void {
         self.access_count += 1;
-        self.last_access_ns = std.time.nanoTimestamp();
+        self.last_access_ns = @intCast(std.time.nanoTimestamp());
     }
 
     /// Find index entry for block ID using binary search
@@ -94,7 +94,7 @@ pub const CachedSSTableIndex = struct {
 
             if (entry.block_id.eql(block_id)) {
                 return entry;
-            } else if (entry.block_id.less_than(block_id)) {
+            } else if (entry.block_id.compare(block_id) == .lt) {
                 left = mid + 1;
             } else {
                 right = mid;
@@ -343,21 +343,22 @@ test "CachedSSTableIndex binary search" {
     const allocator = testing.allocator;
 
     // Create a simple cached index with sorted entries
-    var entries = std.ArrayList(SSTable.IndexEntry).init(allocator);
-    defer entries.deinit();
+    var entries = try std.ArrayList(SSTable.IndexEntry).initCapacity(allocator, 3);
+    defer entries.deinit(allocator);
 
     const id1 = try BlockId.from_hex("00000000000000000000000000000001");
     const id2 = try BlockId.from_hex("00000000000000000000000000000002");
     const id3 = try BlockId.from_hex("00000000000000000000000000000003");
 
-    try entries.append(.{ .block_id = id1, .offset = 100, .size = 50 });
-    try entries.append(.{ .block_id = id2, .offset = 200, .size = 60 });
-    try entries.append(.{ .block_id = id3, .offset = 300, .size = 70 });
+    try entries.append(allocator, .{ .block_id = id1, .offset = 100, .size = 50 });
+    try entries.append(allocator, .{ .block_id = id2, .offset = 200, .size = 60 });
+    try entries.append(allocator, .{ .block_id = id3, .offset = 300, .size = 70 });
 
     var cached_index = CachedSSTableIndex{
-        .entries = entries.clone() catch unreachable,
+        .entries = try entries.clone(allocator),
+        .allocator = allocator,
         .memory_bytes = @sizeOf(SSTable.IndexEntry) * 3,
-        .last_access_ns = std.time.nanoTimestamp(),
+        .last_access_ns = @intCast(std.time.nanoTimestamp()),
         .access_count = 0,
     };
     defer cached_index.deinit();
