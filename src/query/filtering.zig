@@ -786,7 +786,7 @@ test "streaming filtered query prevents memory exhaustion" {
 
     for (0..1000) |i| {
         var id_bytes: [16]u8 = undefined;
-        std.mem.writeInt(u128, &id_bytes, @as(u128, i), .big);
+        std.mem.writeInt(u128, &id_bytes, @as(u128, i + 1), .big);
         const block_id = BlockId{ .bytes = id_bytes };
 
         const content = try std.fmt.allocPrint(allocator, "streaming test content {d}", .{i});

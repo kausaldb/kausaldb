@@ -169,7 +169,7 @@ pub const SSTableIndexCache = struct {
 
     /// Get cached index or load from SSTable if not cached
     /// This is the main entry point for cache usage
-    pub fn get_or_load(
+    pub fn get(
         self: *SSTableIndexCache,
         sstable_id: SSTableId,
         sstable: *SSTable,

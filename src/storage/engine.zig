@@ -110,6 +110,10 @@ const FlushMemtableCommand = struct {
     fn execute(self: FlushMemtableCommand) !void {
         concurrency.assert_main_thread();
 
+        std.debug.assert(self.storage_engine.state == .running or self.storage_engine.state == .flushing);
+
+        const old_sstable_count = self.storage_engine.storage_metrics.sstable_writes.load();
+
         // Transition to flushing state during operation
         self.storage_engine.state.transition(.flushing);
         defer {
@@ -146,6 +150,9 @@ const FlushMemtableCommand = struct {
         };
 
         self.storage_engine.storage_metrics.sstable_writes.incr();
+
+        const new_sstable_count = self.storage_engine.storage_metrics.sstable_writes.load();
+        std.debug.assert(new_sstable_count == old_sstable_count + 1);
     }
 };
 
@@ -363,6 +370,8 @@ pub const StorageEngine = struct {
     pub fn shutdown(self: *StorageEngine) !void {
         concurrency.assert_main_thread();
 
+        std.debug.assert(self.state != .uninitialized);
+
         if (self.state == .stopped) return;
 
         // Only attempt flush operations if engine is in a running state
@@ -384,6 +393,8 @@ pub const StorageEngine = struct {
         } else if (self.state == .stopping) {
             self.state.transition(.stopped);
         }
+
+        std.debug.assert(self.state == .stopped);
     }
 
     /// Reset all storage memory in O(1) time through coordinator pattern.
@@ -544,10 +555,14 @@ pub const StorageEngine = struct {
 
     /// Transition from initialized to running state with I/O operations.
     pub fn startup(self: *StorageEngine) !void {
+        std.debug.assert(self.state == .initialized or self.state == .stopped);
+
         // Handle restart case: transition from stopped back to initialized
         if (self.state == .stopped) {
             self.state.transition(.initialized);
         }
+
+        const old_sequence = self.global_sequence.load(.monotonic);
 
         self.create_storage_directories() catch |err| {
             error_context.log_storage_error(
@@ -589,6 +604,10 @@ pub const StorageEngine = struct {
         };
 
         self.state.transition(.running);
+
+        std.debug.assert(self.state == .running);
+        const new_sequence = self.global_sequence.load(.monotonic);
+        std.debug.assert(new_sequence >= old_sequence);
     }
 
     /// Initialize global sequence counter by scanning existing data.
@@ -669,8 +688,18 @@ pub const StorageEngine = struct {
 
         const block_data = owned_block.read(.temporary);
 
+        var non_zero_bytes: u32 = 0;
+        for (block_data.id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+        std.debug.assert(block_data.source_uri.len > 0);
+
         // Assign global sequence number for MVCC ordering
+        const old_sequence = self.global_sequence.load(.monotonic);
         const sequence = self.global_sequence.fetchAdd(1, .monotonic);
+        std.debug.assert(sequence == old_sequence);
+        std.debug.assert(self.global_sequence.load(.monotonic) > old_sequence);
 
         // Create a new block with the assigned sequence number
         const sequenced_block = ContextBlock{
@@ -825,10 +854,17 @@ pub const StorageEngine = struct {
         }
 
         if (result.block) |block| {
+            std.debug.assert(block.id.eql(block_id));
+            std.debug.assert(block.sequence > 0);
+            std.debug.assert(block.content.len > 0);
+
             self.storage_metrics.blocks_read.incr();
             self.storage_metrics.total_read_time_ns.add(read_duration);
             self.storage_metrics.total_bytes_read.add(block.content.len);
-            return OwnedBlock.take_ownership(&block, block_ownership);
+
+            const owned = OwnedBlock.take_ownership(&block, block_ownership);
+            std.debug.assert(owned.ownership == block_ownership);
+            return owned;
         }
 
         return null;
@@ -843,12 +879,19 @@ pub const StorageEngine = struct {
     /// Unified MVCC read across all storage layers (memtable + SSTables).
     /// Finds the entry with the highest sequence number, whether block or tombstone.
     fn find_highest_sequence_entry(self: *StorageEngine, block_id: BlockId) !MVCCReadResult {
+        var non_zero_bytes: u32 = 0;
+        for (block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         var highest_sequence: u64 = 0;
         var winning_block: ?ContextBlock = null;
         var is_tombstoned = false;
 
         // Check memtable for both block and tombstone
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            std.debug.assert(block.id.eql(block_id));
             if (block.sequence > highest_sequence) {
                 highest_sequence = block.sequence;
                 winning_block = block;
@@ -858,6 +901,7 @@ pub const StorageEngine = struct {
 
         // Check memtable tombstones
         if (self.memtable_manager.block_index.tombstones.get(block_id)) |tombstone_record| {
+            std.debug.assert(tombstone_record.block_id.eql(block_id));
             if (tombstone_record.sequence > highest_sequence) {
                 highest_sequence = tombstone_record.sequence;
                 winning_block = null;
@@ -1026,6 +1070,9 @@ pub const StorageEngine = struct {
                 StorageError.StorageEngineDeinitialized;
         }
 
+        std.debug.assert(block_ids.len > 0);
+        std.debug.assert(results.len >= block_ids.len);
+
         if (results.len < block_ids.len) {
             std.debug.panic("Results buffer too small: got {}, need {}", .{ results.len, block_ids.len });
         }
@@ -1118,13 +1165,19 @@ pub const StorageEngine = struct {
         results: []?OwnedBlock,
         comptime owner: BlockOwnership,
     ) !void {
-        // Get or load cached index for this SSTable
+        std.debug.assert(candidate_indices.len > 0);
+        std.debug.assert(sstable_file.file_path.len > 0);
+
+        // Use cached index for this SSTable
         const sstable_id = SSTableId.from_path(sstable_file.file_path);
-        const cached_index = try self.sstable_index_cache.get_or_load(sstable_id, sstable_file);
+        const cached_index = try self.sstable_index_cache.get(sstable_id, sstable_file);
 
         // Read each candidate block from the SSTable
         // Index lookup is now in-memory (cached) instead of disk I/O
         for (candidate_indices) |idx| {
+            std.debug.assert(idx < block_ids.len);
+            std.debug.assert(idx < results.len);
+
             const block_id = block_ids[idx];
 
             // Fast path: Check if block exists in cached index
@@ -1143,6 +1196,13 @@ pub const StorageEngine = struct {
     /// Delete a Context Block by ID with tombstone semantics.
     pub fn delete_block(self: *StorageEngine, block_id: BlockId) !void {
         concurrency.assert_main_thread();
+
+        var non_zero_bytes: u32 = 0;
+        for (block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         if (!self.state.can_write()) {
             return if (self.state == .uninitialized or self.state == .initialized)
                 StorageError.NotInitialized
@@ -1150,13 +1210,19 @@ pub const StorageEngine = struct {
                 StorageError.StorageEngineDeinitialized;
         }
 
+        const old_tombstone_count = self.storage_metrics.blocks_deleted.load();
+        const old_sequence = self.global_sequence.load(.monotonic);
         const sequence = self.global_sequence.fetchAdd(1, .monotonic);
+        std.debug.assert(sequence == old_sequence);
+
         const tombstone_record = TombstoneRecord{
             .block_id = block_id,
             .sequence = sequence,
             .deletion_timestamp = @intCast(std.time.microTimestamp()),
             .generation = 0,
         };
+
+        std.debug.assert(tombstone_record.sequence == sequence);
 
         self.memtable_manager.put_tombstone_durable(tombstone_record, &self.graph_index) catch |err| {
             error_context.log_storage_error(
@@ -1167,6 +1233,9 @@ pub const StorageEngine = struct {
         };
 
         self.storage_metrics.blocks_deleted.incr();
+
+        const new_tombstone_count = self.storage_metrics.blocks_deleted.load();
+        std.debug.assert(new_tombstone_count == old_tombstone_count + 1);
     }
 
     /// Add a graph edge with durability guarantees.
@@ -1275,11 +1344,20 @@ pub const StorageEngine = struct {
     /// Get current memory usage information for testing and monitoring.
     /// Returns basic memory statistics useful for tests and debugging.
     pub fn memory_usage(self: *const StorageEngine) MemoryUsage {
-        return MemoryUsage{
+        const block_count = self.memtable_manager.block_index.blocks.count();
+        const edge_count = self.graph_index.edge_count();
+
+        std.debug.assert(@intFromPtr(self) != 0);
+
+        const usage = MemoryUsage{
             .total_bytes = self.memtable_manager.block_index.memory_used,
-            .block_count = @as(u32, @intCast(self.memtable_manager.block_index.blocks.count())),
-            .edge_count = self.graph_index.edge_count(),
+            .block_count = @as(u32, @intCast(block_count)),
+            .edge_count = edge_count,
         };
+
+        std.debug.assert(usage.block_count == block_count);
+
+        return usage;
     }
 
     /// Memory usage information structure for testing and monitoring

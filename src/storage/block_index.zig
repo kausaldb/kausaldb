@@ -174,7 +174,17 @@ pub const BlockIndex = struct {
         try self.blocks.put(cloned_block.id, memtable_owned_block);
 
         // Update memory accounting only after successful HashMap operation
+        const previous_memory = self.memory_used;
         self.memory_used = self.memory_used - old_memory + new_memory;
+
+        // POST-CONDITION: Block must be in index after put
+        std.debug.assert(self.blocks.contains(cloned_block.id));
+
+        // POST-CONDITION: Memory must have changed (insert or update case)
+        if (old_memory == 0) {
+            // Insert case: memory must increase
+            std.debug.assert(self.memory_used > previous_memory);
+        }
 
         // Skip per-operation validation to prevent performance regression
         // Per-operation validation causes 60-70% performance degradation in debug builds
@@ -187,8 +197,16 @@ pub const BlockIndex = struct {
     /// Find a block by ID.
     /// Returns block data if found and not tombstoned.
     pub fn find_block(self: *const BlockIndex, block_id: BlockId) ?ContextBlock {
+        var non_zero_bytes: u32 = 0;
+        for (block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         if (self.blocks.getPtr(block_id)) |owned_block_ptr| {
             const block = owned_block_ptr.read(.temporary).*;
+
+            std.debug.assert(block.id.eql(block_id));
 
             // Check if this specific block sequence is shadowed by a tombstone
             if (self.tombstones.get(block_id)) |tombstone_record| {
@@ -205,13 +223,21 @@ pub const BlockIndex = struct {
     /// Remove a block from the index and update memory accounting.
     /// Arena memory cleanup happens at StorageEngine level through bulk reset.
     pub fn remove_block(self: *BlockIndex, block_id: BlockId) void {
+        const had_block = self.blocks.contains(block_id);
+
         if (self.blocks.get(block_id)) |existing_block| {
             const block_data = existing_block.read(.memtable_manager);
             const old_memory = block_data.source_uri.len + block_data.metadata_json.len + block_data.content.len;
             if (!(self.memory_used >= old_memory)) std.debug.panic("Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
             self.memory_used -= old_memory;
         }
-        _ = self.blocks.remove(block_id);
+
+        const removed = self.blocks.remove(block_id);
+
+        if (had_block) {
+            std.debug.assert(removed);
+            std.debug.assert(!self.blocks.contains(block_id));
+        }
     }
 
     /// Clear all blocks in preparation for StorageEngine arena reset.
@@ -240,16 +266,29 @@ pub const BlockIndex = struct {
     /// Add tombstone record to mark block as deleted.
     /// Removes existing block if present to enforce tombstone shadowing.
     pub fn put_tombstone(self: *BlockIndex, tombstone_record: TombstoneRecord) !void {
+        var non_zero_bytes: u32 = 0;
+        for (tombstone_record.block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+        std.debug.assert(tombstone_record.sequence > 0);
+
         // Add tombstone first to ensure atomic visibility
         try self.tombstones.put(tombstone_record.block_id, tombstone_record);
 
+        std.debug.assert(self.tombstones.contains(tombstone_record.block_id));
+
         // Remove existing block after tombstone is safely added
         self.remove_block(tombstone_record.block_id);
+
+        std.debug.assert(!self.blocks.contains(tombstone_record.block_id));
     }
 
     /// Collect all tombstones for compaction processing.
     /// Caller owns returned slice and must free with provided allocator.
     pub fn collect_tombstones(self: *const BlockIndex, allocator: std.mem.Allocator) ![]TombstoneRecord {
+        const tombstone_count = self.tombstones.count();
+
         var tombstones_list = std.ArrayList(TombstoneRecord){};
         defer tombstones_list.deinit(allocator);
 
@@ -257,14 +296,23 @@ pub const BlockIndex = struct {
         while (iter.next()) |entry| {
             try tombstones_list.append(allocator, entry.value_ptr.*);
         }
-        return tombstones_list.toOwnedSlice(allocator);
+
+        const result = try tombstones_list.toOwnedSlice(allocator);
+
+        std.debug.assert(result.len == tombstone_count);
+
+        return result;
     }
 
     /// Large block cloning with chunked copy to improve cache locality.
     /// Standard dupe() performs large single allocations that can cause cache misses.
     /// Returns ContextBlock for unified ownership pattern with OwnedBlock wrapper.
     fn clone_large_block(self: *BlockIndex, block: ContextBlock) !ContextBlock {
+        std.debug.assert(block.content.len >= 512 * 1024);
+
         const content_buffer = try self.arena_coordinator.alloc(u8, block.content.len);
+
+        std.debug.assert(content_buffer.len == block.content.len);
 
         // Chunked copying improves cache performance for multi-megabyte blocks
         const CHUNK_SIZE = 64 * 1024;
@@ -275,17 +323,23 @@ pub const BlockIndex = struct {
                 @memcpy(content_buffer[offset .. offset + chunk_size], block.content[offset .. offset + chunk_size]);
                 offset += chunk_size;
             }
+            std.debug.assert(offset == block.content.len);
         } else {
             @memcpy(content_buffer, block.content);
         }
 
-        return ContextBlock{
+        const cloned = ContextBlock{
             .id = block.id,
             .sequence = block.sequence,
             .source_uri = try self.arena_coordinator.duplicate_slice(u8, block.source_uri),
             .metadata_json = try self.arena_coordinator.duplicate_slice(u8, block.metadata_json),
             .content = content_buffer,
         };
+
+        std.debug.assert(cloned.id.eql(block.id));
+        std.debug.assert(cloned.content.len == block.content.len);
+
+        return cloned;
     }
 
     /// Comprehensive invariant validation for debug builds.
