@@ -11,6 +11,7 @@ TODO.md
 performance-baseline.json
 fuzz_reports/
 fuzz-corpus/
+fuzz_results/
 .fuzzing_monitoring
 .working/
 

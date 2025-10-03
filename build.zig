@@ -26,6 +26,7 @@ const BuildContext = struct {
     log_level: std.log.Level,
     options: *std.Build.Step.Options,
     filter: ?[]const u8,
+    fuzz_iterations: u32,
 };
 
 fn parse_log_level(level_str: []const u8) std.log.Level {
@@ -84,6 +85,7 @@ pub fn build(b: *std.Build) void {
         .log_level = log_level,
         .options = options,
         .filter = filter,
+        .fuzz_iterations = fuzz_iterations,
     };
 
     build_kausal_binaries(context);
@@ -216,6 +218,19 @@ fn build_performance_tools(context: BuildContext) void {
 
     const fuzz_quick_step = context.b.step("fuzz-quick", "Run quick fuzzing tests for CI");
     fuzz_quick_step.dependOn(&run_fuzz_quick.step);
+
+    // Parallel fuzzing support - cross-platform
+    const fuzz_parallel_step = context.b.step("fuzz-parallel", "Run parallel fuzzing campaign");
+    const cores = context.b.option(u32, "fuzz-cores", "Number of parallel fuzzers") orelse 4;
+
+    var i: u32 = 0;
+    while (i < cores) : (i += 1) {
+        const run_fuzz_instance = context.b.addRunArtifact(fuzz_exe);
+        run_fuzz_instance.addArg("--iterations");
+        const iterations_str = context.b.fmt("{d}", .{context.fuzz_iterations});
+        run_fuzz_instance.addArg(iterations_str);
+        fuzz_parallel_step.dependOn(&run_fuzz_instance.step);
+    }
 }
 
 const ExecutableConfig = struct {
