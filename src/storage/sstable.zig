@@ -73,6 +73,7 @@ pub const SSTable = struct {
     const VERSION = 1;
     const HEADER_SIZE = 64; // Cache-aligned header size for performance
     const FOOTER_SIZE = 8; // Checksum
+    const MAX_BLOCKS_PER_SSTABLE = 1_000_000; // Reasonable limit to detect corruption
 
     /// Index entry pointing to a block within the SSTable
     pub const IndexEntry = struct {
@@ -393,7 +394,10 @@ pub const SSTable = struct {
         }
         // Handle empty case - create empty SSTable with just tombstones if needed
         if (blocks.len == 0 and tombstones.len == 0) return;
-        std.debug.assert(blocks.len <= 1000000);
+        std.debug.assert(blocks.len <= MAX_BLOCKS_PER_SSTABLE);
+        std.debug.assert(tombstones.len <= 65535);
+        std.debug.assert(edges.len <= 65535);
+        std.debug.assert(self.file_path.len > 0);
 
         self.index.clearAndFree(self.backing_allocator);
         // Safety: Converting pointer to integer for null pointer validation
@@ -467,6 +471,9 @@ pub const SSTable = struct {
 
         for (context_blocks) |block| {
             const block_size = block.serialized_size();
+            std.debug.assert(block_size > 0);
+            std.debug.assert(block_size < 100 * 1024 * 1024);
+
             const buffer = try self.backing_allocator.alloc(u8, block_size);
             defer self.backing_allocator.free(buffer);
 
@@ -525,7 +532,12 @@ pub const SSTable = struct {
         }
 
         const index_offset = current_offset;
+        std.debug.assert(self.index.items.len == context_blocks.len);
+
         for (self.index.items) |entry| {
+            std.debug.assert(entry.size > 0);
+            std.debug.assert(entry.offset >= HEADER_SIZE);
+
             var entry_buffer: [IndexEntry.SERIALIZED_SIZE]u8 = undefined;
             try entry.serialize(&entry_buffer);
             _ = try file.write(&entry_buffer);
@@ -534,6 +546,9 @@ pub const SSTable = struct {
 
         const bloom_filter_offset = current_offset;
         const bloom_filter_size = new_bloom.serialized_size();
+        std.debug.assert(bloom_filter_size > 0);
+        std.debug.assert(bloom_filter_size < 10 * 1024 * 1024);
+
         const bloom_buffer = try self.backing_allocator.alloc(u8, bloom_filter_size);
         defer self.backing_allocator.free(bloom_buffer);
 
@@ -649,15 +664,22 @@ pub const SSTable = struct {
 
     /// Read SSTable and load index
     pub fn read_index(self: *SSTable) !void {
+        std.debug.assert(self.file_path.len > 0);
+
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
         self.index.clearRetainingCapacity();
 
         var header_buffer: [HEADER_SIZE]u8 = undefined;
-        _ = try file.read(&header_buffer);
+        const header_bytes_read = try file.read(&header_buffer);
+        std.debug.assert(header_bytes_read == HEADER_SIZE);
 
         const header = try Header.deserialize(&header_buffer);
+
+        if (header.block_count > MAX_BLOCKS_PER_SSTABLE) return error.CorruptedBlockCount;
+        if (header.index_offset < HEADER_SIZE) return error.CorruptedIndexOffset;
+
         self.block_count = header.block_count;
         self.tombstone_count = header.tombstone_count;
         self.edge_count = header.edge_count;
@@ -681,11 +703,17 @@ pub const SSTable = struct {
         try self.index.ensureTotalCapacity(self.backing_allocator, header.block_count);
         for (0..header.block_count) |_| {
             var entry_buffer: [IndexEntry.SERIALIZED_SIZE]u8 = undefined;
-            _ = try file.read(&entry_buffer);
+            const entry_bytes_read = try file.read(&entry_buffer);
+            std.debug.assert(entry_bytes_read == IndexEntry.SERIALIZED_SIZE);
 
             const entry = try IndexEntry.deserialize(&entry_buffer);
+            std.debug.assert(entry.size > 0);
+            std.debug.assert(entry.offset >= HEADER_SIZE);
+
             try self.index.append(self.backing_allocator, entry);
         }
+
+        std.debug.assert(self.index.items.len == header.block_count);
 
         // Skip per-operation index validation to prevent performance regression
         // Index ordering validation is expensive (iterates through all entries)
@@ -743,6 +771,12 @@ pub const SSTable = struct {
     /// Uses the bloom filter for fast negative lookups, then performs binary search
     /// on the index. Returns null if the block is not found in this SSTable.
     pub fn find_block(self: *SSTable, block_id: BlockId) !?ContextBlock {
+        var non_zero_bytes: u32 = 0;
+        for (block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         // Check tombstones first - tombstoned blocks should not be returned
         // However, we need to compare sequences to handle MVCC correctly:
         // Only tombstones with higher sequences than the block should hide it
@@ -759,6 +793,8 @@ pub const SSTable = struct {
                 return null;
             }
         }
+
+        std.debug.assert(self.index.items.len <= MAX_BLOCKS_PER_SSTABLE);
 
         var left: usize = 0;
         var right: usize = self.index.items.len;
@@ -783,6 +819,9 @@ pub const SSTable = struct {
             return null;
         };
 
+        std.debug.assert(found_entry.size > 0);
+        std.debug.assert(found_entry.offset >= HEADER_SIZE);
+
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
@@ -791,9 +830,12 @@ pub const SSTable = struct {
 
         const buffer = try self.arena_coordinator.alloc(u8, found_entry.size);
 
-        _ = try file.read(buffer);
+        const bytes_read = try file.read(buffer);
+        std.debug.assert(bytes_read == found_entry.size);
 
         const block_data = try ContextBlock.deserialize(self.arena_coordinator.allocator(), buffer);
+
+        std.debug.assert(block_data.id.eql(block_id));
 
         if (tombstone_sequence) |tomb_seq| {
             if (tomb_seq > block_data.sequence) {
