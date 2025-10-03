@@ -140,6 +140,14 @@ pub const MemtableManager = struct {
     pub fn put_block_durable(self: *MemtableManager, block: ContextBlock) !void {
         concurrency.assert_main_thread();
 
+        var non_zero_bytes: u32 = 0;
+        for (block.id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+        std.debug.assert(block.source_uri.len > 0);
+        std.debug.assert(block.content.len > 0);
+
         // CRITICAL: WAL write must complete before memtable update for durability guarantees
         const wal_succeeded = blk: {
             // Streaming writes eliminate WALEntry buffer allocation for multi-MB blocks
@@ -192,6 +200,13 @@ pub const MemtableManager = struct {
     /// WAL-first design ensures tombstone operation is recorded before state update.
     pub fn put_tombstone_durable(self: *MemtableManager, tombstone_record: TombstoneRecord, graph_index: *GraphEdgeIndex) !void {
         concurrency.assert_main_thread();
+
+        var non_zero_bytes: u32 = 0;
+        for (tombstone_record.block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+        std.debug.assert(tombstone_record.sequence > 0);
 
         const wal_entry = try WALEntry.create_tombstone_block(self.backing_allocator, tombstone_record);
         defer wal_entry.deinit(self.backing_allocator);
@@ -516,7 +531,12 @@ pub const MemtableManager = struct {
     pub fn flush_to_sstable(self: *MemtableManager, sstable_manager: anytype, graph_index: *const GraphEdgeIndex) !void {
         concurrency.assert_main_thread();
 
-        if (self.block_index.blocks.count() == 0 and self.block_index.tombstones.count() == 0) return;
+        const initial_block_count = self.block_index.blocks.count();
+        const initial_tombstone_count = self.block_index.tombstones.count();
+
+        if (initial_block_count == 0 and initial_tombstone_count == 0) return;
+
+        std.debug.assert(initial_block_count > 0 or initial_tombstone_count > 0);
 
         var owned_blocks = std.ArrayList(OwnedBlock){};
         defer owned_blocks.deinit(self.backing_allocator);
@@ -526,9 +546,13 @@ pub const MemtableManager = struct {
             try owned_blocks.append(self.backing_allocator, owned_block_ptr.*);
         }
 
+        std.debug.assert(owned_blocks.items.len == initial_block_count);
+
         // Get tombstones and edges before clearing memtable
         const tombstones = try self.block_index.collect_tombstones(self.backing_allocator);
         defer self.backing_allocator.free(tombstones);
+
+        std.debug.assert(tombstones.len == initial_tombstone_count);
 
         // Collect edges with multiple validation attempts to ensure they're not lost
         var edges: []const GraphEdge = undefined;
@@ -561,7 +585,10 @@ pub const MemtableManager = struct {
 
         // Final validation
         const final_edge_count = graph_index.edge_count();
-        std.debug.assert(edges.len == final_edge_count); // Validate that counts fit in u16 limits for SSTable format
+        std.debug.assert(edges.len == final_edge_count);
+        std.debug.assert(edges.len < std.math.maxInt(u32));
+        std.debug.assert(tombstones.len < std.math.maxInt(u32));
+
         const max_items_per_sstable = std.math.maxInt(u16);
 
         if (tombstones.len > max_items_per_sstable or edges.len > max_items_per_sstable) {
