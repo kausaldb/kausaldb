@@ -75,7 +75,7 @@ pub const SSTable = struct {
     const FOOTER_SIZE = 8; // Checksum
 
     /// Index entry pointing to a block within the SSTable
-    const IndexEntry = struct {
+    pub const IndexEntry = struct {
         block_id: BlockId,
         offset: u64,
         size: u32,
