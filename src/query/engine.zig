@@ -205,6 +205,12 @@ pub const QueryEngine = struct {
     /// Find a single block by ID for maximum performance
     /// Returns direct pointer to storage data without allocation
     pub fn find_block(self: *QueryEngine, block_id: BlockId) !?OwnedBlock {
+        var non_zero_bytes: u32 = 0;
+        for (block_id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         if (!self.state.can_query()) return EngineError.NotInitialized;
 
         const start_time = std.time.nanoTimestamp();
@@ -212,6 +218,7 @@ pub const QueryEngine = struct {
 
         // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
+            std.debug.assert(block.id.eql(block_id));
             return OwnedBlock.take_ownership(&block, .query_engine);
         }
 
@@ -272,6 +279,9 @@ pub const QueryEngine = struct {
         block_ids: []const BlockId,
         result_buffer: []OwnedBlock,
     ) !u32 {
+        std.debug.assert(block_ids.len > 0);
+        std.debug.assert(result_buffer.len >= block_ids.len);
+
         if (!self.state.can_query()) return EngineError.NotInitialized;
         if (!(result_buffer.len >= block_ids.len)) std.debug.panic("Result buffer too small for batch query", .{});
 
@@ -293,16 +303,22 @@ pub const QueryEngine = struct {
         var found_count: u32 = 0;
         for (temp_results) |maybe_block| {
             if (maybe_block) |owned_block| {
+                std.debug.assert(found_count < result_buffer.len);
                 result_buffer[found_count] = owned_block;
                 found_count += 1;
             }
         }
+
+        std.debug.assert(found_count <= block_ids.len);
 
         return found_count;
     }
 
     /// Execute a graph traversal query with caching for expensive operations
     pub fn execute_traversal(self: *QueryEngine, query: TraversalQuery) !TraversalResult {
+        std.debug.assert(query.max_depth > 0);
+        std.debug.assert(query.max_depth <= 100);
+
         const start_time = std.time.nanoTimestamp();
         defer self.record_traversal_query(start_time);
 

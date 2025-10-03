@@ -328,6 +328,9 @@ pub fn execute_traversal(
     storage_engine: *StorageEngine,
     query: TraversalQuery,
 ) !TraversalResult {
+    std.debug.assert(query.max_depth > 0);
+    std.debug.assert(query.max_results > 0);
+
     try query.validate();
 
     const result = switch (query.algorithm) {
@@ -398,8 +401,14 @@ fn traverse_breadth_first(
         const current = queue.orderedRemove(0);
         defer allocator.free(current.path);
 
+        std.debug.assert(current.depth <= query.max_depth);
+        std.debug.assert(current.path.len > 0);
+
         blocks_traversed += 1;
         max_depth_reached = @max(max_depth_reached, current.depth);
+
+        std.debug.assert(blocks_traversed > 0);
+        std.debug.assert(max_depth_reached <= query.max_depth);
 
         const current_block = (try storage_engine.find_block(
             current.block_id,
@@ -432,6 +441,10 @@ fn traverse_breadth_first(
     const owned_blocks = try result_blocks.toOwnedSlice(allocator);
     const owned_paths = try result_paths.toOwnedSlice(allocator);
     const owned_depths = try result_depths.toOwnedSlice(allocator);
+
+    std.debug.assert(owned_blocks.len == owned_paths.len);
+    std.debug.assert(owned_blocks.len == owned_depths.len);
+    std.debug.assert(owned_blocks.len <= query.max_results);
 
     return TraversalResult.init(
         owned_blocks,
@@ -536,6 +549,10 @@ fn traverse_depth_first(
     const owned_blocks = try result_blocks.toOwnedSlice(allocator);
     const owned_paths = try result_paths.toOwnedSlice(allocator);
     const owned_depths = try result_depths.toOwnedSlice(allocator);
+
+    std.debug.assert(owned_blocks.len == owned_paths.len);
+    std.debug.assert(owned_blocks.len == owned_depths.len);
+    std.debug.assert(owned_blocks.len <= query.max_results);
 
     return TraversalResult.init(
         owned_blocks,
@@ -768,6 +785,10 @@ fn traverse_astar_search(
     const owned_paths = try result_paths.toOwnedSlice(allocator);
     const owned_depths = try result_depths.toOwnedSlice(allocator);
 
+    std.debug.assert(owned_blocks.len == owned_paths.len);
+    std.debug.assert(owned_blocks.len == owned_depths.len);
+    std.debug.assert(owned_blocks.len <= query.max_results);
+
     return TraversalResult.init(
         owned_blocks,
         owned_paths,
@@ -939,6 +960,10 @@ fn traverse_bidirectional_search(
     const owned_blocks = try result_blocks.toOwnedSlice(allocator);
     const owned_paths = try result_paths.toOwnedSlice(allocator);
     const owned_depths = try result_depths.toOwnedSlice(allocator);
+
+    std.debug.assert(owned_blocks.len == owned_paths.len);
+    std.debug.assert(owned_blocks.len == owned_depths.len);
+    std.debug.assert(owned_blocks.len <= query.max_results);
 
     return TraversalResult.init(
         owned_blocks,
