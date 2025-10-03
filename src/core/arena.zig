@@ -76,9 +76,15 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         pub fn alloc(self: *Arena) !*T {
             const ptr = try self.arena.allocator().create(T);
 
+            std.debug.assert(@intFromPtr(ptr) != 0);
+            std.debug.assert(@intFromPtr(ptr) % @alignOf(T) == 0);
+
             if (builtin.mode == .Debug) {
+                const old_count = self.debug_allocation_count;
                 self.debug_allocation_count += 1;
                 self.debug_total_bytes += @sizeOf(T);
+
+                std.debug.assert(self.debug_allocation_count > old_count);
 
                 // Log only large allocations to avoid spam
                 if (@sizeOf(T) > 4096) {
@@ -92,10 +98,16 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// Allocate a slice of n objects of type T.
         /// The returned slice is owned by this arena and becomes invalid after reset().
         pub fn alloc_slice(self: *Arena, n: usize) ![]T {
+            std.debug.assert(n > 0);
+            std.debug.assert(n <= std.math.maxInt(u32));
+
             if (!(n > 0)) std.debug.panic("Cannot allocate zero-length slice", .{});
             if (!(n <= std.math.maxInt(u32))) std.debug.panic("Slice too large: {}", .{n});
 
             const slice = try self.arena.allocator().alloc(T, n);
+
+            std.debug.assert(slice.len == n);
+            std.debug.assert(@intFromPtr(slice.ptr) != 0);
 
             if (builtin.mode == .Debug) {
                 self.debug_allocation_count += n;

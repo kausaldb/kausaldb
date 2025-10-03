@@ -87,21 +87,39 @@ pub const OwnedBlock = struct {
     /// Create owned block with explicit ownership and optional arena tracking.
     /// Debug tracking handled separately for consistent HashMap alignment.
     pub fn init(block: *const ContextBlock, ownership: BlockOwnership, arena_ptr: anytype) OwnedBlock {
+        std.debug.assert(@intFromPtr(block) != 0);
+        var non_zero_bytes: u32 = 0;
+        for (block.id.bytes) |byte| {
+            if (byte != 0) non_zero_bytes += 1;
+        }
+        std.debug.assert(non_zero_bytes > 0);
+
         _ = arena_ptr; // Debug tracking handled separately
-        return OwnedBlock{
+        const owned = OwnedBlock{
             .block = block.*,
             .ownership = ownership,
             .state = .valid,
         };
+
+        std.debug.assert(owned.state == .valid);
+
+        return owned;
     }
 
     /// Create owned block from existing block with ownership transfer.
     pub fn take_ownership(block: *const ContextBlock, new_ownership: BlockOwnership) OwnedBlock {
-        return OwnedBlock{
+        std.debug.assert(@intFromPtr(block) != 0);
+
+        const owned = OwnedBlock{
             .block = block.*,
             .ownership = new_ownership,
             .state = .valid,
         };
+
+        std.debug.assert(owned.state == .valid);
+        std.debug.assert(owned.ownership == new_ownership);
+
+        return owned;
     }
 
     /// Get read access to the underlying block with compile-time ownership validation.
@@ -152,10 +170,16 @@ pub const OwnedBlock = struct {
         new_ownership: BlockOwnership,
         new_arena: anytype,
     ) !OwnedBlock {
+        std.debug.assert(self.state == .valid);
+
         // Clone all dynamic data
         const cloned_source_uri = try allocator.dupe(u8, self.block.source_uri);
         const cloned_metadata = try allocator.dupe(u8, self.block.metadata_json);
         const cloned_content = try allocator.dupe(u8, self.block.content);
+
+        std.debug.assert(cloned_source_uri.len == self.block.source_uri.len);
+        std.debug.assert(cloned_metadata.len == self.block.metadata_json.len);
+        std.debug.assert(cloned_content.len == self.block.content.len);
 
         const cloned_block = ContextBlock{
             .id = self.block.id,
@@ -166,11 +190,16 @@ pub const OwnedBlock = struct {
         };
 
         _ = new_arena; // Arena tracking handled separately
-        return OwnedBlock{
+        const owned = OwnedBlock{
             .block = cloned_block,
             .ownership = new_ownership,
             .state = .valid,
         };
+
+        std.debug.assert(owned.block.id.eql(self.block.id));
+        std.debug.assert(owned.ownership == new_ownership);
+
+        return owned;
     }
 
     /// Transfer ownership without cloning data - SAFE version with move semantics.
@@ -200,8 +229,14 @@ pub const OwnedBlock = struct {
             .state = .valid,
         };
 
+        std.debug.assert(transferred.state == .valid);
+        std.debug.assert(transferred.ownership == new_ownership);
+
         // Mark source as moved to prevent further use
         self.state = .moved;
+
+        std.debug.assert(self.state == .moved);
+        std.debug.assert(transferred.state == .valid);
 
         return transferred;
     }
