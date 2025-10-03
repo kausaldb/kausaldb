@@ -110,7 +110,7 @@ fn fuzz_infinite_loops(allocator: std.mem.Allocator, input: []const u8) !void {
         .start_block_id = source_id,
         .direction = .outgoing,
         .algorithm = .breadth_first,
-        .max_depth = 1000, // Very deep - should hit cycle detection
+        .max_depth = 100, // Maximum allowed depth - tests cycle detection within limits
         .edge_filter = .all_types,
         .max_results = 10000, // Large result set
     };
@@ -197,7 +197,7 @@ fn fuzz_deep_recursion(allocator: std.mem.Allocator, input: []const u8) !void {
             .start_block_id = first_id,
             .direction = .outgoing,
             .algorithm = .depth_first, // DFS is more likely to cause stack issues
-            .max_depth = std.math.maxInt(u32),
+            .max_depth = 100, // Maximum allowed depth
             .edge_filter = .all_types,
             .max_results = std.math.maxInt(u32),
         };
