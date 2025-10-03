@@ -52,16 +52,30 @@ pub const CorruptionTracker = struct {
 
     /// Record successful operation, resetting consecutive failure count
     pub fn record_success(self: *Self) void {
+        const old_ops = self.total_operations;
         self.consecutive_failures = 0;
         self.total_operations += 1;
+        std.debug.assert(self.total_operations > old_ops);
+        std.debug.assert(self.consecutive_failures == 0);
     }
 
     /// Record corruption failure with systematic detection
     /// Triggers fatal_assert if systematic corruption detected
     pub fn record_failure(self: *Self, context: []const u8) void {
+        std.debug.assert(context.len > 0);
+
+        const old_consecutive = self.consecutive_failures;
+        const old_total_failures = self.total_failures;
+        const old_total_ops = self.total_operations;
+
         self.consecutive_failures += 1;
         self.total_failures += 1;
         self.total_operations += 1;
+
+        std.debug.assert(self.consecutive_failures > old_consecutive);
+        std.debug.assert(self.total_failures > old_total_failures);
+        std.debug.assert(self.total_operations > old_total_ops);
+        std.debug.assert(self.total_failures <= self.total_operations);
 
         // Systematic corruption indicates unrecoverable system state
         // Use different thresholds for testing vs production

@@ -69,6 +69,9 @@ pub fn recover_from_segment(
 
     while (true) {
         entries_processed += 1;
+        std.debug.assert(entries_processed > 0);
+        std.debug.assert(entries_recovered <= entries_processed);
+
         if (entries_processed > MAX_ENTRIES_PER_SEGMENT) {
             log.err("WAL segment exceeded maximum entries limit: {d}", .{MAX_ENTRIES_PER_SEGMENT});
             return WALError.IoError;
@@ -117,12 +120,18 @@ pub fn recover_from_segment(
         callback(wal_entry, context) catch |err| return err;
         corruption_tracker.record_success();
         entries_recovered += 1;
+        std.debug.assert(entries_recovered <= entries_processed);
     }
+
+    std.debug.assert(entries_recovered <= entries_processed);
 
     stats.entries_recovered += entries_recovered;
     // Update entries_written to maintain consistency with memtable during recovery
     // These recovered entries should be counted as "written" for current session
     stats.entries_written += entries_recovered;
+
+    std.debug.assert(stats.entries_recovered >= entries_recovered);
+    std.debug.assert(stats.entries_written >= entries_recovered);
 
     if (entries_recovered > 0) {
         log.debug("Recovered {d} entries from segment: {s}", .{ entries_recovered, file_path });

@@ -80,9 +80,11 @@ pub const WALEntryStream = struct {
     const MAX_ENTRIES_PER_STREAM = 1_000_000;
 
     pub fn init(allocator: std.mem.Allocator, file: *VFile) StreamError!WALEntryStream {
+        std.debug.assert(@intFromPtr(file) != 0);
+
         _ = file.seek(0, .start) catch return StreamError.IoError;
 
-        return WALEntryStream{
+        const stream = WALEntryStream{
             .allocator = allocator,
             .file = file,
             .process_buffer = std.mem.zeroes([PROCESS_BUFFER_SIZE]u8),
@@ -94,6 +96,11 @@ pub const WALEntryStream = struct {
             .read_iterations = 0,
             .zero_progress_count = 0,
         };
+
+        std.debug.assert(stream.remaining_len == 0);
+        std.debug.assert(stream.entries_read == 0);
+
+        return stream;
     }
 
     /// Read the next WAL entry from the stream
@@ -163,12 +170,15 @@ pub const WALEntryStream = struct {
 
     /// Fill the process buffer with data, handling remaining data from previous reads
     fn fill_process_buffer(self: *WALEntryStream) StreamError!usize {
+        std.debug.assert(self.remaining_len <= PROCESS_BUFFER_SIZE);
+
         const position_before_read = self.file.tell() catch return StreamError.IoError;
         if (self.remaining_len == 0) {
             self.buffer_start_file_pos = position_before_read;
         }
 
         if (self.remaining_len > 0) {
+            std.debug.assert(self.remaining_len <= PROCESS_BUFFER_SIZE);
             // copy remaining data to start of process_buffer
             @memcpy(self.process_buffer[0..self.remaining_len], self.remaining_buffer[0..self.remaining_len]);
         }
@@ -177,6 +187,8 @@ pub const WALEntryStream = struct {
         const bytes_read = self.file.read(read_target) catch return StreamError.IoError;
 
         const available = self.remaining_len + bytes_read;
+        std.debug.assert(available <= PROCESS_BUFFER_SIZE);
+
         self.remaining_len = 0; // it's all in process_buffer now
 
         return available;
@@ -185,7 +197,10 @@ pub const WALEntryStream = struct {
     /// Attempt to read a complete entry from the process buffer
     /// Returns null if no complete entry is available
     fn try_read_entry(self: *WALEntryStream, available: usize) StreamError!?StreamEntry {
+        std.debug.assert(available <= PROCESS_BUFFER_SIZE);
+
         if (available < WAL_HEADER_SIZE) {
+            std.debug.assert(available >= 0);
             // Preserve incomplete header for next read
             self.preserve_remaining_data(0, available);
             return null;
@@ -194,6 +209,8 @@ pub const WALEntryStream = struct {
         const checksum = std.mem.readInt(u64, self.process_buffer[0..8], .little);
         const entry_type = self.process_buffer[8];
         const payload_size = std.mem.readInt(u32, self.process_buffer[9..13], .little);
+
+        std.debug.assert(WAL_HEADER_SIZE == 13);
 
         // Validate entry structure before allocation
         if (payload_size > MAX_PAYLOAD_SIZE) {
