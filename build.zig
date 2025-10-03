@@ -171,7 +171,12 @@ fn build_lint(context: BuildContext) void {
 }
 
 fn build_performance_tools(context: BuildContext) void {
-    const benchmark_exe = create_executable(context, .{
+    // Benchmarks always use ReleaseFast for maximum performance measurement
+    // Override context.optimize to ensure accurate performance data
+    var bench_context = context;
+    bench_context.optimize = .ReleaseFast;
+
+    const benchmark_exe = create_executable(bench_context, .{
         .name = "benchmark",
         .root_source = "src/bench/main.zig",
         .binary_type = .dev_tool,
