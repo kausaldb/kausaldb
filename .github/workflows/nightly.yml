@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [storage, logic]
+        target: [storage_logic, all_logic]
 
     steps:
       - name: Checkout
@@ -112,9 +112,9 @@ jobs:
           echo "========================================="
 
           mkdir -p perf-history
+          set -o pipefail
 
-          ./zig/zig build bench \
-            -Doptimize=ReleaseFast \
+          ./zig/zig build bench --release=fast \
             -Dbench-iterations=50000 \
             -Dbench-warmup=5000 \
             -Dbench-baseline=bench-baseline.json \
@@ -158,20 +158,13 @@ jobs:
 
   # Expanded compatibility testing
   expanded-matrix:
-    name: Expanded Matrix / ${{ matrix.os }} / Zig ${{ matrix.zig_version }}
+    name: Expanded Matrix / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-20.04, ubuntu-22.04, macos-13, macos-14]
-        zig_version: ['0.15.1', 'master']
-        exclude:
-          # Skip master on older OS versions
-          - os: ubuntu-20.04
-            zig_version: master
-          - os: macos-13
-            zig_version: master
 
     steps:
       - name: Checkout
@@ -180,59 +173,12 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Zig
-        if: matrix.zig_version == '0.15.1'
         uses: ./.github/actions/setup-zig
-
-      - name: Setup Zig Master
-        if: matrix.zig_version == 'master'
-        run: |
-          # Download and setup Zig master branch
-          # Use the index.json to get the latest master build URLs
-
-          # Install jq if not available
-          if ! command -v jq &> /dev/null; then
-            if [[ "${{ runner.os }}" == "Linux" ]]; then
-              sudo apt-get update && sudo apt-get install -y jq
-            elif [[ "${{ runner.os }}" == "macOS" ]]; then
-              brew install jq
-            fi
-          fi
-
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            # Get latest Linux x86_64 master build
-            MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."x86_64-linux".tarball')
-            curl -L "$MASTER_URL" | tar -xJ
-            mv zig-* zig-master
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            if [[ "${{ runner.arch }}" == "ARM64" ]]; then
-              # Get latest macOS aarch64 master build
-              MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."aarch64-macos".tarball')
-              curl -L "$MASTER_URL" | tar -xJ
-              mv zig-* zig-master
-            else
-              # Get latest macOS x86_64 master build
-              MASTER_URL=$(curl -s https://ziglang.org/download/index.json | jq -r '.master."x86_64-macos".tarball')
-              curl -L "$MASTER_URL" | tar -xJ
-              mv zig-* zig-master
-            fi
-          fi
-          echo "$PWD/zig-master" >> $GITHUB_PATH
 
       - name: Build and Test
         run: |
-          echo "Testing on ${{ matrix.os }} with Zig ${{ matrix.zig_version }}"
-
-          # Use appropriate zig command based on version
-          if [[ "${{ matrix.zig_version }}" == "master" ]]; then
-            ./zig-master/zig build test -Dseed=0xBADCAFE2
-          else
-            ./zig/zig build test -Dseed=0xBADCAFE1
-          fi
-
-      - name: Report Compatibility Issues
-        if: failure() && matrix.zig_version == 'master'
-        run: |
-          echo "::warning::Compatibility issue with Zig master on ${{ matrix.os }}"
+          echo "Testing on ${{ matrix.os }} with Zig ${{ env.ZIG_VERSION }}"
+          ./zig/zig build test -Dseed=0xBADCAFE1
 
   # Memory safety validation with multiple tools
   memory-safety:
@@ -254,7 +200,7 @@ jobs:
           sudo apt-get install -y valgrind
 
       - name: Build Debug Binary
-        run: ./zig/zig build -Doptimize=Debug -Dseed=0xDEADBEEF
+        run: ./zig/zig build -Ddebug -Dseed=0xDEADBEEF
 
       - name: Run Valgrind Memcheck
         env:

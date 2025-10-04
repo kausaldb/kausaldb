@@ -58,8 +58,11 @@ pub fn build(b: *std.Build) void {
 
     // ReleaseSafe provides optimal performance while maintaining safety checks
     // Essential for KausalDB's microsecond-level performance requirements
-    // Override with -Doptimize=Debug for development debugging and detailed stack traces
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
+    // Override with --Ddebug for development debugging and detailed stack traces
+    const optimize = if (b.option(bool, "debug", "Enable debug build") orelse false)
+        .Debug
+    else
+        b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
     // Build options for benchmarks and fuzzing
     const bench_iterations = b.option(u32, "bench-iterations", "Number of benchmark iterations") orelse 1000;
