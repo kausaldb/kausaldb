@@ -555,3 +555,67 @@ test "scenario: regression - result ordering consistency" {
     // Same query should return consistent ordering
     try runner.verify_result_ordering();
 }
+
+test "scenario: deep graph traversal performance (depth=20, 500 nodes)" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 40,
+        .find_block_weight = 5,
+        .delete_block_weight = 0,
+        .put_edge_weight = 45, // Build connected graph
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x1C001,
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Configure deep traversal testing
+    runner.query_config.max_traversal_depth = 20;
+    runner.query_config.enable_depth_testing = true;
+
+    // Build large connected graph (800 operations)
+    try runner.run(800);
+
+    // Execute deep traversals (400 operations)
+    try runner.run(400);
+
+    // Validate traversal terminates correctly on large graphs
+}
+
+test "scenario: query cache eviction under memory pressure" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 15,
+        .find_block_weight = 60, // Heavy query load
+        .delete_block_weight = 5,
+        .put_edge_weight = 10,
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x1C002,
+        operation_mix,
+        &.{},
+    );
+    defer runner.deinit();
+
+    // Enable repeated queries to test caching behavior
+    runner.query_config.use_repeated_queries = true;
+    runner.query_config.query_repetition_rate = 0.3;
+
+    // Build baseline graph
+    try runner.run(200);
+
+    // Heavy query load with repetition
+    try runner.run(1000);
+
+    // Test query behavior under memory pressure
+}

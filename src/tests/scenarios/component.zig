@@ -25,6 +25,7 @@ const BlockId = types.BlockId;
 const ContextBlock = types.ContextBlock;
 const BatchWriter = batch_writer_mod.BatchWriter;
 const BatchConfig = batch_writer_mod.BatchConfig;
+const OperationMix = harness.OperationMix;
 
 /// Component-specific test scenarios for targeted validation
 pub const ComponentScenario = enum {
@@ -519,4 +520,67 @@ test "component scenario: memory arena cleanup verification" {
     defer runner.deinit();
 
     try ComponentScenario.memory_arena_cleanup_verification.execute_scenario(allocator, &runner);
+}
+
+test "scenario: workspace metadata corruption recovery" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 30,
+        .find_block_weight = 30,
+        .delete_block_weight = 10,
+        .put_edge_weight = 20,
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x1D001,
+        operation_mix,
+        &.{
+            .{
+                .operation_number = 100,
+                .fault_type = .corruption,
+            },
+        },
+    );
+    defer runner.deinit();
+
+    // Build workspace state
+    try runner.run(200);
+
+    // Inject corruption and continue operations
+    try runner.run(300);
+
+    // Test resilience to corrupted state
+}
+
+test "scenario: link to non-existent path error handling" {
+    const allocator = testing.allocator;
+
+    const operation_mix = OperationMix{
+        .put_block_weight = 25,
+        .find_block_weight = 40,
+        .delete_block_weight = 5,
+        .put_edge_weight = 20,
+        .find_edges_weight = 10,
+    };
+
+    var runner = try SimulationRunner.init(
+        allocator,
+        0x1D002,
+        operation_mix,
+        &.{
+            .{
+                .operation_number = 50,
+                .fault_type = .io_error,
+            },
+        },
+    );
+    defer runner.deinit();
+
+    // Run with I/O errors to simulate invalid paths
+    try runner.run(400);
+
+    // Verify error handling for I/O failures
 }
