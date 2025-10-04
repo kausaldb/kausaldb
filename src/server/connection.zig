@@ -278,7 +278,7 @@ pub const ClientConnection = struct {
 
 // Compile-time guarantees for network protocol stability
 comptime {
-    if (!(@sizeOf(MessageHeader) == 16)) @compileError(
+    if (@sizeOf(MessageHeader) != 16) @compileError(
         "CLI v2 MessageHeader must be exactly 16 bytes",
     );
 }

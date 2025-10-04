@@ -61,7 +61,10 @@ fn platform_global_sync() PlatformSyncError!void {
             @as(u64, @intCast(end_time - start_time))
         else
             0;
-        log.warn("platform_global_sync failed on {s} after {}ns ({}µs)", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
+        log.warn(
+            "platform_global_sync failed on {s} after {}ns ({}µs)",
+            .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 },
+        );
     }
 
     switch (builtin.os.tag) {
@@ -95,7 +98,10 @@ fn platform_global_sync() PlatformSyncError!void {
         @as(u64, @intCast(end_time - start_time))
     else
         0;
-    log.debug("platform_global_sync completed on {s} in {}ns ({}µs)", .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 });
+    log.debug(
+        "platform_global_sync completed on {s} in {}ns ({}µs)",
+        .{ @tagName(builtin.os.tag), duration_ns, duration_ns / 1000 },
+    );
 }
 
 /// Production VFS implementation using real OS filesystem operations
@@ -134,10 +140,9 @@ pub const ProductionVFS = struct {
     };
 
     fn open(ptr: *anyopaque, path: []const u8, mode: VFS.OpenMode) VFSError!VFile {
-        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
-        const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
+        _ = ptr;
+
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
-        _ = self; // ProductionVFS no longer needs arena for VFile
 
         const file = std.fs.openFileAbsolute(path, .{
             .mode = switch (mode) {
@@ -164,10 +169,9 @@ pub const ProductionVFS = struct {
     }
 
     fn create(ptr: *anyopaque, path: []const u8) VFSError!VFile {
-        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
-        const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
+        _ = ptr;
+
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
-        _ = self; // ProductionVFS no longer needs arena for VFile
 
         const file = std.fs.createFileAbsolute(path, .{ .read = true, .exclusive = true }) catch |err| {
             return switch (err) {

@@ -571,7 +571,7 @@ pub const ModelState = struct {
                 };
 
                 if (found != null) {
-                    if (!(false)) std.debug.panic(
+                    std.debug.panic(
                         "DELETION CONSISTENCY VIOLATION: Deleted block {} still findable\n" ++
                             "  Block sequence: {}\n" ++
                             "  Deletion timestamp: {}\n" ++
@@ -586,7 +586,7 @@ pub const ModelState = struct {
             const system_block = try storage.find_block(model_block.id, .temporary);
 
             if (system_block == null) {
-                if (!(false)) std.debug.panic(
+                std.debug.panic(
                     "BLOCK EXISTENCE VIOLATION: Model block {} not found in system\n" ++
                         "  Expected sequence: {}\n" ++
                         "  Creation sequence: {}\n" ++
@@ -639,7 +639,7 @@ pub const ModelState = struct {
                     }
                 } else {
                     // Storage has older sequence - this indicates data loss or corruption
-                    if (!(false)) std.debug.panic(
+                    std.debug.panic(
                         "SEQUENCE REGRESSION VIOLATION: Storage sequence older than model\n" ++
                             "  Block ID: {}\n" ++
                             "  Model sequence: {}\n" ++
@@ -652,7 +652,7 @@ pub const ModelState = struct {
                 // Same sequence - verify hash strictly
                 if (actual_hash != expected_hash) {
                     validation_metrics.hash_mismatches += 1;
-                    if (!(false)) std.debug.panic(
+                    std.debug.panic(
                         "CRYPTOGRAPHIC INTEGRITY VIOLATION: Content hash mismatch\n" ++
                             "  Block ID: {}\n" ++
                             "  Expected hash: 0x{x}\n" ++
@@ -720,7 +720,7 @@ pub const ModelState = struct {
 
             if (!source_exists) {
                 graph_metrics.orphaned_edges += 1;
-                if (!(false)) std.debug.panic("REFERENTIAL INTEGRITY VIOLATION: Edge source block missing\n" ++
+                std.debug.panic("REFERENTIAL INTEGRITY VIOLATION: Edge source block missing\n" ++
                     "  Edge type: {}\n" ++
                     "  Source ID: {}\n" ++
                     "  Target ID: {}\n" ++
@@ -729,7 +729,7 @@ pub const ModelState = struct {
 
             if (!target_exists) {
                 graph_metrics.orphaned_edges += 1;
-                if (!(false)) std.debug.panic("REFERENTIAL INTEGRITY VIOLATION: Edge target block missing\n" ++
+                std.debug.panic("REFERENTIAL INTEGRITY VIOLATION: Edge target block missing\n" ++
                     "  Edge type: {}\n" ++
                     "  Source ID: {}\n" ++
                     "  Target ID: {}\n" ++
@@ -775,7 +775,7 @@ pub const ModelState = struct {
             const edge_integrity = @as(f64, @floatFromInt(graph_metrics.verified_edges)) /
                 @as(f64, @floatFromInt(graph_metrics.active_edges));
 
-            if (!(false)) std.debug.panic(
+            std.debug.panic(
                 "GRAPH TRAVERSAL VIOLATION: Edge discovery inconsistency\n" ++
                     "  Missing edges: {}/{} ({d:.1}%)\n" ++
                     "  Active edges: {}\n" ++

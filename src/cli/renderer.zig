@@ -257,7 +257,10 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
             const name_copy = try ctx.allocator.dupe(u8, name);
             defer ctx.allocator.free(name_copy);
 
-            log.debug("Client: Received workspace name='{s}' sync_status={}", .{ name_copy, @intFromEnum(workspace.sync_status) });
+            log.debug(
+                "Client: Received workspace name='{s}' sync_status={}",
+                .{ name_copy, @intFromEnum(workspace.sync_status) },
+            );
 
             const storage_str = try workspace.format_storage_size(ctx.allocator);
             defer ctx.allocator.free(storage_str);
@@ -285,24 +288,37 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
             try ctx.write_colored(icon_color, icon_copy);
 
             // Use a separate format string buffer to avoid aliasing
-            const workspace_line = try std.fmt.allocPrint(ctx.allocator, " {s:<15} {s} {s:<8} ({s})\n", .{ name_copy, status_copy, last_sync_str, storage_str });
+            const workspace_line = try std.fmt.allocPrint(
+                ctx.allocator,
+                " {s:<15} {s} {s:<8} ({s})\n",
+                .{ name_copy, status_copy, last_sync_str, storage_str },
+            );
             defer ctx.allocator.free(workspace_line);
             try ctx.write(workspace_line);
         }
     } else {
         try ctx.write("\n");
-        try ctx.write_colored(RenderContext.Color.dim, "No workspaces linked. Use 'kausal link' to add codebases.\n");
+        try ctx.write_colored(
+            RenderContext.Color.dim,
+            "No workspaces linked. Use 'kausal link' to add codebases.\n",
+        );
     }
 
     if (verbose) {
         try ctx.write("\n");
         try ctx.write_colored(RenderContext.Color.dim, "Developer Info:\n");
-        try ctx.writer.interface.print("├─ Performance: {d} blocks, {d} edges indexed\n", .{ status.block_count, status.edge_count });
+        try ctx.writer.interface.print(
+            "├─ Performance: {d} blocks, {d} edges indexed\n",
+            .{ status.block_count, status.edge_count },
+        );
 
         const memtable_str = try protocol.format_bytes(ctx.allocator, status.memtable_size);
         defer ctx.allocator.free(memtable_str);
 
-        try ctx.writer.interface.print("├─ Storage: {d} SSTables, {s} memtable\n", .{ status.sstable_count, memtable_str });
+        try ctx.writer.interface.print(
+            "├─ Storage: {d} SSTables, {s} memtable\n",
+            .{ status.sstable_count, memtable_str },
+        );
         try ctx.writer.interface.print("└─ Uptime: {d} seconds\n", .{status.uptime_seconds});
 
         if (workspaces.len > 0) {
@@ -314,7 +330,10 @@ fn render_status_text(ctx: *RenderContext, status: *const protocol.StatusRespons
                 const storage_str = try workspace.format_storage_size(ctx.allocator);
                 defer ctx.allocator.free(storage_str);
 
-                try ctx.writer.interface.print("  {s:<15} {s} ({d} blocks, {d} edges)\n", .{ name, storage_str, workspace.block_count, workspace.edge_count });
+                try ctx.writer.interface.print(
+                    "  {s:<15} {s} ({d} blocks, {d} edges)\n",
+                    .{ name, storage_str, workspace.block_count, workspace.edge_count },
+                );
 
                 const display_path = if (path.len > 60) path[path.len - 60 ..] else path;
                 try ctx.writer.interface.print("                  Path: {s}\n", .{display_path});
@@ -546,7 +565,7 @@ fn render_show_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
             try ctx.write_colored(RenderContext.Color.yellow, "→ ");
         }
 
-        // Create defensive copy to prevent memory aliasing
+        // Prevent memory aliasing with copy
         const uri = block.uri[0..block.uri_len];
         const uri_copy = try ctx.allocator.dupe(u8, uri);
         defer ctx.allocator.free(uri_copy);
@@ -560,7 +579,7 @@ fn render_show_results_text(ctx: *RenderContext, blocks: []const protocol.BlockI
 }
 
 fn render_show_results_json(ctx: *RenderContext, blocks: []const protocol.BlockInfo, direction: []const u8) !void {
-    // Create defensive copy for direction
+    // Prevent memory aliasing with copy
     const direction_copy = try ctx.allocator.dupe(u8, direction);
     defer ctx.allocator.free(direction_copy);
     const direction_json = try std.json.Stringify.valueAlloc(ctx.allocator, direction_copy, .{});
@@ -574,7 +593,7 @@ fn render_show_results_json(ctx: *RenderContext, blocks: []const protocol.BlockI
         const id_json = try std.json.Stringify.valueAlloc(ctx.allocator, id_hex, .{});
         defer ctx.allocator.free(id_json);
 
-        // Create defensive copy for URI to prevent memory aliasing
+        // Prevent memory aliasing with copy
         const uri_text = block.uri[0..block.uri_len];
         const uri_copy = try ctx.allocator.dupe(u8, uri_text);
         defer ctx.allocator.free(uri_copy);

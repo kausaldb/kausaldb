@@ -138,7 +138,11 @@ pub const BlockIndex = struct {
         if (self.blocks.get(cloned_block.id)) |existing_block| {
             const existing_data = existing_block.read(.memtable_manager);
             old_memory = existing_data.source_uri.len + existing_data.metadata_json.len + existing_data.content.len;
-            if (!(self.memory_used >= old_memory)) std.debug.panic("Memory accounting underflow: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
+            if (self.memory_used < old_memory)
+                std.debug.panic(
+                    "Memory accounting underflow: tracked={} removing={} - indicates heap corruption",
+                    .{ self.memory_used, old_memory },
+                );
         }
 
         const new_memory = cloned_block.source_uri.len + cloned_block.metadata_json.len + cloned_block.content.len;
@@ -187,7 +191,11 @@ pub const BlockIndex = struct {
         if (self.blocks.get(block_id)) |existing_block| {
             const block_data = existing_block.read(.memtable_manager);
             const old_memory = block_data.source_uri.len + block_data.metadata_json.len + block_data.content.len;
-            if (!(self.memory_used >= old_memory)) std.debug.panic("Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption", .{ self.memory_used, old_memory });
+            if (self.memory_used < old_memory)
+                std.debug.panic(
+                    "Memory accounting underflow during removal: tracked={} removing={} - indicates heap corruption",
+                    .{ self.memory_used, old_memory },
+                );
             self.memory_used -= old_memory;
         }
 
@@ -202,7 +210,7 @@ pub const BlockIndex = struct {
     /// Clears all blocks while retaining HashMap capacity for efficient reuse.
     /// Enables O(1) bulk deallocation through StorageEngine arena reset.
     pub fn clear(self: *BlockIndex) void {
-        if (!(@intFromPtr(self) != 0)) std.debug.panic("BlockIndex self pointer is null - memory corruption detected", .{});
+        if (@intFromPtr(self) == 0) std.debug.panic("BlockIndex self pointer is null - memory corruption detected", .{});
 
         // Skip per-operation validation to prevent performance regression
         // Clear operation validation is expensive and should be selective
@@ -214,9 +222,8 @@ pub const BlockIndex = struct {
         self.memory_used = 0;
 
         if (builtin.mode == .Debug) {
-            if (!(self.blocks.count() == 0)) std.debug.panic("Clear operation failed - blocks still present", .{});
-            // Tombstones intentionally preserved to prevent data resurrection from SSTables
-            if (!(self.memory_used == 0)) std.debug.panic("Clear operation failed - memory not reset", .{});
+            if (self.blocks.count() != 0) std.debug.panic("Clear operation failed - blocks still present", .{});
+            if (self.memory_used != 0) std.debug.panic("Clear operation failed - memory not reset", .{});
         }
     }
 
@@ -315,14 +322,19 @@ pub const BlockIndex = struct {
                 block_data.metadata_json.len +
                 block_data.content.len;
         }
-        if (!(self.memory_used == calculated_memory)) std.debug.panic("Memory accounting mismatch: tracked={} actual={}", .{ self.memory_used, calculated_memory });
+        if (self.memory_used != calculated_memory)
+            std.debug.panic(
+                "Memory accounting mismatch: tracked={} actual={}",
+                .{ self.memory_used, calculated_memory },
+            );
     }
 
     fn validate_coordinator_stability(self: *const BlockIndex) void {
-        if (!(@intFromPtr(self.arena_coordinator) != 0)) std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
+        if (@intFromPtr(self.arena_coordinator) == 0)
+            std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
 
         const test_alloc = self.arena_coordinator.alloc(u8, 1) catch {
-            if (!(false)) std.debug.panic("Arena coordinator non-functional - corruption detected", .{});
+            std.debug.panic("Arena coordinator non-functional - corruption detected", .{});
             return;
         };
 
@@ -338,12 +350,14 @@ pub const BlockIndex = struct {
             actual_count += 1;
 
             const found = self.blocks.get(entry.key_ptr.*);
-            if (!(found != null)) std.debug.panic("Block ID corruption: stored block not findable by key", .{});
+            if (found == null) std.debug.panic("Block ID corruption: stored block not findable by key", .{});
             const found_block_data = found.?.read(.memtable_manager);
-            if (!(found_block_data.id.eql(entry.key_ptr.*))) std.debug.panic("Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found_block_data.id });
+            if (!(found_block_data.id.eql(entry.key_ptr.*)))
+                std.debug.panic("Block ID mismatch: key={any} stored={any}", .{ entry.key_ptr.*, found_block_data.id });
         }
 
-        if (!(actual_count == expected_count)) std.debug.panic("HashMap count corruption: expected={} actual={}", .{ expected_count, actual_count });
+        if (actual_count != expected_count)
+            std.debug.panic("HashMap count corruption: expected={} actual={}", .{ expected_count, actual_count });
     }
 
     fn validate_content_integrity(self: *const BlockIndex) void {
@@ -352,18 +366,24 @@ pub const BlockIndex = struct {
             const block_data = entry.value_ptr.read(.memtable_manager);
 
             if (block_data.source_uri.len > 0) {
-                if (!(@intFromPtr(block_data.source_uri.ptr) != 0)) std.debug.panic("source_uri pointer corruption: null with length {}", .{block_data.source_uri.len});
+                if (@intFromPtr(block_data.source_uri.ptr) == 0)
+                    std.debug.panic("source_uri pointer corruption: null with length {}", .{block_data.source_uri.len});
             }
             if (block_data.metadata_json.len > 0) {
-                if (!(@intFromPtr(block_data.metadata_json.ptr) != 0)) std.debug.panic("metadata_json pointer corruption: null with length {}", .{block_data.metadata_json.len});
+                if (@intFromPtr(block_data.metadata_json.ptr) == 0)
+                    std.debug.panic("metadata_json pointer corruption: null with length {}", .{block_data.metadata_json.len});
             }
             if (block_data.content.len > 0) {
-                if (!(@intFromPtr(block_data.content.ptr) != 0)) std.debug.panic("content pointer corruption: null with length {}", .{block_data.content.len});
+                if (@intFromPtr(block_data.content.ptr) == 0)
+                    std.debug.panic("content pointer corruption: null with length {}", .{block_data.content.len});
             }
 
-            if (!(block_data.source_uri.len < 10 * 1024 * 1024)) std.debug.panic("source_uri length corruption: {} bytes too large", .{block_data.source_uri.len});
-            if (!(block_data.metadata_json.len < 10 * 1024 * 1024)) std.debug.panic("metadata_json length corruption: {} bytes too large", .{block_data.metadata_json.len});
-            if (!(block_data.content.len < 1024 * 1024 * 1024)) std.debug.panic("content length corruption: {} bytes too large", .{block_data.content.len});
+            if (block_data.source_uri.len >= 10 * 1024 * 1024)
+                std.debug.panic("source_uri length corruption: {} bytes too large", .{block_data.source_uri.len});
+            if (block_data.metadata_json.len >= 10 * 1024 * 1024)
+                std.debug.panic("metadata_json length corruption: {} bytes too large", .{block_data.metadata_json.len});
+            if (block_data.content.len >= 1024 * 1024 * 1024)
+                std.debug.panic("content length corruption: {} bytes too large", .{block_data.content.len});
         }
     }
 };

@@ -31,7 +31,10 @@ pub const OwnedGraphEdge = struct {
     /// Returns edge reference after validating accessor permissions.
     pub fn read(self: *const OwnedGraphEdge, accessor: BlockOwnership) *const GraphEdge {
         if (accessor != self.ownership and accessor != .temporary) {
-            if (!(false)) std.debug.panic("Edge access violation: {s} cannot read {s}-owned edge", .{ accessor.name(), self.ownership.name() });
+            std.debug.panic(
+                "Edge access violation: {s} cannot read {s}-owned edge",
+                .{ accessor.name(), self.ownership.name() },
+            );
         }
         return &self.edge;
     }

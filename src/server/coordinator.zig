@@ -258,7 +258,7 @@ pub const ServerCoordinator = struct {
         if (self.storage_engine) |se| {
             return se;
         }
-        if (!(false)) std.debug.panic("Storage engine not initialized", .{});
+        std.debug.panic("Storage engine not initialized", .{});
         unreachable;
     }
 
@@ -267,7 +267,7 @@ pub const ServerCoordinator = struct {
         if (self.query_engine) |qe| {
             return qe;
         }
-        if (!(false)) std.debug.panic("Query engine not initialized", .{});
+        std.debug.panic("Query engine not initialized", .{});
         unreachable;
     }
 
@@ -276,7 +276,7 @@ pub const ServerCoordinator = struct {
         if (self.workspace_manager) |wm| {
             return wm;
         }
-        if (!(false)) std.debug.panic("Workspace manager not initialized", .{});
+        std.debug.panic("Workspace manager not initialized", .{});
         unreachable;
     }
 };

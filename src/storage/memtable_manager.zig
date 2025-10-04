@@ -116,18 +116,21 @@ pub const MemtableManager = struct {
     pub fn deinit(self: *MemtableManager) void {
         concurrency.assert_main_thread();
 
-        if (!(@intFromPtr(self) != 0)) std.debug.panic(
-            "MemtableManager self pointer is null - memory corruption detected",
-            .{},
-        );
-        if (!(@intFromPtr(&self.wal) != 0)) std.debug.panic(
-            "MemtableManager WAL pointer corrupted - memory safety violation detected",
-            .{},
-        );
-        if (!(@intFromPtr(&self.block_index) != 0)) std.debug.panic(
-            "MemtableManager block_index pointer corrupted - memory safety violation detected",
-            .{},
-        ); // Note: graph_index is now owned by StorageEngine, not MemtableManager
+        if (@intFromPtr(self) == 0)
+            std.debug.panic(
+                "MemtableManager self pointer is null - memory corruption detected",
+                .{},
+            );
+        if (@intFromPtr(&self.wal) == 0)
+            std.debug.panic(
+                "MemtableManager WAL pointer corrupted - memory safety violation detected",
+                .{},
+            );
+        if (@intFromPtr(&self.block_index) == 0)
+            std.debug.panic(
+                "MemtableManager block_index pointer corrupted - memory safety violation detected",
+                .{},
+            ); // Note: graph_index is now owned by StorageEngine, not MemtableManager
 
         self.wal.deinit();
         self.block_index.deinit();
@@ -467,7 +470,7 @@ pub const MemtableManager = struct {
         std.debug.assert(@intFromPtr(&self.graph_index) != 0);
 
         const test_alloc = self.backing_allocator.alloc(u8, 1) catch {
-            if (!(false)) std.debug.panic("MemtableManager backing allocator non-functional - corruption detected", .{});
+            std.debug.panic("MemtableManager backing allocator non-functional - corruption detected", .{});
             return;
         };
         defer self.backing_allocator.free(test_alloc);
@@ -494,9 +497,12 @@ pub const MemtableManager = struct {
     fn validate_component_state_coherence(self: *const MemtableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 
-        if (!(@intFromPtr(&self.block_index) != 0)) std.debug.panic("BlockIndex pointer corruption in MemtableManager", .{});
-        if (!(@intFromPtr(&self.graph_index) != 0)) std.debug.panic("GraphEdgeIndex pointer corruption in MemtableManager", .{});
-        if (!(@intFromPtr(&self.wal) != 0)) std.debug.panic("WAL pointer corruption in MemtableManager", .{});
+        if (@intFromPtr(&self.block_index) == 0)
+            std.debug.panic("BlockIndex pointer corruption in MemtableManager", .{});
+        if (@intFromPtr(&self.graph_index) == 0)
+            std.debug.panic("GraphEdgeIndex pointer corruption in MemtableManager", .{});
+        if (@intFromPtr(&self.wal) == 0)
+            std.debug.panic("WAL pointer corruption in MemtableManager", .{});
 
         // Configuration corruption could lead to OOM or pathological performance degradation
         std.debug.assert(self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024);

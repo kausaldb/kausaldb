@@ -56,13 +56,13 @@ pub const QueryAnchor = union(enum) {
         switch (self) {
             .block_id => {}, // BlockId validation handled by type system
             .entity_name => |entity| {
-                if (!(entity.workspace.len > 0)) std.debug.panic("EntityName anchor requires workspace", .{});
-                if (!(entity.entity_type.len > 0)) std.debug.panic("EntityName anchor requires entity_type", .{});
-                if (!(entity.name.len > 0)) std.debug.panic("EntityName anchor requires name", .{});
+                if (entity.workspace.len == 0) std.debug.panic("EntityName anchor requires workspace", .{});
+                if (entity.entity_type.len == 0) std.debug.panic("EntityName anchor requires entity_type", .{});
+                if (entity.name.len == 0) std.debug.panic("EntityName anchor requires name", .{});
             },
             .file_path => |file| {
-                if (!(file.workspace.len > 0)) std.debug.panic("FilePath anchor requires workspace", .{});
-                if (!(file.path.len > 0)) std.debug.panic("FilePath anchor requires path", .{});
+                if (file.workspace.len == 0) std.debug.panic("FilePath anchor requires workspace", .{});
+                if (file.path.len == 0) std.debug.panic("FilePath anchor requires path", .{});
             },
         }
     }
@@ -158,7 +158,7 @@ pub const ContextQuery = struct {
 
     /// Create empty context query for specified workspace
     pub fn create_for_workspace(workspace: []const u8) ContextQuery {
-        if (!(workspace.len > 0)) std.debug.panic("ContextQuery requires non-empty workspace", .{});
+        if (workspace.len == 0) std.debug.panic("ContextQuery requires non-empty workspace", .{});
 
         return ContextQuery{
             .workspace = workspace,
@@ -183,24 +183,24 @@ pub const ContextQuery = struct {
 
     /// Set global node limit for resource management
     pub fn with_max_nodes(self: *ContextQuery, max_nodes: u32) *ContextQuery {
-        if (!(max_nodes > 0)) std.debug.panic("ContextQuery requires positive max_nodes", .{});
-        if (!(max_nodes <= 100000)) std.debug.panic("ContextQuery max_nodes too large: {}", .{max_nodes});
+        if (max_nodes == 0) std.debug.panic("ContextQuery requires positive max_nodes", .{});
+        if (max_nodes > 100000) std.debug.panic("ContextQuery max_nodes too large: {}", .{max_nodes});
         self.max_total_nodes = max_nodes;
         return self;
     }
 
     /// Set query timeout for bounded execution
     pub fn with_timeout_us(self: *ContextQuery, timeout_us: u32) *ContextQuery {
-        if (!(timeout_us > 0)) std.debug.panic("ContextQuery requires positive timeout", .{});
+        if (timeout_us == 0) std.debug.panic("ContextQuery requires positive timeout", .{});
         self.timeout_us = timeout_us;
         return self;
     }
 
     /// Comprehensive validation of query structure and limits
     pub fn validate(self: @This()) !void {
-        if (!(self.workspace.len > 0)) std.debug.panic("ContextQuery requires workspace", .{});
-        if (!(!self.anchors.is_empty())) std.debug.panic("ContextQuery requires anchors", .{});
-        if (!(!self.rules.is_empty())) std.debug.panic("ContextQuery requires traversal rules", .{});
+        if (self.workspace.len == 0) std.debug.panic("ContextQuery requires workspace", .{});
+        if (self.anchors.is_empty()) std.debug.panic("ContextQuery requires anchors", .{});
+        if (self.rules.is_empty()) std.debug.panic("ContextQuery requires traversal rules", .{});
 
         // Validate each anchor
         for (self.anchors.slice()) |anchor| {
@@ -215,10 +215,10 @@ pub const ContextQuery = struct {
         }
 
         // Prevent resource exhaustion by validating total rule capacity against global bounds
-        if (!(total_rule_nodes <= self.max_total_nodes * 2)) std.debug.panic( // Allow some headroom for planning
+        if (total_rule_nodes > self.max_total_nodes * 2) std.debug.panic( // Allow some headroom for planning
             "Combined rule limits ({}) exceed global limit ({})", .{ total_rule_nodes, self.max_total_nodes });
-        if (!(self.max_total_nodes > 0)) std.debug.panic("ContextQuery requires positive max_total_nodes", .{});
-        if (!(self.timeout_us > 0)) std.debug.panic("ContextQuery requires positive timeout", .{});
+        if (self.max_total_nodes == 0) std.debug.panic("ContextQuery requires positive max_total_nodes", .{});
+        if (self.timeout_us == 0) std.debug.panic("ContextQuery requires positive timeout", .{});
     }
 
     /// Calculate estimated resource requirements for query planning
@@ -309,9 +309,9 @@ pub const ContextResult = struct {
 
 // Compile-time validation of bounded collection sizes
 comptime {
-    if (!(@sizeOf(QueryAnchor) <= 64)) @compileError("QueryAnchor too large");
-    if (!(@sizeOf(TraversalRule) <= 128)) @compileError("TraversalRule too large");
-    if (!(@sizeOf(ContextQuery) <= 1024)) @compileError("ContextQuery too large");
+    if (@sizeOf(QueryAnchor) > 64) @compileError("QueryAnchor too large");
+    if (@sizeOf(TraversalRule) > 128) @compileError("TraversalRule too large");
+    if (@sizeOf(ContextQuery) > 1024) @compileError("ContextQuery too large");
 }
 
 //

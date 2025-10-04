@@ -140,7 +140,11 @@ pub const VFS = struct {
         mkdir: *const fn (ptr: *anyopaque, path: []const u8) VFSError!void,
         mkdir_all: *const fn (ptr: *anyopaque, path: []const u8) VFSError!void,
         rmdir: *const fn (ptr: *anyopaque, path: []const u8) VFSError!void,
-        iterate_directory: *const fn (ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) VFSError!DirectoryIterator,
+        iterate_directory: *const fn (
+            ptr: *anyopaque,
+            path: []const u8,
+            allocator: std.mem.Allocator,
+        ) VFSError!DirectoryIterator,
 
         rename: *const fn (ptr: *anyopaque, old_path: []const u8, new_path: []const u8) VFSError!void,
         stat: *const fn (ptr: *anyopaque, path: []const u8) VFSError!FileStat,
@@ -311,7 +315,11 @@ pub const VFile = struct {
                 if (sim.closed) return VFileError.FileClosed;
                 if (!sim.mode.can_read()) return VFileError.ReadError;
 
-                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid())) std.debug.panic("VFS handle corruption detected: ptr=0x{X} handle={} - memory safety violation", .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id });
+                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid()))
+                    std.debug.panic(
+                        "VFS handle corruption detected: ptr=0x{X} handle={} - memory safety violation",
+                        .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id },
+                    );
                 if (!(!sim.closed)) std.debug.panic("VFS file handle used after close - use-after-free detected", .{});
 
                 const data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
@@ -352,7 +360,11 @@ pub const VFile = struct {
                 if (sim.closed) return VFileError.FileClosed;
                 if (!sim.mode.can_write()) return VFileError.WriteError;
 
-                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid())) std.debug.panic("VFS handle corruption detected in write: ptr=0x{X} handle={} - memory safety violation", .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id });
+                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid()))
+                    std.debug.panic(
+                        "VFS handle corruption detected in write: ptr=0x{X} handle={} - memory safety violation",
+                        .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id },
+                    );
                 std.debug.assert(data.len > 0);
 
                 const actual_write_size = sim.fault_injection_fn(sim.vfs_ptr, data.len) catch |err| {
@@ -374,7 +386,8 @@ pub const VFile = struct {
                         // ensureTotalCapacity preserves existing data automatically
                         try file_data.content.ensureTotalCapacity(sim.allocator_fn(sim.vfs_ptr), new_len);
 
-                        const fresh_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
+                        const fresh_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse
+                            return VFileError.FileClosed;
 
                         fresh_file_data.content.items.len = new_len;
 
@@ -392,25 +405,30 @@ pub const VFile = struct {
                 }
 
                 const file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
-                @memcpy(file_data.content.items[sim.position .. sim.position + actual_write_size], data[0..actual_write_size]);
+                @memcpy(
+                    file_data.content.items[sim.position .. sim.position + actual_write_size],
+                    data[0..actual_write_size],
+                );
                 sim.position += actual_write_size;
 
                 const write_start_pos = sim.position - actual_write_size;
-                const verify_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
+                const verify_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse
+                    return VFileError.FileClosed;
                 const written_slice = verify_file_data.content.items[write_start_pos..sim.position];
 
                 if (!std.mem.eql(u8, written_slice, data[0..actual_write_size])) {
                     if (actual_write_size >= 8) {
                         const expected = std.mem.readInt(u64, data[0..8], .little);
                         const actual = std.mem.readInt(u64, written_slice[0..8], .little);
-                        if (!(false)) std.debug.panic("VFS write corruption detected at pos {}: expected 0x{X}, got 0x{X}", .{ write_start_pos, expected, actual });
+                        std.debug.panic("VFS write corruption detected at pos {}: expected 0x{X}, got 0x{X}", .{ write_start_pos, expected, actual });
                     } else {
-                        if (!(false)) std.debug.panic("VFS write corruption detected: written data mismatch at pos {}", .{write_start_pos});
+                        std.debug.panic("VFS write corruption detected: written data mismatch at pos {}", .{write_start_pos});
                     }
                     return VFileError.IoError;
                 }
 
-                const time_update_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
+                const time_update_file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse
+                    return VFileError.FileClosed;
                 time_update_file_data.modified_time = sim.current_time_fn(sim.vfs_ptr);
 
                 // Update disk usage tracking
@@ -449,7 +467,11 @@ pub const VFile = struct {
                 if (sim.closed) return VFileError.FileClosed;
                 if (!sim.mode.can_write()) return VFileError.WriteError;
 
-                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid())) std.debug.panic("VFS handle corruption detected in write_at: ptr=0x{X} handle={} - memory safety violation", .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id });
+                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid()))
+                    std.debug.panic(
+                        "VFS handle corruption detected in write_at: ptr=0x{X} handle={} - memory safety violation",
+                        .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id },
+                    );
                 std.debug.assert(data.len > 0);
 
                 const actual_write_size = sim.fault_injection_fn(sim.vfs_ptr, data.len) catch |err| {
@@ -500,8 +522,14 @@ pub const VFile = struct {
             .simulation => |*sim| blk: {
                 if (sim.closed) return VFileError.FileClosed;
 
-                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid())) std.debug.panic("VFS handle corruption detected in seek: ptr=0x{X} handle={} - memory safety violation", .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id });
-                if (!(!sim.closed)) std.debug.panic("VFS file handle used after close in seek - use-after-free detected", .{});
+                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid()))
+                    std.debug.panic(
+                        "VFS handle corruption detected in seek: ptr=0x{X} handle={} - memory safety violation",
+                        .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id },
+                    );
+
+                if (sim.closed)
+                    std.debug.panic("VFS file handle used after close in seek - use-after-free detected", .{});
 
                 const file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
 
@@ -598,8 +626,13 @@ pub const VFile = struct {
             .simulation => |*sim| blk: {
                 if (sim.closed) return VFileError.FileClosed;
 
-                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid())) std.debug.panic("VFS handle corruption detected in file_size: ptr=0x{X} handle={} - memory safety violation", .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id });
-                if (!(!sim.closed)) std.debug.panic("VFS file handle used after close in file_size - use-after-free detected", .{});
+                if (!(@intFromPtr(sim.vfs_ptr) >= 0x1000 and sim.handle_id.is_valid()))
+                    std.debug.panic(
+                        "VFS handle corruption detected in file_size: ptr=0x{X} handle={} - memory safety violation",
+                        .{ @intFromPtr(sim.vfs_ptr), sim.handle_id.id },
+                    );
+                if (sim.closed)
+                    std.debug.panic("VFS file handle used after close in file_size - use-after-free detected", .{});
 
                 const file_data = sim.file_data_fn(sim.vfs_ptr, sim.handle_id) orelse return VFileError.FileClosed;
                 break :blk file_data.content.items.len;

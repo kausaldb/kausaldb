@@ -269,8 +269,16 @@ pub fn resolve_user_data_dir(allocator: std.mem.Allocator, app_name: []const u8)
     const home_dir = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
 
     return switch (builtin.os.tag) {
-        .linux, .freebsd, .openbsd, .netbsd => std.fmt.allocPrint(allocator, "{s}/.local/share/{s}", .{ home_dir, app_name }),
-        .macos => std.fmt.allocPrint(allocator, "{s}/Library/Application Support/{s}", .{ home_dir, app_name }),
+        .linux, .freebsd, .openbsd, .netbsd => std.fmt.allocPrint(
+            allocator,
+            "{s}/.local/share/{s}",
+            .{ home_dir, app_name },
+        ),
+        .macos => std.fmt.allocPrint(
+            allocator,
+            "{s}/Library/Application Support/{s}",
+            .{ home_dir, app_name },
+        ),
         .windows => blk: {
             // On Windows, use APPDATA if available, otherwise fall back to user profile
             const app_data = std.posix.getenv("APPDATA") orelse home_dir;
@@ -302,7 +310,11 @@ pub fn resolve_user_runtime_dir(allocator: std.mem.Allocator, app_name: []const 
         },
         .macos => blk: {
             const home_dir = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
-            break :blk std.fmt.allocPrint(allocator, "{s}/Library/Application Support/{s}/runtime", .{ home_dir, app_name });
+            break :blk std.fmt.allocPrint(
+                allocator,
+                "{s}/Library/Application Support/{s}/runtime",
+                .{ home_dir, app_name },
+            );
         },
         .windows => blk: {
             const temp_dir = std.posix.getenv("TEMP") orelse "C:\\Temp";

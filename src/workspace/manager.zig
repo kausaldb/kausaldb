@@ -112,7 +112,7 @@ pub const WorkspaceManager = struct {
     /// Name defaults to directory basename if not provided.
     pub fn link_codebase(self: *WorkspaceManager, path: []const u8, name: ?[]const u8) !void {
         std.debug.assert(self.initialized);
-        if (!(path.len > 0)) std.debug.panic("Codebase path cannot be empty", .{});
+        if (path.len == 0) std.debug.panic("Codebase path cannot be empty", .{});
 
         // Validate path exists and is accessible
         _ = self.storage_engine.vfs.stat(path) catch |err| switch (err) {
@@ -191,7 +191,7 @@ pub const WorkspaceManager = struct {
     /// Future versions may implement full cleanup.
     pub fn unlink_codebase(self: *WorkspaceManager, name: []const u8) !void {
         std.debug.assert(self.initialized);
-        if (!(name.len > 0)) std.debug.panic("Codebase name cannot be empty", .{});
+        if (name.len == 0) std.debug.panic("Codebase name cannot be empty", .{});
 
         if (!self.linked_codebases.contains(name)) {
             return WorkspaceError.CodebaseNotFound;
@@ -344,7 +344,7 @@ pub const WorkspaceManager = struct {
     /// Deserialize workspace configuration from JSON storage.
     fn deserialize_workspace_config(self: *WorkspaceManager, content: []const u8) !void {
         var parsed = std.json.parseFromSlice(std.json.Value, self.coordinator.allocator(), content, .{}) catch |err| {
-            if (!(false)) std.debug.panic("Failed to parse workspace configuration JSON", .{});
+            std.debug.panic("Failed to parse workspace configuration JSON", .{});
             return err;
         };
         defer parsed.deinit();
@@ -355,7 +355,7 @@ pub const WorkspaceManager = struct {
         // Safety: JSON parsing guarantees integer fits in u32 range for version field
         const version = @as(u32, @intCast(root.get("version").?.integer));
         if (version != WorkspaceConfig.WORKSPACE_CONFIG_VERSION) {
-            if (!(false)) std.debug.panic("Unsupported workspace config version", .{});
+            std.debug.panic("Unsupported workspace config version", .{});
         }
 
         const codebases_array = &root.get("codebases").?.array;

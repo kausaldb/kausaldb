@@ -183,6 +183,7 @@ pub const QueryEngine = struct {
 
     /// Stop query engine operations gracefully
     pub fn shutdown(self: *QueryEngine) void {
+        if (self.state == .stopped or self.state == .initialized) return;
         self.state.transition(.shutdown);
         self.state.transition(.stopped);
     }
@@ -279,7 +280,7 @@ pub const QueryEngine = struct {
         std.debug.assert(result_buffer.len >= block_ids.len);
 
         if (!self.state.can_query()) return EngineError.NotInitialized;
-        if (!(result_buffer.len >= block_ids.len)) std.debug.panic("Result buffer too small for batch query", .{});
+        if (result_buffer.len < block_ids.len) std.debug.panic("Result buffer too small for batch query", .{});
 
         const start_time = std.time.nanoTimestamp();
         defer self.record_direct_query(start_time);

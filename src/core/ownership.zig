@@ -82,7 +82,6 @@ pub const OwnedBlock = struct {
     block: ContextBlock,
     ownership: BlockOwnership,
     state: State,
-    // NO conditional fields - debug tracking handled separately to ensure consistent alignment
 
     /// Create owned block with explicit ownership and optional arena tracking.
     /// Debug tracking handled separately for consistent HashMap alignment.
@@ -126,7 +125,7 @@ pub const OwnedBlock = struct {
     /// Zero runtime cost in release builds - ownership validation is compile-time only.
     pub fn read(self: *const OwnedBlock, comptime accessor: BlockOwnership) *const ContextBlock {
         // Validate block hasn't been moved
-        if (!(self.state == .valid))
+        if (self.state != .valid)
             std.debug.panic("Attempted to read moved-from block {}", .{self.block.id});
 
         // Compile-time validation when ownership is known at compile time
@@ -143,7 +142,7 @@ pub const OwnedBlock = struct {
     /// Zero runtime cost in release builds - ownership validation is compile-time only.
     pub fn write(self: *OwnedBlock, comptime accessor: BlockOwnership) *ContextBlock {
         // Validate block hasn't been moved
-        if (!(self.state == .valid))
+        if (self.state != .valid)
             std.debug.panic("Attempted to write moved-from block {}", .{self.block.id});
 
         // Compile-time validation when ownership is known at compile time
@@ -212,7 +211,7 @@ pub const OwnedBlock = struct {
     ) OwnedBlock {
         _ = new_arena; // Arena tracking handled separately
 
-        if (!(self.state == .valid))
+        if (self.state != .valid)
             std.debug.panic("Attempted to transfer already-moved block {any}", .{self.block.id});
 
         if (builtin.mode == .Debug) {
@@ -246,7 +245,7 @@ pub const OwnedBlock = struct {
     pub fn validate_read_access(self: *const OwnedBlock, accessor: BlockOwnership) void {
         if (builtin.mode == .Debug) {
             if (!accessor.can_read_from(self.ownership)) {
-                if (!(false)) std.debug.panic(
+                std.debug.panic(
                     "Read access violation: {s} cannot read {s}-owned block {}",
                     .{ accessor.name(), self.ownership.name(), self.block.id },
                 );
@@ -259,7 +258,7 @@ pub const OwnedBlock = struct {
     pub fn validate_write_access(self: *const OwnedBlock, accessor: BlockOwnership) void {
         if (builtin.mode == .Debug) {
             if (!accessor.can_write_to(self.ownership)) {
-                if (!(false)) std.debug.panic(
+                std.debug.panic(
                     "Write access violation: {s} cannot write to {s}-owned block {}",
                     .{ accessor.name(), self.ownership.name(), self.block.id },
                 );
@@ -269,28 +268,31 @@ pub const OwnedBlock = struct {
 
     /// Get ownership information for debugging.
     pub fn query_owner(self: *const OwnedBlock) BlockOwnership {
-        if (!(self.state == .valid)) std.debug.panic(
-            "Attempted to query moved-from block {}",
-            .{self.block.id},
-        );
+        if (self.state != .valid)
+            std.debug.panic(
+                "Attempted to query moved-from block {}",
+                .{self.block.id},
+            );
         return self.ownership;
     }
 
     /// Check if block is owned by specific subsystem.
     pub fn is_owned_by(self: *const OwnedBlock, ownership: BlockOwnership) bool {
-        if (!(self.state == .valid)) std.debug.panic(
-            "Attempted to check ownership of moved-from block {}",
-            .{self.block.id},
-        );
+        if (self.state != .valid)
+            std.debug.panic(
+                "Attempted to check ownership of moved-from block {}",
+                .{self.block.id},
+            );
         return self.ownership == ownership;
     }
 
     /// Check if block has temporary ownership (can be accessed by any subsystem).
     pub fn is_temporary(self: *const OwnedBlock) bool {
-        if (!(self.state == .valid)) std.debug.panic(
-            "Attempted to check temporality of moved-from block {}",
-            .{self.block.id},
-        );
+        if (self.state != .valid)
+            std.debug.panic(
+                "Attempted to check temporality of moved-from block {}",
+                .{self.block.id},
+            );
         return self.ownership == .temporary;
     }
 };
@@ -353,9 +355,6 @@ pub fn ComptimeOwnedBlockType(comptime owner: BlockOwnership) type {
     };
 }
 
-// Specialized block types removed in favor of unified OwnedBlock pattern.
-// Use OwnedBlock with explicit ownership (.storage_engine, .query_engine, etc.)
-
 /// Collection of owned blocks with batch operations.
 /// Provides type-safe batch operations while maintaining ownership tracking.
 pub const OwnedBlockCollection = struct {
@@ -416,10 +415,7 @@ pub const OwnedBlockCollection = struct {
 
     /// Query all blocks as slice with ownership validation.
     pub fn query_blocks(self: *const OwnedBlockCollection, comptime accessor: BlockOwnership) []const OwnedBlock {
-        // Validate accessor can read from this collection
-        if (builtin.mode == .Debug) {
-            std.debug.assert(accessor.can_read_from(self.ownership));
-        }
+        std.debug.assert(accessor.can_read_from(self.ownership));
         return self.blocks.items;
     }
 
@@ -569,7 +565,7 @@ pub const OwnershipTracker = struct {
         if (builtin.mode == .Debug) {
             if (self.active_blocks.get(block_id)) |owner| {
                 if (!accessor.can_read_from(owner)) {
-                    if (!(false)) std.debug.panic("Ownership validation failed", .{});
+                    std.debug.panic("Ownership validation failed", .{});
                 }
             } else {
                 log.warn("Accessing untracked block: {any} by {s}", .{ block_id, accessor.name() });
@@ -689,10 +685,6 @@ pub fn validate_ownership_usage(comptime T: type) void {
                     @compileError("Raw ContextBlock pointer '" ++ field.name ++ "' in " ++ @typeName(T) ++
                         ". Use OwnedBlock for ownership tracking.");
                 }
-
-                // ArrayList validation deferred: @typeName() string matching unreliable
-                // Zig compiler lacks precise generic type introspection for this validation
-                // Future enhancement: enable when Zig provides better compile-time type analysis
             }
         },
         else => @compileError("validate_ownership_usage only works on struct types"),
@@ -703,16 +695,13 @@ pub fn validate_ownership_usage(comptime T: type) void {
 comptime {
     // Enforce reasonable enum size limits to prevent excessive compile-time overhead
     const ownership_count = @typeInfo(BlockOwnership).@"enum".fields.len;
-    if (!(ownership_count >= 3 and ownership_count <= 16)) @compileError(
-        "BlockOwnership should have 3-16 variants for reasonable subsystem count",
-    );
+    if (ownership_count < 3 or ownership_count > 16)
+        @compileError("BlockOwnership should have 3-16 variants for reasonable subsystem count");
 
     // Prevent memory bloat by enforcing size constraints on core ownership structures
-    if (!(@sizeOf(OwnedBlock) <= 256)) @compileError("OwnedBlock should be reasonably sized");
-    if (!(@sizeOf(OwnershipTransfer) <= 128)) @compileError("OwnershipTransfer should be compact");
+    if (@sizeOf(OwnedBlock) > 256) @compileError("OwnedBlock should be reasonably sized");
+    if (@sizeOf(OwnershipTransfer) > 128) @compileError("OwnershipTransfer should be compact");
 }
-
-// Tests
 
 test "BlockOwnership access validation" {
     const storage = BlockOwnership.storage_engine;
@@ -764,7 +753,7 @@ test "OwnedBlock basic operations" {
 test "OwnedBlock ownership transfer" {
     const block = ContextBlock{
         // Safety: Valid hex string is statically verified
-        .id = BlockId.from_hex("FFEEDDCCBBAA99887766554433221100") catch unreachable, // Safety: valid 32-char hex string
+        .id = BlockId.from_hex("FFEEDDCCBBAA99887766554433221100") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://transfer"),
         .metadata_json = try std.testing.allocator.dupe(u8, "{}"),

@@ -166,7 +166,11 @@ pub const TieredCompactionManager = struct {
             for (self.sstables.items, 0..) |info, i| {
                 if (std.mem.eql(u8, info.path, path)) {
                     // Prevent size accounting underflow
-                    if (!(self.total_size >= info.size)) std.debug.panic("Tier size underflow: removing {} bytes from {} total", .{ info.size, self.total_size });
+                    if (self.total_size < info.size)
+                        std.debug.panic(
+                            "Tier size underflow: removing {} bytes from {} total",
+                            .{ info.size, self.total_size },
+                        );
 
                     // Free the owned path copy
                     allocator.free(info.path);

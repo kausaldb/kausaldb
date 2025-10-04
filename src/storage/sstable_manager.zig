@@ -161,10 +161,11 @@ pub const SSTableManager = struct {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(temp_allocator);
         defer sstable_paths.deinit(temp_allocator);
 
-        if (!(sstable_paths.items.len < 10000)) std.debug.panic(
-            "Excessive SSTable count {} suggests corruption",
-            .{sstable_paths.items.len},
-        );
+        if (sstable_paths.items.len >= 10000)
+            std.debug.panic(
+                "Excessive SSTable count {} suggests corruption",
+                .{sstable_paths.items.len},
+            );
 
         // Search in reverse order (newer first) for better performance
         var i: usize = sstable_paths.items.len;
@@ -205,10 +206,11 @@ pub const SSTableManager = struct {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit();
 
-        if (!(sstable_paths.items.len < 10000)) std.debug.panic(
-            "Excessive SSTable count {} suggests corruption",
-            .{sstable_paths.items.len},
-        );
+        if (sstable_paths.items.len >= 10000)
+            std.debug.panic(
+                "Excessive SSTable count {} suggests corruption",
+                .{sstable_paths.items.len},
+            );
 
         // Collect and load all SSTables upfront for proper tombstone precedence
         // This ensures tombstones from newer SSTables shadow blocks in older ones
@@ -550,11 +552,12 @@ pub const SSTableManager = struct {
 
             // Corruption tracking: Validate path before append
             if (builtin.mode == .Debug) {
-                if (!(full_path.len > 0 and full_path.len < 4096)) std.debug.panic(
-                    "Invalid path length: {}, path: '{s}'",
-                    .{ full_path.len, full_path },
-                );
-                if (!(@intFromPtr(full_path.ptr) != 0)) std.debug.panic("Path pointer is null", .{});
+                if (full_path.len == 0 or full_path.len >= 4096)
+                    std.debug.panic(
+                        "Invalid path length: {}, path: '{s}'",
+                        .{ full_path.len, full_path },
+                    );
+                if (@intFromPtr(full_path.ptr) == 0) std.debug.panic("Path pointer is null", .{});
             }
 
             self.validate_sstable_paths_integrity("before append") catch |err| {
@@ -896,7 +899,7 @@ pub const SSTableManager = struct {
     pub fn validate_invariants(self: *const SSTableManager) void {
         if (builtin.mode == .Debug) {
             self.validate_sstable_paths_integrity("invariant_validation") catch |err| {
-                if (!(false)) std.debug.panic("SSTableManager path integrity validation failed: {}", .{err});
+                std.debug.panic("SSTableManager path integrity validation failed: {}", .{err});
             };
             self.validate_arena_coordinator_stability();
             self.validate_compaction_manager_coherence();
@@ -908,18 +911,19 @@ pub const SSTableManager = struct {
         std.debug.assert(builtin.mode == .Debug);
 
         // Arena coordinator corruption indicates struct copying which breaks allocation interface
-        if (!(@intFromPtr(self.arena_coordinator) != 0)) std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
+        if (@intFromPtr(self.arena_coordinator) == 0)
+            std.debug.panic("Arena coordinator pointer is null - struct copying corruption", .{});
 
         // Minimal allocation test verifies coordinator hasn't been corrupted by struct copying
         const test_alloc = self.arena_coordinator.alloc(u8, 1) catch {
-            if (!(false)) std.debug.panic("SSTableManager arena coordinator non-functional - corruption detected", .{});
+            std.debug.panic("SSTableManager arena coordinator non-functional - corruption detected", .{});
             return;
         };
         _ = test_alloc; // Arena will clean up during next reset
 
         // Validate backing allocator is functional
         const test_backing_alloc = self.backing_allocator.alloc(u8, 1) catch {
-            if (!(false)) std.debug.panic("SSTableManager backing allocator non-functional", .{});
+            std.debug.panic("SSTableManager backing allocator non-functional", .{});
             return;
         };
         defer self.backing_allocator.free(test_backing_alloc);
@@ -930,7 +934,7 @@ pub const SSTableManager = struct {
         std.debug.assert(builtin.mode == .Debug);
 
         // Compaction manager corruption would break background maintenance operations
-        if (!(@intFromPtr(&self.compaction_manager) != 0)) std.debug.panic("CompactionManager pointer corruption", .{});
+        if (@intFromPtr(&self.compaction_manager) == 0) std.debug.panic("CompactionManager pointer corruption", .{});
 
         // Excessive SSTable count indicates counter corruption or runaway file creation
         const current_sstable_count = @as(u32, @intCast(self.sstable_paths.items.len));

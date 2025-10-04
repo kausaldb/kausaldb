@@ -340,9 +340,9 @@ pub const WALEntryStream = struct {
 // Compile-time validation of buffer relationships
 comptime {
     // Process buffer must accommodate multiple headers to prevent thrashing
-    if (!(PROCESS_BUFFER_SIZE >= WAL_HEADER_SIZE * 4)) @compileError("Process buffer too small for multiple headers");
-    if (!(READ_BUFFER_SIZE >= WAL_HEADER_SIZE * 4)) @compileError("Read buffer too small for multiple headers");
-    if (!(PROCESS_BUFFER_SIZE >= READ_BUFFER_SIZE)) @compileError("Process buffer must be at least as large as read buffer");
+    if (PROCESS_BUFFER_SIZE < WAL_HEADER_SIZE * 4) @compileError("Process buffer too small for multiple headers");
+    if (READ_BUFFER_SIZE < WAL_HEADER_SIZE * 4) @compileError("Read buffer too small for multiple headers");
+    if (PROCESS_BUFFER_SIZE < READ_BUFFER_SIZE) @compileError("Process buffer must be at least as large as read buffer");
 }
 
 test "WALEntryStream initialization" {

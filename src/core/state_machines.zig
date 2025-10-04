@@ -53,12 +53,12 @@ pub const FileState = enum {
     pub fn transition(self: *FileState, next: FileState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                if (!(false)) std.debug.panic("Invalid file state transition: {} -> {}", .{ self.*, next });
+                std.debug.panic("Invalid file state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("File state transition: {} -> {}", .{ self.*, next });
         } else {
             // Release builds still validate critical transitions
-            if (!(self.* != .deleted)) std.debug.panic("File operation on deleted file", .{});
+            if (self.* == .deleted) std.debug.panic("File operation on deleted file", .{});
         }
         self.* = next;
     }
@@ -116,7 +116,7 @@ pub const ConnectionState = enum {
     pub fn transition(self: *ConnectionState, next: ConnectionState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                if (!(false)) std.debug.panic("Invalid connection state transition: {} -> {}", .{ self.*, next });
+                std.debug.panic("Invalid connection state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Connection state transition: {} -> {}", .{ self.*, next });
         }
@@ -176,7 +176,7 @@ pub const StorageState = enum {
     pub fn transition(self: *StorageState, next: StorageState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                if (!(false)) std.debug.panic("Invalid storage state transition: {} -> {}", .{ self.*, next });
+                std.debug.panic("Invalid storage state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Storage state transition: {} -> {}", .{ self.*, next });
         }
@@ -224,7 +224,7 @@ pub const QueryState = enum {
     pub fn transition(self: *QueryState, next: QueryState) void {
         if (builtin.mode == .Debug) {
             if (!self.can_transition_to(next)) {
-                if (!(false)) std.debug.panic("Invalid query state transition: {} -> {}", .{ self.*, next });
+                std.debug.panic("Invalid query state transition: {} -> {}", .{ self.*, next });
             }
             log.debug("Query state transition: {} -> {}", .{ self.*, next });
         }
@@ -264,7 +264,9 @@ pub fn validate_state_machine(comptime StateEnum: type) void {
                     } else {
                         // Most state machines should not allow self-transitions
                         if (state_value.can_transition_to(state_value)) {
-                            @compileError(@typeName(StateEnum) ++ " state " ++ field.name ++ " allows self-transition (add ALLOW_SELF_TRANSITIONS if intended)");
+                            @compileError(
+                                @typeName(StateEnum) ++ " state " ++ field.name ++ " allows self-transition",
+                            );
                         }
                     }
                 }

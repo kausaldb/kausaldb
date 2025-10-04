@@ -20,13 +20,13 @@ const log = std.log.scoped(.cli);
 /// CLI coordinator managing command execution lifecycle
 pub const CLI = struct {
     allocator: std.mem.Allocator,
-    config: CLIConfig,
+    config: Config,
     client: ?Client,
     render_ctx: RenderContext,
     stdout_buffer: [4096]u8,
 
     /// CLI configuration
-    pub const CLIConfig = struct {
+    pub const Config = struct {
         server_host: []const u8 = "127.0.0.1",
         server_port: u16 = 3838,
         timeout_ms: u32 = 5000,
@@ -34,7 +34,7 @@ pub const CLI = struct {
     };
 
     /// Initialize CLI coordinator (cold init, no I/O)
-    pub fn init(allocator: std.mem.Allocator, config: CLIConfig) CLI {
+    pub fn init(allocator: std.mem.Allocator, config: Config) CLI {
         var cli = CLI{
             .allocator = allocator,
             .config = config,
@@ -73,8 +73,6 @@ pub const CLI = struct {
             .sync => |cmd| try self.execute_sync(cmd),
         }
     }
-
-    // === Local Commands (No Server Required) ===
 
     fn execute_help(self: *CLI, cmd: parser.HelpCommand) !void {
         try renderer.render_help(&self.render_ctx, cmd.topic);
@@ -122,7 +120,10 @@ pub const CLI = struct {
                 }) catch |err| {
                     const msg = try std.fmt.allocPrint(self.allocator, "Failed to stop server: {}", .{err});
                     defer self.allocator.free(msg);
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(false, msg),
+                    );
                     try self.render_ctx.flush();
                     return;
                 };
@@ -130,10 +131,16 @@ pub const CLI = struct {
                 defer self.allocator.free(result.stderr);
 
                 if (result.term.Exited == 0) {
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(true, "Server stopped"));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(true, "Server stopped"),
+                    );
                 } else {
                     const msg = if (result.stderr.len > 0) result.stderr else "Failed to stop server";
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(false, msg),
+                    );
                 }
                 try self.render_ctx.flush();
             },
@@ -144,7 +151,10 @@ pub const CLI = struct {
                 }) catch |err| {
                     const msg = try std.fmt.allocPrint(self.allocator, "Failed to restart server: {}", .{err});
                     defer self.allocator.free(msg);
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(false, msg),
+                    );
                     try self.render_ctx.flush();
                     return;
                 };
@@ -152,10 +162,16 @@ pub const CLI = struct {
                 defer self.allocator.free(result.stderr);
 
                 if (result.term.Exited == 0) {
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(true, "Server restarted"));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(true, "Server restarted"),
+                    );
                 } else {
                     const msg = if (result.stderr.len > 0) result.stderr else "Failed to restart server";
-                    try renderer.render_operation_result(&self.render_ctx, protocol.OperationResponse.init(false, msg));
+                    try renderer.render_operation_result(
+                        &self.render_ctx,
+                        protocol.OperationResponse.init(false, msg),
+                    );
                 }
                 try self.render_ctx.flush();
             },
@@ -229,7 +245,11 @@ pub const CLI = struct {
 
         const query = if (cmd.workspace) |workspace| blk: {
             if (type_str.len > 0) {
-                break :blk try std.fmt.allocPrint(self.allocator, "workspace:{s} type:{s} name:{s}", .{ workspace, type_str, cmd.name });
+                break :blk try std.fmt.allocPrint(
+                    self.allocator,
+                    "workspace:{s} type:{s} name:{s}",
+                    .{ workspace, type_str, cmd.name },
+                );
             } else {
                 break :blk try std.fmt.allocPrint(self.allocator, "workspace:{s} name:{s}", .{ workspace, cmd.name });
             }
@@ -276,6 +296,7 @@ pub const CLI = struct {
 
     fn execute_trace(self: *CLI, cmd: parser.TraceCommand) !void {
         if (cmd.format != self.config.output_format) {
+            // Override format if specified
             self.render_ctx.format = cmd.format;
         }
 
@@ -451,7 +472,7 @@ pub fn run() !void {
         std.process.exit(1);
     };
 
-    var cli_config = CLI.CLIConfig{};
+    var cli_config = CLI.Config{};
     if (parse_result.global_options.port) |port| {
         cli_config.server_port = port;
     }
@@ -539,7 +560,7 @@ pub fn run_with_args(args: []const []const u8) !void {
         std.process.exit(1);
     };
 
-    var cli_config = CLI.CLIConfig{};
+    var cli_config = CLI.Config{};
     if (parse_result.global_options.port) |port| {
         cli_config.server_port = port;
     }

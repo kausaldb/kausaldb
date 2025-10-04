@@ -88,9 +88,15 @@ pub const CorruptionTracker = struct {
         }
 
         if (self.consecutive_failures > threshold) {
-            log.err("SYSTEMATIC CORRUPTION: {s} hit {} consecutive failures (threshold: {})", .{ context, self.consecutive_failures, threshold });
+            log.err(
+                "SYSTEMATIC CORRUPTION: {s} hit {} consecutive failures (threshold: {})",
+                .{ context, self.consecutive_failures, threshold },
+            );
             log.err("This indicates unrecoverable system state - terminating to prevent data corruption", .{});
-            if (!(false)) std.debug.panic("WAL systematic corruption detected in {s}: {} consecutive failures - data integrity compromised", .{ context, self.consecutive_failures });
+            std.debug.panic(
+                "WAL systematic corruption detected in {s}: {} consecutive failures - data integrity compromised",
+                .{ context, self.consecutive_failures },
+            );
         }
     }
 
@@ -98,7 +104,10 @@ pub const CorruptionTracker = struct {
     pub fn validate_file_magic(self: *Self, magic: u32, file_path: []const u8) void {
         if (magic != WAL_MAGIC_NUMBER) {
             self.record_failure("header_validation");
-            if (!(false)) std.debug.panic("WAL header magic corruption in {s}: expected 0x{X}, got 0x{X} - filesystem corruption", .{ file_path, WAL_MAGIC_NUMBER, magic });
+            std.debug.panic(
+                "WAL header magic corruption in {s}: expected 0x{X}, got 0x{X} - filesystem corruption",
+                .{ file_path, WAL_MAGIC_NUMBER, magic },
+            );
         } else {
             self.record_success();
         }
@@ -108,7 +117,10 @@ pub const CorruptionTracker = struct {
     pub fn validate_entry_magic(self: *Self, magic: u32, entry_offset: u64) void {
         if (magic != WAL_ENTRY_MAGIC) {
             self.record_failure("entry_validation");
-            if (!(false)) std.debug.panic("WAL entry magic corruption at offset {}: expected 0x{X}, got 0x{X} - data corruption", .{ entry_offset, WAL_ENTRY_MAGIC, magic });
+            std.debug.panic(
+                "WAL entry magic corruption at offset {}: expected 0x{X}, got 0x{X} - data corruption",
+                .{ entry_offset, WAL_ENTRY_MAGIC, magic },
+            );
         } else {
             self.record_success();
         }

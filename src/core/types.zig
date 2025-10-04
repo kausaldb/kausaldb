@@ -17,10 +17,15 @@ const std = @import("std");
 pub const BlockId = struct {
     bytes: [16]u8,
 
+    /// Global counter for deterministic BlockId generation.
+    /// Ensures reproducible test behavior and maintains architectural determinism.
+    /// Single-threaded design eliminates need for synchronization.
+    var generation_counter: u64 = 1;
+
     const SIZE = 16;
 
     comptime {
-        if (!(@sizeOf(BlockId) == SIZE)) @compileError("BlockId must be 16 bytes");
+        if (@sizeOf(BlockId) != SIZE) @compileError("BlockId must be 16 bytes");
     }
 
     /// Create BlockId from raw bytes.
@@ -80,11 +85,6 @@ pub const BlockId = struct {
         return std.mem.order(u8, &self.bytes, &other.bytes);
     }
 
-    /// Global counter for deterministic BlockId generation.
-    /// Ensures reproducible test behavior and maintains architectural determinism.
-    /// Single-threaded design eliminates need for synchronization.
-    var generation_counter: u64 = 1;
-
     /// Generate a deterministic BlockId for testing purposes.
     /// Uses simple counter to ensure unique, reproducible IDs across test runs.
     /// This maintains KausalDB's core principle of deterministic behavior.
@@ -118,7 +118,7 @@ pub const EdgeType = enum(u16) {
     calls_function = 11, // A calls free function B (function invocation relationship)
 
     comptime {
-        if (!(@sizeOf(EdgeType) == 2)) @compileError("EdgeType must be 2 bytes (u16)");
+        if (@sizeOf(EdgeType) != 2) @compileError("EdgeType must be 2 bytes (u16)");
     }
 
     /// Convert EdgeType to u16 for serialization.
@@ -169,10 +169,13 @@ pub const ContextBlock = struct {
         pub const SIZE: usize = 64;
 
         comptime {
-            if (!(@sizeOf(BlockHeader) == SIZE)) @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
-            if (!(BlockHeader.SIZE == @sizeOf(BlockHeader))) @compileError("BlockHeader.SIZE constant must match actual struct size");
-            if (!(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
-                @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64)) @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
+            if (@sizeOf(BlockHeader) != SIZE)
+                @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
+            if (BlockHeader.SIZE != @sizeOf(BlockHeader))
+                @compileError("BlockHeader.SIZE constant must match actual struct size");
+            if (@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
+                @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 != 64)
+                @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
         }
 
         /// Serialize block header to binary buffer in little-endian format.
@@ -255,10 +258,13 @@ pub const ContextBlock = struct {
 
     // Compile-time guarantees for on-disk format integrity
     comptime {
-        if (!(@sizeOf(BlockHeader) == 64)) @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
-        if (!(BlockHeader.SIZE == @sizeOf(BlockHeader))) @compileError("BlockHeader.SIZE constant must match actual struct size");
-        if (!(@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
-            @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 == 64)) @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
+        if (@sizeOf(BlockHeader) != 64)
+            @compileError("BlockHeader must be exactly 64 bytes for on-disk format compatibility");
+        if (BlockHeader.SIZE != @sizeOf(BlockHeader))
+            @compileError("BlockHeader.SIZE constant must match actual struct size");
+        if (@sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) + 16 +
+            @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) + @sizeOf(u64) + @sizeOf(u32) + 12 != 64)
+            @compileError("BlockHeader field sizes must sum to exactly 64 bytes");
     }
 
     /// Calculate the total serialized size for this block.
@@ -479,7 +485,10 @@ pub const ParsedBlock = struct {
         if (header.metadata_json_len > 10 * 1024 * 1024) return error.InvalidMetadataLength;
         if (header.content_len > 100 * 1024 * 1024) return error.InvalidContentLength;
 
-        const total_size = ContextBlock.BlockHeader.SIZE + header.source_uri_len + header.metadata_json_len + header.content_len;
+        const total_size = ContextBlock.BlockHeader.SIZE +
+            header.source_uri_len +
+            header.metadata_json_len +
+            header.content_len;
         if (buffer.len < total_size) return error.IncompleteData;
 
         // Validate checksum to detect data corruption
@@ -543,20 +552,17 @@ pub const ParsedBlock = struct {
 
 /// Graph edge representing a typed relationship between two Context Blocks.
 pub const GraphEdge = struct {
-    /// Source block ID
     source_id: BlockId,
-
-    /// Target block ID
     target_id: BlockId,
-
-    /// Type of relationship
     edge_type: EdgeType,
 
     pub const SERIALIZED_SIZE: usize = 40; // 16 (source_id) + 16 (target_id) + 2 (edge_type) + 6 (reserved)
 
     comptime {
-        if (!(SERIALIZED_SIZE == 40)) @compileError("GraphEdge SERIALIZED_SIZE must be 40 bytes (16 + 16 + 2 + 6 reserved)");
-        if (!(16 + 16 + 2 + 6 == SERIALIZED_SIZE)) @compileError("GraphEdge field sizes plus reserved bytes must equal SERIALIZED_SIZE");
+        if (SERIALIZED_SIZE != 40)
+            @compileError("GraphEdge SERIALIZED_SIZE must be 40 bytes (16 + 16 + 2 + 6 reserved)");
+        if (16 + 16 + 2 + 6 != SERIALIZED_SIZE)
+            @compileError("GraphEdge field sizes plus reserved bytes must equal SERIALIZED_SIZE");
     }
 
     /// Serialize this GraphEdge to a buffer.

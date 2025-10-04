@@ -14,7 +14,7 @@ const GraphEdge = types.GraphEdge;
 const EdgeType = types.EdgeType;
 
 comptime {
-    if (!(@sizeOf(MessageHeader) == 16)) @compileError("MessageHeader size mismatch");
+    if (@sizeOf(MessageHeader) != 16) @compileError("MessageHeader size mismatch");
 }
 
 /// Protocol version for compatibility checking

@@ -25,7 +25,7 @@ pub const FileHandleId = struct {
 
     /// Create new file handle ID with generation counter.
     pub fn init(id: u32, generation: u32) FileHandleId {
-        if (!(id != std.math.maxInt(u32))) std.debug.panic("Invalid file handle ID: {}", .{id});
+        if (id == std.math.maxInt(u32)) std.debug.panic("Invalid file handle ID: {}", .{id});
         return FileHandleId{ .id = id, .generation = generation };
     }
 
@@ -96,8 +96,8 @@ pub const TypedFileHandle = struct {
     /// Create new typed file handle.
     pub fn init(handle_id: FileHandleId, path: []const u8, access_mode: FileAccessMode) TypedFileHandle {
         if (!(handle_id.is_valid())) std.debug.panic("Invalid file handle ID", .{});
-        if (!(path.len > 0)) std.debug.panic("Empty file path", .{});
-        if (!(path.len <= 4096)) std.debug.panic("File path too long: {}", .{path.len});
+        if (path.len == 0) std.debug.panic("Empty file path", .{});
+        if (path.len > 4096) std.debug.panic("File path too long: {}", .{path.len});
 
         return TypedFileHandle{
             .id = handle_id,
@@ -430,7 +430,9 @@ pub const FileOperations = struct {
 
         // Validate seek bounds at FileOperations layer
         if (offset > handle.file_size) {
-            return FileOperationResult{ .error_out_of_bounds = .{ .requested = offset, .available = handle.file_size } };
+            return FileOperationResult{
+                .error_out_of_bounds = .{ .requested = offset, .available = handle.file_size },
+            };
         }
 
         handle.seek(offset) catch |err| switch (err) {
@@ -485,12 +487,12 @@ pub const FileInfo = struct {
 
 // Compile-time validation
 comptime {
-    if (!(@sizeOf(FileHandleId) <= 16)) @compileError("FileHandleId should be compact");
-    if (!(@sizeOf(TypedFileHandle) <= 128)) @compileError("TypedFileHandle should be reasonably sized");
+    if (@sizeOf(FileHandleId) > 16) @compileError("FileHandleId should be compact");
+    if (@sizeOf(TypedFileHandle) > 128) @compileError("TypedFileHandle should be reasonably sized");
 
     // Validate that file access modes cover all cases
     const mode_count = @typeInfo(FileAccessMode).@"enum".fields.len;
-    if (!(mode_count == 3)) @compileError("FileAccessMode should have exactly 3 variants");
+    if (mode_count != 3) @compileError("FileAccessMode should have exactly 3 variants");
 }
 
 // Tests

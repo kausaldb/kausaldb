@@ -24,7 +24,6 @@ pub const GenerationError = error{
 /// Arena coordinator providing stable allocation interface.
 /// Remains valid even when underlying arena is reset or struct is copied.
 /// All allocation methods dispatch to current arena state, eliminating temporal coupling.
-/// CRITICAL: Always pass ArenaCoordinator by pointer to prevent struct copying corruption.
 pub const ArenaCoordinator = struct {
     /// Pointer to arena - never becomes invalid because it's a stable reference
     arena: *std.heap.ArenaAllocator,
@@ -158,7 +157,11 @@ pub const ArenaCoordinator = struct {
     pub fn validate_coordinator(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
             // Safety: Converting pointer to integer for null pointer validation
-            if (!(@intFromPtr(self.arena) != 0)) std.debug.panic("ArenaCoordinator arena pointer is null - coordinator corruption", .{});
+            if (@intFromPtr(self.arena) == 0)
+                std.debug.panic(
+                    "ArenaCoordinator arena pointer is null - coordinator corruption",
+                    .{},
+                );
         }
     }
 
@@ -191,18 +194,18 @@ pub const ArenaCoordinator = struct {
         if (comptime builtin.mode == .Debug) {
             // Basic pointer validation
             // Safety: Converting pointers to integers for null pointer validation
-            if (!(@intFromPtr(self) != 0)) std.debug.panic("ArenaCoordinator self pointer is null", .{});
-            if (!(@intFromPtr(self.arena) != 0)) std.debug.panic("ArenaCoordinator arena pointer is null", .{});
+            if (@intFromPtr(self) == 0) std.debug.panic("ArenaCoordinator self pointer is null", .{});
+            if (@intFromPtr(self.arena) == 0) std.debug.panic("ArenaCoordinator arena pointer is null", .{});
 
             // Arena alignment validation
             const arena_addr = @intFromPtr(self.arena);
             const arena_align = @alignOf(std.heap.ArenaAllocator);
-            if (!(arena_addr % arena_align == 0)) std.debug.panic("Arena pointer misaligned: 0x{x}", .{arena_addr});
+            if (arena_addr % arena_align != 0) std.debug.panic("Arena pointer misaligned: 0x{x}", .{arena_addr});
 
             // Coordinator address validation
             const coord_addr = @intFromPtr(self);
             const coord_align = @alignOf(ArenaCoordinator);
-            if (!(coord_addr % coord_align == 0)) std.debug.panic("Coordinator pointer misaligned: 0x{x}", .{coord_addr});
+            if (coord_addr % coord_align != 0) std.debug.panic("Coordinator pointer misaligned: 0x{x}", .{coord_addr});
         }
     }
 
@@ -253,8 +256,11 @@ pub fn TypedStorageCoordinatorType(comptime StorageEngineType: type) type {
         /// Debug-only validation to catch use-after-free and corruption.
         pub fn validate_coordinator(self: Self) void {
             if (comptime builtin.mode == .Debug) {
-                if (!(@intFromPtr(self.storage_engine) != 0)) std.debug.panic("Storage coordinator has null engine reference", .{});
-                // Additional validation can be added by implementers
+                if (@intFromPtr(self.storage_engine) == 0)
+                    std.debug.panic(
+                        "Storage coordinator has null engine reference",
+                        .{},
+                    );
             }
         }
     };
@@ -330,7 +336,11 @@ pub const ArenaAllocationTracker = struct {
     /// Logs total allocations, peak memory usage, and detects potential leaks.
     pub fn report_statistics(self: *const ArenaAllocationTracker) void {
         if (comptime builtin.mode == .Debug) {
-            log.debug("Arena stats: {} allocations, peak {} bytes, current {} bytes", .{ self.total_allocations, self.peak_memory, self.current_memory });
+            log.debug("Arena stats: {} allocations, peak {} bytes, current {} bytes", .{
+                self.total_allocations,
+                self.peak_memory,
+                self.current_memory,
+            });
 
             if (self.current_memory > 0) {
                 log.warn("Potential arena leaks: {} bytes still allocated", .{self.current_memory});
@@ -379,6 +389,7 @@ test "arena coordinator slice duplication" {
     const duplicated = try coordinator.duplicate_slice(u8, original);
 
     try testing.expectEqualStrings(original, duplicated);
+
     // Verify different memory locations
     try testing.expect(@intFromPtr(original.ptr) != @intFromPtr(duplicated.ptr));
 }

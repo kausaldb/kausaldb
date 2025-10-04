@@ -33,7 +33,9 @@ pub fn BoundedArrayType(
         @compileError("bounded_array_type max_size must be greater than 0");
     }
     if (max_size > 1048576) {
-        @compileError("bounded_array_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 1048576)");
+        @compileError(
+            "bounded_array_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 1048576)",
+        );
     }
 
     return struct {
@@ -78,7 +80,11 @@ pub fn BoundedArrayType(
         /// Get element at index with bounds checking.
         /// Panics if index out of bounds.
         pub fn at(self: *const BoundedArray, index: usize) T {
-            if (!(index < self.len)) std.debug.panic("bounded_array_type index out of bounds: {} >= {}", .{ index, self.len });
+            if (index >= self.len)
+                std.debug.panic(
+                    "bounded_array_type index out of bounds: {} >= {}",
+                    .{ index, self.len },
+                );
             return self.items[index];
         }
 
@@ -100,9 +106,12 @@ pub fn BoundedArrayType(
             }
 
             const item = self.items[index];
-
             if (index < self.len - 1) {
-                stdx.copy_left(T, self.items[index .. self.len - 1], self.items[index + 1 .. self.len]);
+                stdx.copy_left(
+                    T,
+                    self.items[index .. self.len - 1],
+                    self.items[index + 1 .. self.len],
+                );
             }
 
             self.len -= 1;
@@ -224,7 +233,9 @@ pub fn BoundedHashMapType(comptime K: type, comptime V: type, comptime max_size:
         @compileError("bounded_hash_map_type max_size must be greater than 0");
     }
     if (max_size > 32768) {
-        @compileError("bounded_hash_map_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 32768)");
+        @compileError(
+            "bounded_hash_map_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 32768)",
+        );
     }
 
     // Hash table load factor of 66% balances memory efficiency with probe distance
@@ -474,7 +485,9 @@ pub fn BoundedQueueType(comptime T: type, comptime max_size: usize) type {
         @compileError("bounded_queue_type max_size must be greater than 0");
     }
     if (max_size > 65536) {
-        @compileError("bounded_queue_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 65536)");
+        @compileError(
+            "bounded_queue_type max_size too large: " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (max: 65536)",
+        );
     }
 
     return struct {
@@ -608,17 +621,15 @@ pub fn BoundedGraphBuilderType(comptime max_nodes: usize, comptime max_edges: us
 
         /// Add node to graph with deduplication
         pub fn add_node(self: *Self, node_id: [16]u8) !void {
-            // Deduplication handled by HashMap - put returns existing entry if present
+            // Deduplication handled by HashMap, put returns existing entry if present
             try self.nodes.put(node_id, {});
         }
 
         /// Add edge to graph with validation
         pub fn add_edge(self: *Self, source: [16]u8, target: [16]u8, edge_type: u8) !void {
-            // Ensure both nodes exist in graph
             if (self.nodes.get(source) == null) return error.SourceNodeNotFound;
             if (self.nodes.get(target) == null) return error.TargetNodeNotFound;
 
-            // Check for duplicate edges
             for (self.edges.slice()) |existing| {
                 if (std.mem.eql(u8, &existing.source, &source) and
                     std.mem.eql(u8, &existing.target, &target) and
@@ -719,14 +730,20 @@ pub const ArenaCoordinator = struct {
 pub fn validate_bounded_usage(comptime T: type, comptime max_size: usize, comptime usage_context: []const u8) void {
     // Validate reasonable size limits
     if (max_size > 65536) {
-        @compileError("Bounded collection too large in " ++ usage_context ++ ": " ++ std.fmt.comptimePrint("{}", .{max_size}) ++ " (consider using dynamic allocation)");
+        @compileError(
+            "Bounded collection too large in " ++ usage_context ++ ": " ++ std.fmt.comptimePrint("{}", .{max_size}),
+        );
     }
 
     // Validate type size is reasonable
     const item_size = @sizeOf(T);
     const total_size = item_size * max_size;
     if (total_size > 1024 * 1024) { // 1MB stack allocation limit
-        @compileError("Bounded collection memory usage too large in " ++ usage_context ++ ": " ++ std.fmt.comptimePrint("{} bytes", .{total_size}) ++ " (consider reducing max_size or using heap allocation)");
+        @compileError(
+            "Bounded collection memory usage too large in " ++
+                usage_context ++ ": " ++
+                std.fmt.comptimePrint("{} bytes", .{total_size}),
+        );
     }
 }
 
@@ -737,9 +754,9 @@ comptime {
     const TestQueue = BoundedQueueType(u8, 20);
     const TestMap = BoundedHashMapType(u32, []const u8, 16);
 
-    if (!(@sizeOf(TestArray) > 0)) @compileError("bounded_array_type must have non-zero size");
-    if (!(@sizeOf(TestQueue) > 0)) @compileError("bounded_queue_type must have non-zero size");
-    if (!(@sizeOf(TestMap) > 0)) @compileError("bounded_hash_map_type must have non-zero size");
+    if (@sizeOf(TestArray) == 0) @compileError("bounded_array_type must have non-zero size");
+    if (@sizeOf(TestQueue) == 0) @compileError("bounded_queue_type must have non-zero size");
+    if (@sizeOf(TestMap) == 0) @compileError("bounded_hash_map_type must have non-zero size");
 }
 
 // Tests

@@ -291,8 +291,11 @@ pub const WAL = struct {
                     // Only log corruption errors when verification is enabled
                     // During corruption testing (disable_write_verification=true), these errors are expected
                     if (!self.disable_write_verification) {
-                        log.err("WAL write corruption detected: written header differs from buffer (disable_write_verification={})", .{self.disable_write_verification});
-                        log.err("Expected: checksum=0x{X}, type={}, payload_size={}", .{ entry.checksum, @intFromEnum(entry.entry_type), entry.payload_size });
+                        log.err("WAL write corruption detected: written header differs from buffer", .{});
+                        log.err(
+                            "Expected: checksum=0x{X}, type={}, payload_size={}",
+                            .{ entry.checksum, @intFromEnum(entry.entry_type), entry.payload_size },
+                        );
                         log.err("Verified: checksum=0x{X}, type={}, payload_size={}", .{ verify_checksum, verify_type, verify_payload_size });
                     }
                     return WALError.CorruptedEntry;

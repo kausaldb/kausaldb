@@ -156,21 +156,24 @@ pub const Client = struct {
     fn validate_status_response(status: *const protocol.StatusResponse) void {
         const workspaces = status.workspaces_slice();
 
-        if (!(workspaces.len <= protocol.MAX_WORKSPACES_PER_STATUS)) std.debug.panic(
-            "Client: Invalid workspace count: {}",
-            .{workspaces.len},
-        );
+        if (workspaces.len > protocol.MAX_WORKSPACES_PER_STATUS)
+            std.debug.panic(
+                "Client: Invalid workspace count: {}",
+                .{workspaces.len},
+            );
         for (workspaces, 0..) |*workspace, i| {
             const sync_status_raw = @intFromEnum(workspace.sync_status);
-            if (!(sync_status_raw <= 3)) std.debug.panic(
-                "Client: Corrupted sync_status in workspace {}: {}",
-                .{ i, sync_status_raw },
-            );
+            if (sync_status_raw > 3)
+                std.debug.panic(
+                    "Client: Corrupted sync_status in workspace {}: {}",
+                    .{ i, sync_status_raw },
+                );
             const name = workspace.name_text();
-            if (!(name.len > 0)) std.debug.panic(
-                "Client: Empty workspace name at index {}",
-                .{i},
-            );
+            if (name.len == 0)
+                std.debug.panic(
+                    "Client: Empty workspace name at index {}",
+                    .{i},
+                );
         }
     }
 
@@ -178,16 +181,16 @@ pub const Client = struct {
     fn validate_find_response(response: *const protocol.FindResponse) void {
         const blocks = response.blocks_slice();
 
-        if (!(blocks.len <= protocol.MAX_BLOCKS_PER_RESPONSE)) std.debug.panic(
+        if (blocks.len > protocol.MAX_BLOCKS_PER_RESPONSE) std.debug.panic(
             "Client: Invalid block count: {}",
             .{blocks.len},
         );
         for (blocks, 0..) |*block, i| {
-            if (!(block.uri_len <= 256)) std.debug.panic(
+            if (block.uri_len > 256) std.debug.panic(
                 "Client: Corrupted uri_len in block {}: {}",
                 .{ i, block.uri_len },
             );
-            if (!(block.content_preview_len <= 256)) std.debug.panic(
+            if (block.content_preview_len > 256) std.debug.panic(
                 "Client: Corrupted content_preview_len in block {}: {}",
                 .{ i, block.content_preview_len },
             );

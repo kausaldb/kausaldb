@@ -75,13 +75,19 @@ fn DebugTrackerType(comptime T: type) type {
             log.info("  Currently allocated: {}", .{self.current_allocations.items.len});
 
             if (self.current_allocations.items.len > 0) {
-                log.warn("Potential leaks in {s} pool: {} objects", .{ @typeName(T), self.current_allocations.items.len });
+                log.warn(
+                    "Potential leaks in {s} pool: {} objects",
+                    .{ @typeName(T), self.current_allocations.items.len },
+                );
             }
         }
 
         fn report_leaks_only(self: *const Self) void {
             if (self.current_allocations.items.len > 0) {
-                log.warn("Pool[{s}] leak detected: {} objects still allocated", .{ @typeName(T), self.current_allocations.items.len });
+                log.warn(
+                    "Pool[{s}] leak detected: {} objects still allocated",
+                    .{ @typeName(T), self.current_allocations.items.len },
+                );
             }
         }
 
@@ -112,7 +118,11 @@ pub fn ObjectPoolType(comptime T: type) type {
         /// Initialize object pool with pre-allocated capacity.
         /// All objects are allocated upfront to eliminate runtime allocation.
         pub fn init(backing_allocator: std.mem.Allocator, pool_capacity: u32) !Self {
-            if (!(pool_capacity > 0 and pool_capacity <= 65536)) std.debug.panic("Pool capacity must be 1-65536, got {}", .{pool_capacity});
+            if (pool_capacity == 0 or pool_capacity > 65536)
+                std.debug.panic(
+                    "Pool capacity must be 1-65536, got {}",
+                    .{pool_capacity},
+                );
 
             var self = Self{
                 .backing_allocator = backing_allocator,
@@ -215,9 +225,7 @@ pub fn ObjectPoolType(comptime T: type) type {
             if (comptime builtin.mode == .Debug) {
                 const node: *PoolNode = @alignCast(@fieldParentPtr("item", item));
                 const node_addr = @intFromPtr(node);
-
-                // Note: a more sophisticated validation could walk all nodes
-                if (!(node_addr != 0)) std.debug.panic("Attempted to release null pointer to pool", .{});
+                if (node_addr == 0) std.debug.panic("Attempted to release null pointer to pool", .{});
             }
         }
 
@@ -269,7 +277,10 @@ pub fn ObjectPoolType(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             if (comptime builtin.mode == .Debug) {
                 if (self.used_count > 0) {
-                    log.warn("Pool[{s}] deinit with {} active objects - potential leaks", .{ @typeName(T), self.used_count });
+                    log.warn(
+                        "Pool[{s}] deinit with {} active objects - potential leaks",
+                        .{ @typeName(T), self.used_count },
+                    );
                 }
                 self.debug_tracker.deinit();
             }
@@ -383,12 +394,14 @@ pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
             const base_addr = @intFromPtr(&self.items[0]);
             const item_size = @sizeOf(T);
 
-            if (!(item_addr >= base_addr)) std.debug.panic("Object not from this stack pool", .{});
-            if (!((item_addr - base_addr) % item_size == 0)) std.debug.panic("Misaligned object in stack pool", .{});
+            if (item_addr < base_addr) std.debug.panic("Object not from this stack pool", .{});
+            if ((item_addr - base_addr) % item_size != 0)
+                std.debug.panic("Misaligned object in stack pool", .{});
 
             const index = (item_addr - base_addr) / item_size;
-            if (!(index < capacity)) std.debug.panic("Object index out of bounds: {}", .{index});
-            if (!(self.used_mask.is_set(index))) std.debug.panic("Attempted to release already-free object at index {}", .{index});
+            if (index >= capacity) std.debug.panic("Object index out of bounds: {}", .{index});
+            if (!(self.used_mask.is_set(index)))
+                std.debug.panic("Attempted to release already-free object at index {}", .{index});
 
             self.used_mask.unset(index);
             self.next_hint = @intCast(index); // Prefer recently freed slots
@@ -407,10 +420,6 @@ pub fn StackPoolType(comptime T: type, comptime capacity: u32) type {
         }
     };
 }
-
-// Note: Specific pool implementations created at usage sites to avoid circular imports
-
-// Tests
 
 const testing = std.testing;
 
@@ -596,6 +605,7 @@ test "pool performance characteristics" {
 
     // Verify performance (should be very fast with pooling)
     const avg_ns_per_op = @as(f64, @floatFromInt(duration_ns)) / @as(f64, @floatFromInt(iterations));
+
     // In optimized builds, timing can be unreliable in CI environments
     if (builtin.mode == .Debug) {
         try testing.expect(avg_ns_per_op < 10000.0); // Less than 10μs per operation

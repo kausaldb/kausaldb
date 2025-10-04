@@ -210,13 +210,16 @@ pub const SSTable = struct {
         edge_count: u16, // 2 bytes: Number of edges (max 65K per SSTable)
 
         comptime {
-            if (!(@sizeOf(Header) == 64)) @compileError("SSTable Header must be exactly 64 bytes for cache-aligned performance");
-            if (!(HEADER_SIZE == @sizeOf(Header))) @compileError("HEADER_SIZE constant must match actual Header struct size");
-            if (!(4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u64) +
+            if (@sizeOf(Header) != 64)
+                @compileError("SSTable Header must be exactly 64 bytes for cache-aligned performance");
+            if (HEADER_SIZE != @sizeOf(Header))
+                @compileError("HEADER_SIZE constant must match actual Header struct size");
+            if (4 + @sizeOf(u16) + @sizeOf(u16) + @sizeOf(u64) + @sizeOf(u64) +
                 @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u64) + @sizeOf(u32) + @sizeOf(u32) +
-                @sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) == 64)) @compileError(
-                "SSTable Header field sizes must sum to exactly 64 bytes",
-            );
+                @sizeOf(u32) + @sizeOf(u16) + @sizeOf(u16) != 64)
+                @compileError(
+                    "SSTable Header field sizes must sum to exactly 64 bytes",
+                );
         }
 
         /// Serialize SSTable header to binary format for on-disk storage
@@ -903,10 +906,11 @@ pub const SSTable = struct {
 
         for (self.index.items[0 .. self.index.items.len - 1], self.index.items[1..]) |current, next| {
             const order = std.mem.order(u8, &current.block_id.bytes, &next.block_id.bytes);
-            if (!(order == .lt)) std.debug.panic(
-                "SSTable index not properly sorted: {any} >= {any} at positions",
-                .{ current.block_id, next.block_id },
-            );
+            if (order != .lt)
+                std.debug.panic(
+                    "SSTable index not properly sorted: {any} >= {any} at positions",
+                    .{ current.block_id, next.block_id },
+                );
         }
     }
 

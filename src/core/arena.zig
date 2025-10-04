@@ -88,7 +88,16 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
 
                 // Log only large allocations to avoid spam
                 if (@sizeOf(T) > 4096) {
-                    log.debug("{s} arena allocated large {s} (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), @sizeOf(T), self.debug_allocation_count, self.debug_total_bytes });
+                    log.debug(
+                        "{s} arena allocated large {s} (size: {}, total: {} objects, {} bytes)",
+                        .{
+                            self.ownership.name(),
+                            @typeName(T),
+                            @sizeOf(T),
+                            self.debug_allocation_count,
+                            self.debug_total_bytes,
+                        },
+                    );
                 }
             }
 
@@ -101,8 +110,8 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
             std.debug.assert(n > 0);
             std.debug.assert(n <= std.math.maxInt(u32));
 
-            if (!(n > 0)) std.debug.panic("Cannot allocate zero-length slice", .{});
-            if (!(n <= std.math.maxInt(u32))) std.debug.panic("Slice too large: {}", .{n});
+            if (n == 0) std.debug.panic("Cannot allocate zero-length slice", .{});
+            if (n > std.math.maxInt(u32)) std.debug.panic("Slice too large: {}", .{n});
 
             const slice = try self.arena.allocator().alloc(T, n);
 
@@ -116,7 +125,17 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
                 // Log only large slice allocations to avoid spam
                 const slice_size = n * @sizeOf(T);
                 if (slice_size > 4096) {
-                    log.debug("{s} arena allocated large {s}[{}] (size: {}, total: {} objects, {} bytes)", .{ self.ownership.name(), @typeName(T), n, slice_size, self.debug_allocation_count, self.debug_total_bytes });
+                    log.debug(
+                        "{s} arena allocated large {s}[{}] (size: {}, total: {} objects, {} bytes)",
+                        .{
+                            self.ownership.name(),
+                            @typeName(T),
+                            n,
+                            slice_size,
+                            self.debug_allocation_count,
+                            self.debug_total_bytes,
+                        },
+                    );
                 }
             }
 
@@ -144,7 +163,10 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// This is the primary cleanup mechanism for bulk deallocation.
         pub fn reset(self: *Arena) void {
             if (builtin.mode == .Debug) {
-                log.debug("{s} arena reset: freed {} objects, {} bytes", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
+                log.debug(
+                    "{s} arena reset: freed {} objects, {} bytes",
+                    .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes },
+                );
                 self.debug_allocation_count = 0;
                 self.debug_total_bytes = 0;
             }
@@ -157,7 +179,10 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         pub fn deinit(self: *Arena) void {
             if (builtin.mode == .Debug) {
                 if (self.debug_allocation_count > 0) {
-                    log.warn("{s} arena deinit with {} unfreed objects ({} bytes) - potential leak", .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes });
+                    log.warn(
+                        "{s} arena deinit with {} unfreed objects ({} bytes) - potential leak",
+                        .{ self.ownership.name(), self.debug_allocation_count, self.debug_total_bytes },
+                    );
                 }
             }
             self.arena.deinit();
@@ -173,7 +198,11 @@ pub fn TypedArenaType(comptime T: type, comptime Owner: type) type {
         /// Used for runtime validation in debug builds.
         pub fn validate_ownership_access(self: *const Arena, expected: ArenaOwnership) void {
             if (builtin.mode == .Debug) {
-                if (!(self.ownership == expected or expected == .temporary)) std.debug.panic("Ownership violation: {s} arena accessed as {s}", .{ self.ownership.name(), expected.name() });
+                if (self.ownership != expected and expected != .temporary)
+                    std.debug.panic(
+                        "Ownership violation: {s} arena accessed as {s}",
+                        .{ self.ownership.name(), expected.name() },
+                    );
             }
         }
 
@@ -302,7 +331,11 @@ pub fn OwnedPtrType(comptime T: type) type {
         /// Access the underlying pointer with ownership validation.
         pub fn access(self: *const Ptr, expected_ownership: ArenaOwnership) *T {
             if (builtin.mode == .Debug) {
-                if (!(self.ownership == expected_ownership or expected_ownership == .temporary)) std.debug.panic("Ownership violation: {s} pointer accessed as {s}", .{ self.ownership.name(), expected_ownership.name() });
+                if (self.ownership != expected_ownership and expected_ownership != .temporary)
+                    std.debug.panic(
+                        "Ownership violation: {s} pointer accessed as {s}",
+                        .{ self.ownership.name(), expected_ownership.name() },
+                    );
             }
             return self.ptr;
         }
@@ -320,10 +353,13 @@ pub fn OwnedPtrType(comptime T: type) type {
 comptime {
     // Validate ownership enum has reasonable number of variants
     const ownership_count = @typeInfo(ArenaOwnership).@"enum".fields.len;
-    if (!(ownership_count >= 3 and ownership_count <= 16)) @compileError("ArenaOwnership should have 3-16 variants, found " ++ std.fmt.comptimePrint("{}", .{ownership_count}));
+    if (ownership_count < 3 or ownership_count > 16)
+        @compileError(
+            "ArenaOwnership should have 3-16 variants, found " ++ std.fmt.comptimePrint("{}", .{ownership_count}),
+        );
 
     // Validate ArenaDebugInfo struct layout
-    if (!(@sizeOf(ArenaDebugInfo) > 0)) @compileError("ArenaDebugInfo must have non-zero size");
+    if (@sizeOf(ArenaDebugInfo) == 0) @compileError("ArenaDebugInfo must have non-zero size");
 }
 
 // Tests
