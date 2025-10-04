@@ -45,16 +45,10 @@ const BloomFilter = bloom_filter.BloomFilter;
 /// Cached metadata for an SSTable to avoid repeated disk I/O during reads.
 /// Contains pre-loaded bloom filter and sequence bounds for fast lookups.
 const SSTableMetadata = struct {
-    /// Path to the SSTable file
     path: []const u8,
-    /// Pre-loaded bloom filter for negative lookups
     bloom_filter: BloomFilter,
-
-    /// Number of blocks in this SSTable
     block_count: u32,
-    /// Creation timestamp for age-based optimizations
     created_timestamp: u64,
-    /// File size for memory usage tracking
     file_size: u64,
 
     pub fn deinit(self: *SSTableMetadata) void {
@@ -66,10 +60,6 @@ const SSTableMetadata = struct {
 /// Provides single ownership boundary for all persistent storage state
 /// including discovery, read coordination, and compaction management.
 /// Uses TypedArena for safe memory management and OwnedBlock for access control.
-///
-/// Arena Coordinator Pattern: SSTableManager receives stable coordinator interface
-/// and uses it for ALL SSTable content allocation. Stable backing allocator
-/// used for path strings and structures while content uses coordinator's arena.
 pub const SSTableManager = struct {
     arena_coordinator: *const ArenaCoordinator,
     backing_allocator: std.mem.Allocator,
@@ -175,7 +165,8 @@ pub const SSTableManager = struct {
             "Excessive SSTable count {} suggests corruption",
             .{sstable_paths.items.len},
         );
-        // Search in reverse order (newer files first) for better performance
+
+        // Search in reverse order (newer first) for better performance
         var i: usize = sstable_paths.items.len;
         while (i > 0) {
             i -= 1;
@@ -183,7 +174,6 @@ pub const SSTableManager = struct {
 
             var sstable_file = SSTable.init(self.arena_coordinator, temp_allocator, self.vfs, sstable_path);
 
-            // Track SSTable index loading failures,
             sstable_file.read_index() catch |err| {
                 log.warn(
                     "SSTable index loading failed for '{s}': {any} - block lookup will fail for this SSTable",
@@ -215,11 +205,11 @@ pub const SSTableManager = struct {
         var sstable_paths = try self.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit();
 
-        // Basic safety validation for the collected paths
         if (!(sstable_paths.items.len < 10000)) std.debug.panic(
             "Excessive SSTable count {} suggests corruption",
             .{sstable_paths.items.len},
         );
+
         // Collect and load all SSTables upfront for proper tombstone precedence
         // This ensures tombstones from newer SSTables shadow blocks in older ones
         var loaded_sstables = std.ArrayList(SSTable){};
@@ -241,7 +231,6 @@ pub const SSTableManager = struct {
                 sstable_path_copy,
             );
 
-            // Load index - skip corrupted SSTables
             sstable_file.read_index() catch {
                 sstable_file.deinit();
                 continue;
@@ -262,14 +251,12 @@ pub const SSTableManager = struct {
 
         // SECOND PASS: Search for blocks (newest to oldest) since no tombstone found
         for (loaded_sstables.items) |*sstable_file| {
-            // Check bloom filter
             if (sstable_file.bloom_filter) |*bloom| {
                 if (!bloom.might_contain(block_id)) {
                     continue; // Not in this SSTable
                 }
             }
 
-            // Search for the actual block
             if (try sstable_file.find_block_view(block_id)) |parsed_block| {
                 return parsed_block;
             }
@@ -343,7 +330,6 @@ pub const SSTableManager = struct {
         defer self.backing_allocator.free(sstable_filename);
         self.next_sstable_id += 1;
 
-        // Create a sorted list of OwnedBlocks for consistent ownership model
         const sorted_owned_blocks = try self.backing_allocator.alloc(OwnedBlock, owned_blocks.len);
         defer self.backing_allocator.free(sorted_owned_blocks);
         @memcpy(sorted_owned_blocks, owned_blocks);
@@ -358,7 +344,6 @@ pub const SSTableManager = struct {
         };
         std.sort.pdq(OwnedBlock, sorted_owned_blocks, {}, SortContext.less_than);
 
-        // Extract sorted ContextBlocks for SSTable writing
         const sorted_blocks = try self.backing_allocator.alloc(ContextBlock, sorted_owned_blocks.len);
         defer self.backing_allocator.free(sorted_blocks);
         for (sorted_owned_blocks, 0..) |owned_block, i| {
@@ -375,20 +360,16 @@ pub const SSTableManager = struct {
         defer new_sstable.deinit();
         try new_sstable.write_blocks(sorted_blocks, tombstones, edges);
 
-        // Register path in single ownership system and get reference
         const path_index = try self.register_sstable_path(sstable_filename);
         const owned_path = self.sstable_paths.items[path_index];
         const file_size = try self.read_file_size(sstable_filename);
 
-        // Pass owned path reference to compaction manager (no copying)
-        // TieredCompactionManager will store reference, not copy
         try self.compaction_manager.add_sstable(
             owned_path,
             file_size,
             0, // Level 0 for new SSTables
         );
 
-        // Build metadata for performance optimization - skip if corrupted
         if (self.build_sstable_metadata(owned_path, file_size)) |new_metadata| {
             try self.cached_metadata.append(self.backing_allocator, new_metadata);
         } else |err| {
@@ -465,7 +446,6 @@ pub const SSTableManager = struct {
         var total: u64 = 0;
 
         for (self.sstable_paths.items) |sstable_path| {
-            // Read block count directly from SSTable header without creating full SSTable instance
             const block_count = self.read_sstable_block_count(sstable_path) catch |err| {
                 log.warn("Failed to read block count from '{s}': {any} - excluding from total", .{ sstable_path, err });
                 continue;
@@ -482,8 +462,7 @@ pub const SSTableManager = struct {
         var file = try self.vfs.open(file_path, .read);
         defer file.close();
 
-        // Read and validate the header to get block count safely
-        var header_buffer: [64]u8 = undefined; // SSTable.HEADER_SIZE = 64
+        var header_buffer: [64]u8 = undefined; // SSTable.HEADER_SIZE = 64 TODO: these should use const
         const bytes_read = try file.read(&header_buffer);
         if (bytes_read < 64) {
             const context = error_context.StorageContext{
@@ -496,11 +475,10 @@ pub const SSTableManager = struct {
             return error.InvalidSSTableHeader;
         }
 
-        // Validate magic number and version (same as SSTable.Header.deserialize)
-        var offset: usize = 0;
-
         // Check magic number to ensure this is a valid SSTable
+        var offset: usize = 0;
         const magic = header_buffer[offset .. offset + 4];
+
         if (!std.mem.eql(u8, magic, "SSTB")) {
             const context = error_context.StorageContext{
                 .operation = "sstable_magic_validation",
@@ -514,7 +492,6 @@ pub const SSTableManager = struct {
         }
         offset += 4;
 
-        // Check version compatibility
         const format_version = std.mem.readInt(u16, header_buffer[offset..][0..2], .little);
         if (format_version > 2) {
             const context = error_context.StorageContext{
@@ -539,7 +516,7 @@ pub const SSTableManager = struct {
         // Block count is at offset 48 in header for O(1) statistics without index loading
         const block_count = std.mem.readInt(u32, header_buffer[offset..][0..4], .little);
 
-        // Defensive: Block count is reasonable
+        // 100M blocks per SSTable (32 bytes each) = 3.2GB index alone, likely corruption
         if (block_count > 100_000_000) return error.CorruptedBlockCount;
 
         return block_count;
@@ -580,28 +557,21 @@ pub const SSTableManager = struct {
                 if (!(@intFromPtr(full_path.ptr) != 0)) std.debug.panic("Path pointer is null", .{});
             }
 
-            // Corruption tracking: Validate ArrayList before append
             self.validate_sstable_paths_integrity("before append") catch |err| {
                 log.err("CORRUPTION: ArrayList corrupted before appending path '{s}': {any}", .{ full_path, err });
                 self.backing_allocator.free(full_path);
                 return err;
             };
 
-            // Register path in single ownership system and get index for reference
             const path_index = try self.register_sstable_path(full_path);
 
-            // Free the temporary path since register_sstable_path made its own copy
             self.backing_allocator.free(full_path);
 
-            // Get our owned copy for file operations
             const path_copy = self.sstable_paths.items[path_index];
             const file_size = try self.read_file_size(path_copy);
 
-            // Pass owned path reference to compaction manager (no copying)
-            // TieredCompactionManager will store reference, not copy
             try self.compaction_manager.add_sstable(path_copy, file_size, 0);
 
-            // Build metadata for performance optimization - skip if corrupted
             if (self.build_sstable_metadata(path_copy, file_size)) |metadata| {
                 try self.cached_metadata.append(self.backing_allocator, metadata);
             } else |err| {
@@ -649,7 +619,6 @@ pub const SSTableManager = struct {
                 try filter.serialize(buffer);
                 break :blk try BloomFilter.deserialize(self.backing_allocator, buffer);
             } else {
-                // Create empty bloom filter if none exists
                 break :blk try BloomFilter.init(self.backing_allocator, BloomFilter.Params.small);
             }
         };
@@ -670,7 +639,6 @@ pub const SSTableManager = struct {
         var highest_sequence: u64 = 0;
         var winning_block: ?ContextBlock = null;
 
-        // Search through cached metadata first
         for (self.cached_metadata.items) |*metadata| {
             // Bloom filter check BEFORE expensive disk I/O
             // Avoids loading SSTable index for negative lookups (1000x speedup)
@@ -679,8 +647,6 @@ pub const SSTableManager = struct {
                 continue; // Bloom filter proves block is not in this SSTable
             }
 
-            // Bloom filter says block might be present (could be false positive)
-            // Now load SSTable index to confirm
             var sstable_file = SSTable.init(
                 self.arena_coordinator,
                 self.arena_coordinator.allocator(),
@@ -925,7 +891,7 @@ pub const SSTableManager = struct {
         }
     }
 
-    /// P0.6 & P0.7: Comprehensive invariant validation for SSTableManager.
+    /// Comprehensive invariant validation for SSTableManager.
     /// Validates arena coordinator stability, path integrity, and compaction state.
     pub fn validate_invariants(self: *const SSTableManager) void {
         if (builtin.mode == .Debug) {
@@ -937,7 +903,7 @@ pub const SSTableManager = struct {
         }
     }
 
-    /// P0.6: Validate arena coordinator stability.
+    /// Validate arena coordinator stability.
     fn validate_arena_coordinator_stability(self: *const SSTableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 

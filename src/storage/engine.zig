@@ -114,10 +114,8 @@ const FlushMemtableCommand = struct {
 
         const old_sstable_count = self.storage_engine.storage_metrics.sstable_writes.load();
 
-        // Transition to flushing state during operation
         self.storage_engine.state.transition(.flushing);
         defer {
-            // Only transition back to running if we're not already there
             if (self.storage_engine.state != .running) {
                 self.storage_engine.state.transition(.running);
             }
@@ -134,11 +132,9 @@ const FlushMemtableCommand = struct {
             return err;
         };
 
-        // Reset storage arena to reclaim memory after successful flush
         // This implements the "Memory allocated from this arena is freed on next memtable flush" contract
         self.storage_engine.reset_storage_memory();
 
-        // Execute compaction if needed using command pattern
         // Handle compaction failures gracefully - they shouldn't block flush operations
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
         compaction_command.execute() catch |err| {
@@ -146,7 +142,6 @@ const FlushMemtableCommand = struct {
                 err,
                 error_context.StorageContext{ .operation = "flush_compaction" },
             );
-            // Continue without compaction - flush can succeed without it
         };
 
         self.storage_engine.storage_metrics.sstable_writes.incr();
@@ -163,21 +158,19 @@ const CompactionCommand = struct {
     storage_engine: *StorageEngine,
 
     /// Execute compaction if needed with proper state transitions.
-    /// Handles state machine transitions and error context logging.
+    /// Handles state machine transitions and error context logging
     fn execute(self: CompactionCommand) !void {
         concurrency.assert_main_thread();
 
         if (!self.storage_engine.sstable_manager.should_compact()) {
-            return; // No compaction needed
+            return;
         }
 
-        // Ensure we're in running state before transitioning to compacting
         if (self.storage_engine.state != .running) {
             self.storage_engine.state.transition(.running);
         }
         self.storage_engine.state.transition(.compacting);
         defer {
-            // Only transition back to running if we're not already there
             if (self.storage_engine.state != .running) {
                 self.storage_engine.state.transition(.running);
             }
@@ -190,7 +183,7 @@ const CompactionCommand = struct {
             );
             // Log the error but don't fail - compaction is a background optimization
             log.warn("Compaction failed but continuing: {any}", .{err});
-            return; // Exit without incrementing metrics but without failing
+            return;
         };
 
         self.storage_engine.storage_metrics.compactions.incr();
@@ -210,16 +203,16 @@ pub const StorageEngine = struct {
     config: Config,
     memtable_manager: MemtableManager,
     sstable_manager: SSTableManager,
-    /// Graph edge index for managing relationships between blocks.
-    /// Decoupled from memtable lifecycle to ensure edge persistence across flushes.
     graph_index: GraphEdgeIndex,
     state: StorageState,
     storage_metrics: StorageMetrics,
+
     /// Heap-allocated arena for ALL storage subsystem memory allocation.
     /// Arena Coordinator Pattern: Arena is allocated on heap with stable pointer,
     /// eliminating corruption from struct copying while maintaining O(1) cleanup.
     storage_arena: *std.heap.ArenaAllocator,
     arena_coordinator: *ArenaCoordinator,
+
     /// Global sequence counter for all operations (reads, writes, deletes)
     /// This provides total ordering of operations for MVCC semantics
     global_sequence: std.atomic.Value(u64),
@@ -274,7 +267,6 @@ pub const StorageEngine = struct {
             return err;
         };
 
-        // Arena Coordinator Pattern: Allocate arena on heap for stable pointer
         const storage_arena = try allocator.create(std.heap.ArenaAllocator);
         storage_arena.* = std.heap.ArenaAllocator.init(allocator);
 
@@ -339,8 +331,7 @@ pub const StorageEngine = struct {
             return err;
         };
 
-        // Initialize GraphEdgeIndex with backing allocator (not arena-allocated)
-        // This ensures edge persistence across memtable flushes
+        // Edge persistence across memtable flushes requires non-arena allocation
         engine.graph_index = GraphEdgeIndex.init(allocator);
 
         engine.sstable_manager = SSTableManager.init(engine.arena_coordinator, allocator, filesystem, owned_data_dir);
@@ -355,7 +346,6 @@ pub const StorageEngine = struct {
     /// Zero runtime overhead in release builds through comptime evaluation.
     pub fn validate_memory_hierarchy(self: *const StorageEngine) void {
         if (comptime builtin.mode == .Debug) {
-            // Validate coordinator pattern integrity
             self.arena_coordinator.validate_coordinator();
 
             // Safety: Converting pointers to integers for arena reference validation
@@ -374,7 +364,6 @@ pub const StorageEngine = struct {
 
         if (self.state == .stopped) return;
 
-        // Only attempt flush operations if engine is in a running state
         if (self.state.can_write()) {
             if (self.memtable_manager.block_index.blocks.count() > 0) {
                 try self.coordinate_memtable_flush();
@@ -384,10 +373,8 @@ pub const StorageEngine = struct {
         }
 
         if (self.state == .initialized) {
-            // From initialized, can only go directly to stopped
             self.state.transition(.stopped);
         } else if (self.state != .stopping and self.state != .stopped) {
-            // From running/compacting/flushing, go through stopping first
             self.state.transition(.stopping);
             self.state.transition(.stopped);
         } else if (self.state == .stopping) {
@@ -403,7 +390,6 @@ pub const StorageEngine = struct {
     pub fn reset_storage_memory(self: *StorageEngine) void {
         concurrency.assert_main_thread();
 
-        // O(1) reset through coordinator - interface remains valid after operation
         // Note: memtable should already be cleared by flush_to_sstable before this is called
         self.arena_coordinator.reset();
 
@@ -417,9 +403,8 @@ pub const StorageEngine = struct {
         // Safety: Converting pointer to integer for memory corruption detection
         if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine self pointer is null - memory corruption detected", .{});
 
-        // Prevent double-free by checking if data_dir is already freed
         if (self.data_dir.len == 0) {
-            return; // Already deinitialized
+            return;
         }
 
         if (self.state != .stopped) {
@@ -432,18 +417,14 @@ pub const StorageEngine = struct {
             };
         }
 
-        // Hierarchical cleanup: Deinit submodules first, then pools, then coordinator arena
         self.memtable_manager.deinit();
         self.sstable_manager.deinit();
 
-        // Clean up persistent graph index
         self.graph_index.deinit();
 
-        // Clean up SSTable index cache
         self.sstable_index_cache.deinit();
 
-        // Clean up object pools - must be done after submodules that might use pooled objects
-        // Note: Pools are const so we need temporary mutable copies for deinit
+        // Pools are const so we need temporary mutable copies for deinit
         {
             var mut_sstable_pool = self.sstable_pool;
             var mut_iterator_pool = self.iterator_pool;
@@ -451,11 +432,9 @@ pub const StorageEngine = struct {
             mut_iterator_pool.deinit();
         }
 
-        // StorageEngine owns and cleans up the heap-allocated storage arena
         // This frees ALL storage memory in O(1) time
         self.storage_arena.deinit();
         self.backing_allocator.destroy(self.storage_arena);
-        // Clean up heap-allocated coordinator
         self.backing_allocator.destroy(self.arena_coordinator);
 
         self.backing_allocator.free(self.data_dir);
@@ -549,15 +528,12 @@ pub const StorageEngine = struct {
                 },
             };
         }
-
-        // State remains .initialized until startup() transitions to .running
     }
 
     /// Transition from initialized to running state with I/O operations.
     pub fn startup(self: *StorageEngine) !void {
         std.debug.assert(self.state == .initialized or self.state == .stopped);
 
-        // Handle restart case: transition from stopped back to initialized
         if (self.state == .stopped) {
             self.state.transition(.initialized);
         }
@@ -593,8 +569,6 @@ pub const StorageEngine = struct {
             return err;
         };
 
-        // Initialize global sequence number by scanning existing data
-        // to ensure new blocks always get higher sequence numbers than existing ones
         self.initialize_global_sequence() catch |err| {
             error_context.log_storage_error(
                 err,
@@ -616,7 +590,6 @@ pub const StorageEngine = struct {
     fn initialize_global_sequence(self: *StorageEngine) !void {
         var max_sequence: u64 = 0;
 
-        // Scan memtable for highest sequence number
         var memtable_iterator = self.memtable_manager.block_index.blocks.iterator();
         while (memtable_iterator.next()) |entry| {
             const owned_block = entry.value_ptr.*;
@@ -625,7 +598,6 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Scan memtable tombstones for highest sequence number
         var tombstone_iterator = self.memtable_manager.block_index.tombstones.iterator();
         while (tombstone_iterator.next()) |entry| {
             const tombstone_record = entry.value_ptr.*;
@@ -634,7 +606,6 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Scan SSTables for highest sequence number
         var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit(self.backing_allocator);
 
@@ -648,17 +619,14 @@ pub const StorageEngine = struct {
             );
             defer sstable_file.deinit();
 
-            // Load index - skip corrupted SSTables during sequence scanning
             sstable_file.read_index() catch continue;
 
-            // Check tombstones in this SSTable for sequence numbers
             for (sstable_file.tombstone_index.items) |tombstone_record| {
                 if (tombstone_record.sequence > max_sequence) {
                     max_sequence = tombstone_record.sequence;
                 }
             }
 
-            // Iterate through all blocks in this SSTable using iterator
             var iterator = sstable_file.iterator();
             defer iterator.deinit();
 
@@ -669,8 +637,6 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Set global sequence to one higher than the maximum found
-        // This ensures new blocks always get higher sequence numbers
         const next_sequence = max_sequence + 1;
         self.global_sequence.store(next_sequence, .monotonic);
     }
@@ -695,13 +661,11 @@ pub const StorageEngine = struct {
         std.debug.assert(non_zero_bytes > 0);
         std.debug.assert(block_data.source_uri.len > 0);
 
-        // Assign global sequence number for MVCC ordering
         const old_sequence = self.global_sequence.load(.monotonic);
         const sequence = self.global_sequence.fetchAdd(1, .monotonic);
         std.debug.assert(sequence == old_sequence);
         std.debug.assert(self.global_sequence.load(.monotonic) > old_sequence);
 
-        // Create a new block with the assigned sequence number
         const sequenced_block = ContextBlock{
             .id = block_data.id,
             .sequence = sequence,
@@ -741,7 +705,6 @@ pub const StorageEngine = struct {
                 return error.WriteBlocked;
             };
 
-            // Check again after compaction - if still blocked, fail
             if (self.sstable_manager.compaction_manager.should_block_writes()) {
                 return error.WriteBlocked;
             }
@@ -756,7 +719,6 @@ pub const StorageEngine = struct {
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-        // Create new owned block with sequence number for storage
         const sequenced_owned_block = OwnedBlock.take_ownership(&sequenced_block, .storage_engine);
         var mutable_owned_block = sequenced_owned_block;
         const transferred_block = mutable_owned_block.transfer(.memtable_manager, undefined);
@@ -790,7 +752,6 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Update throttle state after successful write
         self.sstable_manager.compaction_manager.update_throttle_state();
 
         self.track_write_metrics(start_time, block_data.content.len);
@@ -817,7 +778,7 @@ pub const StorageEngine = struct {
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
         concurrency.assert_main_thread();
-        if (!(@intFromPtr(self) != 0)) std.debug.panic(
+        if ((@intFromPtr(self) == 0)) std.debug.panic(
             "StorageEngine self pointer is null - memory corruption detected",
             .{},
         );
@@ -840,7 +801,6 @@ pub const StorageEngine = struct {
 
         const start_time = std.time.nanoTimestamp();
 
-        // Use unified MVCC read to find highest sequence entry
         const result = try self.find_highest_sequence_entry(block_id);
 
         const end_time = std.time.nanoTimestamp();
@@ -850,7 +810,7 @@ pub const StorageEngine = struct {
             1; // Minimum measurable duration when time goes backwards
 
         if (result.is_tombstoned) {
-            return null; // Block is deleted
+            return null;
         }
 
         if (result.block) |block| {
@@ -876,8 +836,6 @@ pub const StorageEngine = struct {
         is_tombstoned: bool,
     };
 
-    /// Unified MVCC read across all storage layers (memtable + SSTables).
-    /// Finds the entry with the highest sequence number, whether block or tombstone.
     fn find_highest_sequence_entry(self: *StorageEngine, block_id: BlockId) !MVCCReadResult {
         var non_zero_bytes: u32 = 0;
         for (block_id.bytes) |byte| {
@@ -889,7 +847,6 @@ pub const StorageEngine = struct {
         var winning_block: ?ContextBlock = null;
         var is_tombstoned = false;
 
-        // Check memtable for both block and tombstone
         if (self.memtable_manager.find_block_in_memtable(block_id)) |block| {
             std.debug.assert(block.id.eql(block_id));
             if (block.sequence > highest_sequence) {
@@ -899,7 +856,6 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Check memtable tombstones
         if (self.memtable_manager.block_index.tombstones.get(block_id)) |tombstone_record| {
             std.debug.assert(tombstone_record.block_id.eql(block_id));
             if (tombstone_record.sequence > highest_sequence) {
@@ -909,13 +865,11 @@ pub const StorageEngine = struct {
             }
         }
 
-        // Check SSTables using cached metadata for bloom filter optimization
         // This avoids loading full index for blocks that definitely don't exist
         var sstable_paths = try self.sstable_manager.compaction_manager.collect_all_sstable_paths(self.backing_allocator);
         defer sstable_paths.deinit(self.backing_allocator);
 
         for (sstable_paths.items) |sstable_path| {
-            // Try to find cached bloom filter for this SSTable
             var cached_bloom: ?*const BloomFilter = null;
             for (self.sstable_manager.cached_metadata.items) |*metadata| {
                 if (std.mem.eql(u8, metadata.path, sstable_path)) {
@@ -940,10 +894,8 @@ pub const StorageEngine = struct {
             );
             defer sstable_file.deinit();
 
-            // Load index only after bloom filter check (or if no cached bloom filter)
             sstable_file.read_index() catch continue;
 
-            // Check for tombstones in this SSTable
             for (sstable_file.tombstone_index.items) |tombstone_record| {
                 if (tombstone_record.block_id.eql(block_id)) {
                     if (tombstone_record.sequence > highest_sequence) {
@@ -954,12 +906,10 @@ pub const StorageEngine = struct {
                 }
             }
 
-            // Check for blocks in this SSTable - skip on I/O errors
             if (sstable_file.find_block_view(block_id) catch null) |parsed_block| {
                 const sequence = @as(u64, @intCast(parsed_block.sequence()));
                 if (sequence > highest_sequence) {
                     highest_sequence = sequence;
-                    // Convert to owned block for later return
                     winning_block = try parsed_block.to_owned(self.arena_coordinator.allocator());
                     is_tombstoned = false;
                 }
@@ -992,16 +942,15 @@ pub const StorageEngine = struct {
                 StorageError.StorageEngineDeinitialized;
         }
 
-        // Use unified MVCC read to find highest sequence entry
         const result = try self.find_highest_sequence_entry(block_id);
 
         if (result.is_tombstoned) {
-            return null; // Block is deleted
+            return null;
         }
         if (result.block) |block| {
             return OwnedBlock.take_ownership(&block, owner);
         }
-        return null; // Block not found
+        return null;
     }
 
     /// Zero-cost storage engine block lookup - fastest possible read path.
@@ -1014,16 +963,15 @@ pub const StorageEngine = struct {
             if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine corrupted", .{});
         }
 
-        // Use unified MVCC read to find highest sequence entry
         const result = try self.find_highest_sequence_entry(block_id);
 
         if (result.is_tombstoned) {
-            return null; // Block is deleted
+            return null;
         }
         if (result.block) |block| {
             return OwnedBlock.take_ownership(block, .storage_engine);
         }
-        return null; // Block not found
+        return null;
     }
 
     /// Zero-cost query engine block lookup for cross-subsystem access.
@@ -1034,16 +982,15 @@ pub const StorageEngine = struct {
             if (!(@intFromPtr(self) != 0)) std.debug.panic("StorageEngine corrupted", .{});
         }
 
-        // Use unified MVCC read to find highest sequence entry
         const result = try self.find_highest_sequence_entry(block_id);
 
         if (result.is_tombstoned) {
-            return null; // Block is deleted
+            return null;
         }
         if (result.block) |block| {
             return OwnedBlock.take_ownership(&block, .query_engine);
         }
-        return null; // Block not found
+        return null;
     }
 
     /// Batch find multiple blocks with bloom filter optimization.
@@ -1099,23 +1046,19 @@ pub const StorageEngine = struct {
             }
         }
 
-        // All blocks found in memtable - fast exit
         if (remaining_indices.items.len == 0) return;
 
         // Phase 3: For each SSTable, batch check bloom filters
         // This is the KEY optimization - amortizes bloom filter overhead
         const sstables = self.sstable_manager.sstables.items;
         for (sstables) |sstable_file| {
-            // Skip SSTables without bloom filters (shouldn't happen but defensive)
             const bloom = sstable_file.bloom_filter orelse continue;
 
-            // Collect candidates where bloom filter indicates block might exist
             var sstable_candidates = std.ArrayList(usize).init(self.backing_allocator);
             defer sstable_candidates.deinit();
 
             for (remaining_indices.items) |idx| {
                 const block_id = block_ids[idx];
-                // Bloom filter check is in-memory bit array - very fast
                 if (bloom.might_contain(&block_id.bytes)) {
                     try sstable_candidates.append(idx);
                     self.storage_metrics.bloom_filter_checks.incr();
@@ -1133,7 +1076,6 @@ pub const StorageEngine = struct {
                     owner,
                 );
 
-                // Remove found blocks from remaining_indices for next SSTable
                 var new_remaining = std.ArrayList(usize).init(self.backing_allocator);
                 defer new_remaining.deinit();
 
@@ -1146,12 +1088,9 @@ pub const StorageEngine = struct {
                 remaining_indices.clearRetainingCapacity();
                 try remaining_indices.appendSlice(new_remaining.items);
 
-                // All blocks found - early exit
                 if (remaining_indices.items.len == 0) return;
             }
         }
-
-        // Any remaining nulls are truly nonexistent blocks (not an error)
     }
 
     /// Read multiple blocks from a single SSTable with batched I/O and index caching.
@@ -1168,22 +1107,17 @@ pub const StorageEngine = struct {
         std.debug.assert(candidate_indices.len > 0);
         std.debug.assert(sstable_file.file_path.len > 0);
 
-        // Use cached index for this SSTable
         const sstable_id = SSTableId.from_path(sstable_file.file_path);
         const cached_index = try self.sstable_index_cache.get(sstable_id, sstable_file);
 
-        // Read each candidate block from the SSTable
-        // Index lookup is now in-memory (cached) instead of disk I/O
         for (candidate_indices) |idx| {
             std.debug.assert(idx < block_ids.len);
             std.debug.assert(idx < results.len);
 
             const block_id = block_ids[idx];
 
-            // Fast path: Check if block exists in cached index
             _ = cached_index.find_entry(block_id) orelse continue;
 
-            // Block found in index - now read the actual block data from disk
             // Note: This still requires disk I/O for the block content
             // Future optimization: also cache hot blocks (not just indices)
             if (try sstable_file.find_block(block_id)) |block| {
@@ -1287,7 +1221,6 @@ pub const StorageEngine = struct {
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-        // Write edge to WAL for durability (memtable_manager owns WAL)
         self.memtable_manager.put_edge_wal_only(edge) catch |err| {
             error_context.log_storage_error(
                 err,
@@ -1296,7 +1229,6 @@ pub const StorageEngine = struct {
             return err;
         };
 
-        // Add edge to persistent graph index (StorageEngine now owns this)
         self.graph_index.put_edge(edge) catch |err| {
             error_context.log_storage_error(
                 err,
@@ -1376,7 +1308,7 @@ pub const StorageEngine = struct {
             .{},
         );
         if (self.data_dir.len == 0) {
-            return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
+            return &[_]OwnedGraphEdge{};
         }
 
         var non_zero_bytes: u32 = 0;
@@ -1389,8 +1321,10 @@ pub const StorageEngine = struct {
             "MemtableManager pointer corrupted - memory safety violation detected",
             .{},
         );
-        // First check persistent graph index (in-memory edges)
-        const in_memory_edges = self.graph_index.find_outgoing_edges_with_ownership(source_id, .storage_engine) orelse &[_]OwnedGraphEdge{};
+        const in_memory_edges = self.graph_index.find_outgoing_edges_with_ownership(
+            source_id,
+            .storage_engine,
+        ) orelse &[_]OwnedGraphEdge{};
 
         if (in_memory_edges.len > 0) {
             if (!(@intFromPtr(in_memory_edges.ptr) != 0)) std.debug.panic(
@@ -1404,7 +1338,6 @@ pub const StorageEngine = struct {
             return in_memory_edges;
         }
 
-        // Check SSTables if not found in in-memory graph index
         const sstable_edges = self.sstable_manager.find_outgoing_edges_in_sstables(
             source_id,
             self.backing_allocator,
@@ -1418,7 +1351,6 @@ pub const StorageEngine = struct {
             return &[_]OwnedGraphEdge{};
         }
 
-        // Convert GraphEdge array to OwnedGraphEdge array
         const owned_edges = self.backing_allocator.alloc(OwnedGraphEdge, sstable_edges.len) catch |err| {
             log.warn("Failed to allocate memory for owned edges: {any}", .{err});
             return &[_]OwnedGraphEdge{};
@@ -1439,7 +1371,7 @@ pub const StorageEngine = struct {
             .{},
         );
         if (self.data_dir.len == 0) {
-            return &[_]OwnedGraphEdge{}; // Return empty slice if deinitialized
+            return &[_]OwnedGraphEdge{};
         }
 
         var non_zero_bytes: u32 = 0;
@@ -1466,7 +1398,6 @@ pub const StorageEngine = struct {
             return edges;
         }
 
-        // Check SSTables if not found in memtable
         const sstable_edges = self.sstable_manager.find_incoming_edges_in_sstables(
             target_id,
             self.backing_allocator,
@@ -1480,7 +1411,6 @@ pub const StorageEngine = struct {
             return &[_]OwnedGraphEdge{};
         }
 
-        // Convert GraphEdge array to OwnedGraphEdge array
         const owned_edges = self.backing_allocator.alloc(OwnedGraphEdge, sstable_edges.len) catch |err| {
             log.warn("Failed to allocate memory for owned edges: {any}", .{err});
             return &[_]OwnedGraphEdge{};
@@ -1539,7 +1469,6 @@ pub const StorageEngine = struct {
         return self.storage_metrics.calculate_memory_pressure(config);
     }
 
-    /// Block iterator for scanning all blocks in storage (memtable only).
     /// Complete storage iterator that traverses both memtable and SSTables.
     /// Follows coordinator pattern - delegates to subsystems for actual iteration.
     pub const BlockIterator = struct {
@@ -1555,7 +1484,6 @@ pub const StorageEngine = struct {
         /// Iterate through memtable first, then all SSTables in order.
         /// Returns OwnedBlock with storage_engine ownership for safe cross-subsystem usage.
         pub fn next(self: *BlockIterator) !?OwnedBlock {
-            // First, exhaust memtable
             if (self.memtable_iterator.next()) |entry| {
                 const owned_block = entry.value_ptr.*;
                 // Clone with storage_engine ownership using iteration arena (cleaned up when iterator is destroyed)
@@ -1565,7 +1493,6 @@ pub const StorageEngine = struct {
                 return cloned_block;
             }
 
-            // Then iterate through SSTables
             while (self.current_sstable_index < @as(u32, @intCast(self.sstable_manager.sstable_paths.items.len))) {
                 // Lazy SSTable opening: avoids file handles for SSTables we might skip
                 // due to early termination or empty tables
@@ -1606,10 +1533,8 @@ pub const StorageEngine = struct {
                 self.sstable_manager.arena_coordinator.validate_coordinator();
 
                 if (try self.current_sstable_iterator.?.next()) |sstable_block| {
-                    // Create owned block with storage_engine ownership for iterator return
                     const storage_block = OwnedBlock.take_ownership(&sstable_block, .storage_engine);
 
-                    // Skip if we've already seen this block (deduplication)
                     const gop = self.seen_blocks.getOrPut(sstable_block.id) catch {
                         // If dedup tracking OOM, just return the block anyway
                         return storage_block;
@@ -1617,7 +1542,6 @@ pub const StorageEngine = struct {
                     if (!gop.found_existing) {
                         return storage_block;
                     }
-                    // Continue to next block if duplicate
                     continue;
                 } else {
                     if (self.current_sstable_iterator) |*iter| {
@@ -1636,6 +1560,7 @@ pub const StorageEngine = struct {
             return null;
         }
 
+        /// Cleans up iterator resources.
         pub fn deinit(self: *BlockIterator) void {
             if (self.current_sstable_iterator) |*iter| {
                 iter.deinit();
@@ -1664,9 +1589,9 @@ pub const StorageEngine = struct {
         };
     }
 
-    /// P0.5, P0.6, P0.7: Comprehensive invariant validation for StorageEngine.
-    /// Validates WAL ordering, arena coordinator stability, memory accounting consistency,
-    /// and subsystem state coherence. Critical for detecting programming errors.
+    /// Invariant validation for StorageEngine. Validates WAL ordering, arena coordinator
+    /// stability, memory accounting consistency, and subsystem state coherence.
+    /// Critical for detecting programming errors.
     pub fn validate_invariants(self: *const StorageEngine) void {
         if (builtin.mode == .Debug) {
             self.validate_storage_state_invariants();
@@ -1678,7 +1603,6 @@ pub const StorageEngine = struct {
         }
     }
 
-    /// Validate StorageEngine state machine and critical pointers.
     fn validate_storage_state_invariants(self: *const StorageEngine) void {
         std.debug.assert(builtin.mode == .Debug);
 
@@ -1695,7 +1619,6 @@ pub const StorageEngine = struct {
         }
     }
 
-    /// Validate coherence between StorageEngine subsystems.
     fn validate_subsystem_coherence(self: *const StorageEngine) void {
         std.debug.assert(builtin.mode == .Debug);
 
@@ -1712,7 +1635,6 @@ pub const StorageEngine = struct {
         std.debug.assert(memtable_blocks < 1000000 and sstable_blocks < 10000000);
     }
 
-    /// P0.6 & P0.7: Validate arena coordinator stability and memory consistency.
     fn validate_arena_memory_consistency(self: *const StorageEngine) void {
         std.debug.assert(builtin.mode == .Debug);
 
@@ -1748,8 +1670,6 @@ pub const TypedStorageCoordinator = struct {
         return self.storage_engine.storage_arena.allocator();
     }
 
-    /// Get query cache allocator for temporary query data.
-    /// Memory allocated from this arena is freed when query cache is cleared.
     /// Validate storage engine is ready for read operations.
     /// Zero-cost in release builds through comptime evaluation.
     pub fn validate_read_state(self: TypedStorageCoordinator) bool {
@@ -1774,14 +1694,11 @@ pub const TypedStorageCoordinator = struct {
         return self.storage_engine.query_metrics();
     }
 
-    /// Check for compaction opportunities and execute if beneficial.
-    /// Pure coordinator that delegates decision and execution to SSTableManager.
     fn check_and_run_compaction(self: TypedStorageCoordinator) !void {
         const compaction_command = CompactionCommand{ .storage_engine = self.storage_engine };
         try compaction_command.execute();
     }
 
-    /// Get file size for SSTable registration with compaction manager.
     fn read_file_size(self: *StorageEngine, path: []const u8) !u64 {
         var file = self.vfs.open(path, .read) catch |err| {
             error_context.log_storage_error(err, error_context.file_context("read_file_size_open", path));

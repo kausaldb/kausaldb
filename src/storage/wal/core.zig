@@ -124,7 +124,6 @@ pub const WAL = struct {
         const bytes_written = try self.write_and_verify(entry, write_buffer);
         self.update_write_stats(bytes_written);
 
-        // Success - operation completed with potential retries
         if (builtin.mode == .Debug) {
             log.debug("WAL entry written successfully (type={}, size={})", .{ entry.entry_type, bytes_written });
         }
@@ -155,7 +154,6 @@ pub const WAL = struct {
         self.update_write_stats(bytes_written);
     }
 
-    /// Validate entry structure and state before write operations
     fn validate_entry_for_write(self: *WAL, entry: WALEntry) WALError!usize {
         concurrency.assert_main_thread();
 
@@ -172,7 +170,6 @@ pub const WAL = struct {
         return serialized_size;
     }
 
-    /// Ensure active segment has capacity for entry, rotating if necessary
     fn ensure_segment_capacity(self: *WAL, required_size: usize) WALError!void {
         if (self.segment_size + required_size > MAX_SEGMENT_SIZE) {
             std.debug.assert(self.segment_size <= MAX_SEGMENT_SIZE);
@@ -182,14 +179,12 @@ pub const WAL = struct {
         }
     }
 
-    /// Serialize entry with validation and corruption detection
     fn serialize_with_validation(self: *WAL, entry: WALEntry, serialized_size: usize) WALError![]u8 {
         // to prevent any memory sharing with the entry payload data
         var write_arena = std.heap.ArenaAllocator.init(self.allocator);
         defer write_arena.deinit();
         const write_allocator = write_arena.allocator();
 
-        // then zero-initialize for actual serialization use
         const write_buffer = try write_allocator.alloc(u8, serialized_size);
         @memset(write_buffer, 0xDD);
         @memset(write_buffer, 0);
@@ -225,28 +220,22 @@ pub const WAL = struct {
         return try self.allocator.dupe(u8, write_buffer);
     }
 
-    /// Write buffer to file with immediate verification and atomic rollback on failure.
-    /// Ensures WAL integrity by reverting partial writes that could corrupt state.
-    /// Implements retry logic for resilience against transient I/O failures.
     fn write_and_verify(self: *WAL, entry: WALEntry, write_buffer: []const u8) WALError!usize {
         const max_retries = 10;
-        const base_retry_delay_ns = 500_000; // Start with 0.5ms base delay
+        const base_retry_delay_ns = 500_000;
 
         // Capture position before write for potential rollback on failure
         const start_position = self.active_file.?.tell() catch return WALError.IoError;
 
         var retry_count: u32 = 0;
         while (retry_count < max_retries) : (retry_count += 1) {
-            // Attempt write with potential retry
             const written = self.active_file.?.write(write_buffer) catch {
                 if (retry_count < max_retries - 1) {
-                    // Transient failure - rollback and retry with exponential backoff
                     self.rollback_to_position(start_position);
                     const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
                     std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
                     continue;
                 }
-                // Final attempt failed - rollback and return error
                 self.rollback_to_position(start_position);
                 return WALError.IoError;
             };
@@ -254,22 +243,18 @@ pub const WAL = struct {
             if (written != write_buffer.len) {
                 if (retry_count < max_retries - 1) {
                     log.warn("WAL write incomplete: expected {}, got {} - retrying ({}/{})", .{ write_buffer.len, written, retry_count + 1, max_retries });
-                    // Rollback partial write and retry with exponential backoff
                     self.rollback_to_position(start_position);
                     const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
                     std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
                     continue;
                 }
                 log.warn("WAL write incomplete after {} retries: expected {}, got {}", .{ max_retries, write_buffer.len, written });
-                // Final attempt failed - rollback
                 self.rollback_to_position(start_position);
                 return WALError.IoError;
             }
 
-            // Ensure durability before considering write successful
             self.active_file.?.flush() catch {
                 if (retry_count < max_retries - 1) {
-                    // Retry flush on transient failure with exponential backoff
                     const backoff_delay = base_retry_delay_ns * (@as(u64, 1) << @intCast(retry_count));
                     std.Thread.sleep(@min(backoff_delay, 100_000_000)); // Cap at 100ms
                     continue;
@@ -279,7 +264,6 @@ pub const WAL = struct {
                 return WALError.IoError;
             };
 
-            // Write and flush succeeded - continue to verification
             break;
         }
         // Write verification enabled only in debug builds for performance
@@ -323,8 +307,6 @@ pub const WAL = struct {
         return write_buffer.len;
     }
 
-    /// Rollback file to specified position, best-effort cleanup on write failures.
-    /// Used to maintain WAL integrity when writes fail or are incomplete.
     fn rollback_to_position(self: *WAL, position: u64) void {
         // Best-effort rollback - failures are logged but not fatal since
         // we're already in error recovery path
@@ -337,11 +319,9 @@ pub const WAL = struct {
         // the next write position is correct. WAL recovery will handle any
         // trailing garbage data by validating checksums.
 
-        // Update segment size to reflect rollback position
         self.segment_size = position;
     }
 
-    /// Update WAL statistics after successful write
     fn update_write_stats(self: *WAL, bytes_written: usize) void {
         const old_segment_size = self.segment_size;
         self.segment_size += bytes_written;
@@ -440,7 +420,6 @@ pub const WAL = struct {
         }
     }
 
-    /// Rotate to a new WAL segment, closing the current one
     fn rotate_segment(self: *WAL) WALError!void {
         if (self.active_file) |*file| {
             file.flush() catch return WALError.IoError;
@@ -457,7 +436,6 @@ pub const WAL = struct {
         log.info("Rotated to WAL segment {d}", .{self.segment_number});
     }
 
-    /// Initialize the active segment by discovering existing segments or creating the first one
     fn setup_active_segment(self: *WAL) WALError!void {
         self.segment_number = try self.discover_latest_segment_number();
 
@@ -474,7 +452,6 @@ pub const WAL = struct {
         }
     }
 
-    /// Discover the highest numbered segment in the directory
     fn discover_latest_segment_number(self: *WAL) WALError!u32 {
         var highest_number: u32 = 0;
         var found_any = false;
@@ -503,7 +480,6 @@ pub const WAL = struct {
         return if (found_any) highest_number else 0;
     }
 
-    /// Open existing segment file for append operations
     fn open_segment_file(self: *WAL) WALError!void {
         var filename_buffer: [512]u8 = undefined;
         const filename = try self.segment_filename(&filename_buffer);
@@ -522,7 +498,6 @@ pub const WAL = struct {
         _ = self.active_file.?.seek(0, .end) catch return WALError.IoError;
     }
 
-    /// Create a new segment file
     fn create_new_segment(self: *WAL) WALError!void {
         var filename_buffer: [512]u8 = undefined;
         const filename = try self.segment_filename(&filename_buffer);
@@ -536,7 +511,6 @@ pub const WAL = struct {
         self.segment_size = 0;
     }
 
-    /// Generate segment filename based on current segment number
     fn segment_filename(self: *WAL, buffer: []u8) WALError![]u8 {
         return std.fmt.bufPrint(
             buffer,
@@ -547,7 +521,6 @@ pub const WAL = struct {
         };
     }
 
-    /// WAL header write optimized for streaming operations to avoid buffer allocation.
     fn write_streaming_wal_header(
         self: *WAL,
         entry_type: WALEntryType,
@@ -566,7 +539,6 @@ pub const WAL = struct {
         return written;
     }
 
-    /// Block header serialization for streaming WAL to avoid intermediate allocation.
     fn write_streaming_block_header(self: *WAL, block: ContextBlock) WALError!usize {
         var header_buffer: [context_block.ContextBlock.BlockHeader.SIZE]u8 = undefined;
 
@@ -590,7 +562,6 @@ pub const WAL = struct {
         return written;
     }
 
-    /// Chunked content writing for cache-friendly I/O with large blocks.
     fn write_streaming_block_content(self: *WAL, block: ContextBlock) WALError!usize {
         var total_written: usize = 0;
 
@@ -626,7 +597,6 @@ pub const WAL = struct {
                 }
             }
         }
-
         return total_written;
     }
 };

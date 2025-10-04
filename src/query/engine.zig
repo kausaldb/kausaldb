@@ -216,7 +216,6 @@ pub const QueryEngine = struct {
         const start_time = std.time.nanoTimestamp();
         defer self.record_direct_query(start_time);
 
-        // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
             std.debug.assert(block.id.eql(block_id));
             return OwnedBlock.take_ownership(&block, .query_engine);
@@ -229,7 +228,6 @@ pub const QueryEngine = struct {
             return err;
         } orelse return null;
 
-        // Store in query cache and return reference
         const cached_block = try self.cache_block_for_access(owned_block);
         return OwnedBlock.take_ownership(cached_block, .query_engine);
     }
@@ -238,7 +236,6 @@ pub const QueryEngine = struct {
     pub fn block_exists(self: *QueryEngine, block_id: BlockId) bool {
         if (!self.state.can_query()) return false;
 
-        // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |_| {
             return true;
         }
@@ -251,7 +248,6 @@ pub const QueryEngine = struct {
     pub fn query_block_sequence(self: *QueryEngine, block_id: BlockId) ?u64 {
         if (!self.state.can_query()) return null;
 
-        // Check memtable first for direct access
         if (self.storage_engine.memtable_manager.find_block_in_memtable(block_id)) |block| {
             return block.sequence;
         }

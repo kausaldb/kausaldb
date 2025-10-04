@@ -60,7 +60,6 @@ const VisitedTracker = struct {
     }
 
     fn put(self: *VisitedTracker, id: BlockId) !void {
-        // Check if already exists to avoid duplicates
         for (self.visited_ids.items) |existing_id| {
             if (existing_id.eql(id)) return;
         }
@@ -511,7 +510,7 @@ fn traverse_depth_first(
         defer allocator.free(current.path);
 
         if (visited.contains(current.block_id)) {
-            continue; // Already processed this block
+            continue;
         }
 
         try visited.validate();
@@ -1017,14 +1016,12 @@ fn traverse_topological_sort(
     var queue = try std.ArrayList(BlockId).initCapacity(allocator, initial_queue_capacity);
     defer queue.deinit(allocator);
 
-    // Start from the root node
     var current_nodes = try std.ArrayList(BlockId).initCapacity(allocator, initial_level_capacity);
     defer current_nodes.deinit(allocator);
     try current_nodes.append(allocator, query.start_block_id);
 
     var depth: u32 = 0;
 
-    // Build in-degree map for all reachable nodes
     while (current_nodes.items.len > 0 and depth < query.max_depth) {
         var next_nodes = try std.ArrayList(BlockId).initCapacity(allocator, initial_level_capacity);
         defer next_nodes.deinit(allocator);
@@ -1033,7 +1030,6 @@ fn traverse_topological_sort(
             if (visited.contains(block_id)) continue;
             try visited.put(block_id);
 
-            // Initialize in-degree for this node
             if (!in_degree.contains(block_id)) {
                 try in_degree.put(block_id, 0);
             }
@@ -1085,7 +1081,6 @@ fn traverse_topological_sort(
             if (!edge_passes_filter(edge, query.edge_filter)) continue;
             if (!in_degree.contains(edge.target_id)) continue;
 
-            // Decrease in-degree
             const current_degree = in_degree.get(edge.target_id).?;
             if (current_degree > 0) {
                 try in_degree.put(edge.target_id, current_degree - 1);
@@ -1098,7 +1093,6 @@ fn traverse_topological_sort(
 
     // Check for cycle: if sorted_count < total nodes, there's a cycle
     if (sorted_count < visited.count()) {
-        // Cycle detected - return empty result
         const owned_blocks = try result_blocks.toOwnedSlice(allocator);
         const owned_paths = try result_paths.toOwnedSlice(allocator);
         const owned_depths = try result_depths.toOwnedSlice(allocator);
@@ -1112,10 +1106,8 @@ fn traverse_topological_sort(
         );
     }
 
-    // No cycle - build result with blocks in topological order
     if (path.items.len > 0) {
         for (path.items, 0..) |block_id, i| {
-            // Try to find the block
             if (storage_engine.find_query_block(block_id) catch null) |block| {
                 try result_blocks.append(allocator, block);
 

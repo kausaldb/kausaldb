@@ -220,7 +220,6 @@ pub fn validate_arena_naming(comptime T: type) void {
                     }
                 }
 
-                // Validate TypedArenaType fields have proper naming
                 const field_type_name = @typeName(field.type);
                 if (std.mem.startsWith(u8, field_type_name, "arena.TypedArenaType") or
                     std.mem.startsWith(u8, field_type_name, "core.arena.TypedArenaType") or
@@ -261,17 +260,13 @@ pub fn check_field_for_raw_pointers(
     const info = @typeInfo(FieldType);
     switch (info) {
         .pointer => |ptr_info| {
-            // Allow specific safe pointer patterns
             if (ptr_info.child == u8 and ptr_info.size == .slice) {
-                // []const u8 and []u8 are safe for strings and buffers
                 return;
             }
             if (ptr_info.size == .slice and ptr_info.is_const) {
-                // Const slices are generally safe
                 return;
             }
 
-            // Disallow raw single-item pointers
             if (ptr_info.size == .one) {
                 @compileError("Raw pointer '" ++ field_name ++ "' in " ++ struct_name ++
                     " of type " ++ @typeName(FieldType) ++
@@ -279,16 +274,12 @@ pub fn check_field_for_raw_pointers(
             }
         },
         .optional => |opt_info| {
-            // Recursively check optional types
             check_field_for_raw_pointers(opt_info.child, struct_name, field_name);
         },
         .array => |array_info| {
-            // Recursively check array element types
             check_field_for_raw_pointers(array_info.child, struct_name, field_name);
         },
-        else => {
-            // Other types are safe
-        },
+        else => {},
     }
 }
 

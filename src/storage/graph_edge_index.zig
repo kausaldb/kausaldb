@@ -20,6 +20,7 @@ pub const OwnedGraphEdge = struct {
     edge: GraphEdge,
     ownership: BlockOwnership,
 
+    /// Creates owned edge wrapper with specified ownership.
     pub fn init(edge: GraphEdge, owner: BlockOwnership) OwnedGraphEdge {
         return OwnedGraphEdge{
             .edge = edge,
@@ -27,6 +28,7 @@ pub const OwnedGraphEdge = struct {
         };
     }
 
+    /// Returns edge reference after validating accessor permissions.
     pub fn read(self: *const OwnedGraphEdge, accessor: BlockOwnership) *const GraphEdge {
         if (accessor != self.ownership and accessor != .temporary) {
             if (!(false)) std.debug.panic("Edge access violation: {s} cannot read {s}-owned edge", .{ accessor.name(), self.ownership.name() });
@@ -35,9 +37,9 @@ pub const OwnedGraphEdge = struct {
     }
 };
 
-/// Arena refresh pattern: GraphEdgeIndex only uses backing allocator for HashMap and ArrayList
-/// structures. GraphEdge data is stored by value (no string allocation needed), so no
-/// coordinator interface is required. Edges contain fixed-size BlockId arrays.
+/// Memory model: Uses backing allocator for HashMap/ArrayList structures only.
+/// GraphEdge contains fixed-size BlockId arrays (stored by value), so no arena
+/// coordinator is needed unlike BlockIndex which manages string content.
 pub const GraphEdgeIndex = struct {
     outgoing_edges: std.HashMap(
         BlockId,
@@ -51,8 +53,7 @@ pub const GraphEdgeIndex = struct {
         BlockIdContext,
         std.hash_map.default_max_load_percentage,
     ),
-    /// Stable backing allocator for HashMap and ArrayList structures
-    backing_allocator: std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     const BlockIdContext = struct {
         pub fn hash(self: @This(), block_id: BlockId) u64 {
@@ -68,8 +69,7 @@ pub const GraphEdgeIndex = struct {
         }
     };
 
-    /// Initialize empty graph edge index using only backing allocator.
-    /// No coordinator needed since GraphEdge data is stored by value (fixed-size arrays).
+    /// Initializes empty graph edge index with backing allocator.
     pub fn init(backing: std.mem.Allocator) GraphEdgeIndex {
         return GraphEdgeIndex{
             .outgoing_edges = std.HashMap(
@@ -84,21 +84,19 @@ pub const GraphEdgeIndex = struct {
                 BlockIdContext,
                 std.hash_map.default_max_load_percentage,
             ).init(backing),
-            .backing_allocator = backing,
+            .allocator = backing,
         };
     }
 
-    /// Clean up GraphEdgeIndex resources.
-    /// Frees HashMap and ArrayList structures. No arena cleanup needed since
-    /// GraphEdge data is stored by value (no allocated strings).
+    /// Cleans up edge lists and HashMaps.
     pub fn deinit(self: *GraphEdgeIndex) void {
         var outgoing_iterator = self.outgoing_edges.valueIterator();
         while (outgoing_iterator.next()) |edge_list| {
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
         }
         var incoming_iterator = self.incoming_edges.valueIterator();
         while (incoming_iterator.next()) |edge_list| {
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
         }
         self.outgoing_edges.deinit();
         self.incoming_edges.deinit();
@@ -106,12 +104,9 @@ pub const GraphEdgeIndex = struct {
         // Arena memory is owned by StorageEngine - no local cleanup needed
     }
 
-    /// Add a directed edge to the index with bidirectional lookup support.
-    /// Updates both outgoing and incoming edge collections for efficient traversal.
-    /// Uses arena allocation for O(1) bulk cleanup during index reset operations.
+    /// Adds bidirectional edge relationship (outgoing and incoming).
     pub fn put_edge(self: *GraphEdgeIndex, edge: GraphEdge) !void {
         std.debug.assert(@intFromPtr(self) != 0);
-        // Hierarchical model: Arena validation handled at coordinator level
 
         var source_non_zero: u32 = 0;
         var target_non_zero: u32 = 0;
@@ -132,7 +127,7 @@ pub const GraphEdgeIndex = struct {
             outgoing_result.value_ptr.* = std.ArrayList(OwnedGraphEdge){};
         }
         const outgoing_before = outgoing_result.value_ptr.items.len;
-        try outgoing_result.value_ptr.append(self.backing_allocator, owned_edge);
+        try outgoing_result.value_ptr.append(self.allocator, owned_edge);
         std.debug.assert(outgoing_result.value_ptr.items.len == outgoing_before + 1);
 
         var incoming_result = try self.incoming_edges.getOrPut(edge.target_id);
@@ -140,13 +135,11 @@ pub const GraphEdgeIndex = struct {
             incoming_result.value_ptr.* = std.ArrayList(OwnedGraphEdge){};
         }
         const incoming_before = incoming_result.value_ptr.items.len;
-        try incoming_result.value_ptr.append(self.backing_allocator, owned_edge);
+        try incoming_result.value_ptr.append(self.allocator, owned_edge);
         std.debug.assert(incoming_result.value_ptr.items.len == incoming_before + 1);
     }
 
-    /// Find all outgoing edges from a source block with ownership validation.
-    /// Returns owned edge collection that can be safely accessed by the specified accessor.
-    /// Used for graph traversal operations that need ownership-validated edge access.
+    /// Returns outgoing edges from source_id after validating accessor permissions.
     pub fn find_outgoing_edges_with_ownership(
         self: *const GraphEdgeIndex,
         source_id: BlockId,
@@ -173,9 +166,7 @@ pub const GraphEdgeIndex = struct {
         return null;
     }
 
-    /// Find all incoming edges to a target block with ownership validation.
-    /// Returns owned edge collection that can be safely accessed by the specified accessor.
-    /// Used for reverse graph traversal operations that need ownership-validated edge access.
+    /// Returns incoming edges to target_id after validating accessor permissions.
     pub fn find_incoming_edges_with_ownership(
         self: *const GraphEdgeIndex,
         target_id: BlockId,
@@ -202,19 +193,12 @@ pub const GraphEdgeIndex = struct {
         return null;
     }
 
-    /// Remove all edges involving a specific block (when block is deleted).
-    /// Cleans up both outgoing and incoming edge lists to maintain consistency.
-    /// Note: This removes only direct edges; graph traversal cleanup for
-    /// Remove all edges associated with a specific block (both incoming and outgoing).
-    /// After removing a block from storage, all its edges become dangling references.
-    /// Uses the existing remove_edge method for proper bidirectional cleanup.
-    /// Must deinitialize ArrayLists to prevent memory leaks.
+    /// Bidirectional cleanup: removes edges where block_id is source or target.
+    /// Maintains consistency by updating both sides of each edge relationship.
     pub fn remove_block_edges(self: *GraphEdgeIndex, block_id: BlockId) void {
-        // Remove all outgoing edges FROM this block (clean up target's incoming lists)
         if (self.outgoing_edges.getPtr(block_id)) |edge_list| {
             for (edge_list.items) |owned_edge| {
                 const edge = owned_edge.edge;
-                // Remove this edge from target's incoming list
                 if (self.incoming_edges.getPtr(edge.target_id)) |target_incoming| {
                     var i: usize = 0;
                     while (i < target_incoming.items.len) {
@@ -224,9 +208,8 @@ pub const GraphEdgeIndex = struct {
                             target_edge.edge_type == edge.edge_type)
                         {
                             _ = target_incoming.swapRemove(i);
-                            // Clean up HashMap entry if list becomes empty
                             if (target_incoming.items.len == 0) {
-                                target_incoming.deinit(self.backing_allocator);
+                                target_incoming.deinit(self.allocator);
                                 _ = self.incoming_edges.remove(edge.target_id);
                             }
                             break;
@@ -235,15 +218,13 @@ pub const GraphEdgeIndex = struct {
                     }
                 }
             }
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
             _ = self.outgoing_edges.remove(block_id);
         }
 
-        // Remove all incoming edges TO this block (clean up source's outgoing lists)
         if (self.incoming_edges.getPtr(block_id)) |edge_list| {
             for (edge_list.items) |owned_edge| {
                 const edge = owned_edge.edge;
-                // Remove this edge from source's outgoing list
                 if (self.outgoing_edges.getPtr(edge.source_id)) |source_outgoing| {
                     var i: usize = 0;
                     while (i < source_outgoing.items.len) {
@@ -253,9 +234,8 @@ pub const GraphEdgeIndex = struct {
                             source_edge.edge_type == edge.edge_type)
                         {
                             _ = source_outgoing.swapRemove(i);
-                            // Clean up HashMap entry if list becomes empty
                             if (source_outgoing.items.len == 0) {
-                                source_outgoing.deinit(self.backing_allocator);
+                                source_outgoing.deinit(self.allocator);
                                 _ = self.outgoing_edges.remove(edge.source_id);
                             }
                             break;
@@ -264,14 +244,12 @@ pub const GraphEdgeIndex = struct {
                     }
                 }
             }
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
             _ = self.incoming_edges.remove(block_id);
         }
     }
 
-    /// Remove a specific edge between two blocks.
-    /// Removes from both outgoing and incoming indexes to maintain consistency.
-    /// Returns true if edge was found and removed, false if not found.
+    /// Removes bidirectional edge relationship. Returns true if edge was found.
     pub fn remove_edge(self: *GraphEdgeIndex, source_id: BlockId, target_id: BlockId, edge_type: EdgeType) bool {
         var removed = false;
 
@@ -297,16 +275,13 @@ pub const GraphEdgeIndex = struct {
         return removed;
     }
 
-    /// Get total number of edges in the index.
-    /// Counts outgoing edges only to avoid double-counting since each edge
-    /// appears in both outgoing and incoming indexes.
+    /// Counts outgoing edges only to avoid double-counting.
     pub fn edge_count(self: *const GraphEdgeIndex) u32 {
         std.debug.assert(@intFromPtr(self) != 0);
 
         var total: u32 = 0;
         var iterator = self.outgoing_edges.iterator();
         while (iterator.next()) |entry| {
-            // Use the same logic as collect_edges() to ensure consistency
             if (entry.value_ptr.items.len > 0) {
                 const count = @as(u32, @intCast(entry.value_ptr.items.len));
                 std.debug.assert(count < 1000000);
@@ -316,19 +291,15 @@ pub const GraphEdgeIndex = struct {
         return total;
     }
 
-    /// Get number of blocks that have outgoing edges.
-    /// Get number of blocks that have incoming edges.
-    /// Clear all edges and reset arena for O(1) bulk deallocation.
-    /// Retains HashMap capacity for efficient reuse after clearing.
+    /// Clears all edges while retaining HashMap capacity.
     pub fn clear(self: *GraphEdgeIndex) void {
-        // Deinit all ArrayLists before clearing to prevent memory leaks
         var outgoing_iterator = self.outgoing_edges.valueIterator();
         while (outgoing_iterator.next()) |edge_list| {
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
         }
         var incoming_iterator = self.incoming_edges.valueIterator();
         while (incoming_iterator.next()) |edge_list| {
-            edge_list.deinit(self.backing_allocator);
+            edge_list.deinit(self.allocator);
         }
 
         self.outgoing_edges.clearRetainingCapacity();
@@ -337,20 +308,15 @@ pub const GraphEdgeIndex = struct {
         // No arena memory to reset since GraphEdge data is stored by value
     }
 
-    /// Collect all edges from the index for SSTable persistence.
-    /// Returns array of all edges that must be freed by caller.
-    /// Used during memtable flush to extract edges before clearing.
+    /// Collects all edges into slice. Caller owns returned slice.
     pub fn collect_edges(self: *const GraphEdgeIndex, allocator: std.mem.Allocator) ![]const GraphEdge {
         std.debug.assert(@intFromPtr(self) != 0);
 
-        // Use direct iteration instead of edge_count() to avoid any counting bugs
         var edges = std.ArrayList(GraphEdge){};
         defer edges.deinit(allocator);
 
-        // Iterate through outgoing edges only to avoid duplicates
         var iterator = self.outgoing_edges.iterator();
         while (iterator.next()) |entry| {
-            // Ensure the edge list exists and has items
             if (entry.value_ptr.items.len > 0) {
                 for (entry.value_ptr.items) |owned_edge| {
                     try edges.append(allocator, owned_edge.edge);
@@ -374,7 +340,6 @@ test "graph edge index initialization creates empty index" {
 }
 
 test "put and find edge operations work correctly" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -404,7 +369,6 @@ test "put and find edge operations work correctly" {
 }
 
 test "multiple edges from same source are stored correctly" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -435,7 +399,6 @@ test "multiple edges from same source are stored correctly" {
 }
 
 test "remove specific edge works correctly" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -471,7 +434,6 @@ test "remove specific edge works correctly" {
 }
 
 test "remove block edges cleans up all references" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -495,7 +457,6 @@ test "remove block edges cleans up all references" {
 }
 
 test "clear operation resets index to empty state" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -519,7 +480,6 @@ test "clear operation resets index to empty state" {
 }
 
 test "bidirectional index consistency" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 
@@ -562,7 +522,6 @@ test "hash context provides good distribution for block ids" {
 }
 
 test "edge count accuracy with complex graph" {
-    // Hierarchical memory model: create arena for content, use backing for structure
     var index = GraphEdgeIndex.init(testing.allocator);
     defer index.deinit();
 

@@ -47,6 +47,7 @@ pub const BlockIterator = struct {
         std.hash_map.default_max_load_percentage,
     ).Iterator,
 
+    /// Returns next owned block or null when iteration completes.
     pub fn next(self: *BlockIterator) ?*const OwnedBlock {
         if (self.hash_map_iterator.next()) |entry| {
             return entry.value_ptr;
@@ -291,9 +292,7 @@ pub const MemtableManager = struct {
         block_ownership: BlockOwnership,
     ) !?OwnedBlock {
         if (self.block_index.find_block(id)) |block_data| {
-            // Create temporary owned block for cloning
             const temp_owned = OwnedBlock.take_ownership(block_data, .memtable_manager);
-            // Clone with new ownership for safe transfer between subsystems
             return try temp_owned.clone_with_ownership(self.backing_allocator, block_ownership, null);
         }
         return null;
@@ -305,10 +304,9 @@ pub const MemtableManager = struct {
     pub fn put_block_durable_owned(self: *MemtableManager, owned_block: OwnedBlock) !void {
         concurrency.assert_main_thread();
 
-        // Extract block for storage - MemtableManager accessing owned block for persistence
         const block = owned_block.read(.memtable_manager);
 
-        // P0.5: WAL-before-memtable ordering assertions
+        //WAL-before-memtable ordering assertions
         // Durability ordering: WAL MUST be persistent before memtable update
         const wal_entries_before = self.wal.stats.entries_written;
 
@@ -321,14 +319,14 @@ pub const MemtableManager = struct {
             try self.wal.write_entry(wal_entry);
         }
 
-        // P0.5: Verify WAL write completed before memtable update
+        // Verify WAL write completed before memtable update
         // This ordering is CRITICAL for durability guarantees
         const wal_entries_after = self.wal.stats.entries_written;
         std.debug.assert(wal_entries_after > wal_entries_before); // Only update memtable AFTER WAL persistence is confirmed
         try self.block_index.put_block(block.*);
 
         // Skip per-operation validation to prevent performance regression
-        // P0.5 validation is expensive and should only run during specific tests
+        // validation is expensive and should only run during specific tests
     }
 
     /// Encapsulates flush decision within memtable ownership boundary.
@@ -430,28 +428,26 @@ pub const MemtableManager = struct {
         }
     }
 
-    /// P0.5: Validate WAL-before-memtable ordering invariant is maintained.
+    /// Validate WAL-before-memtable ordering invariant is maintained.
     /// Ensures WAL durability ordering is preserved - WAL entries must be persistent
     /// before corresponding memtable state exists. Critical for LSM-tree durability guarantees.
     fn validate_wal_memtable_ordering_invariant(self: *const MemtableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 
-        // WAL entry count should reflect all memtable blocks in durable form
         const memtable_blocks = @as(u32, @intCast(self.block_index.blocks.count()));
         const wal_entries = self.wal.statistics().entries_written;
 
         // In normal operation, WAL should have at least as many entries as memtable blocks
         // (WAL may have more due to edges, deletes, or unflushed entries)
         std.debug.assert(wal_entries >= memtable_blocks);
-        // Verify WAL is in a consistent state for durability
         if (self.wal.active_file != null) {
             std.debug.assert(self.wal.statistics().entries_written > 0 or memtable_blocks == 0);
         }
     }
 
-    /// P0.6 & P0.7: Comprehensive invariant validation for MemtableManager.
-    /// Validates arena coordinator stability, memory accounting consistency,
-    /// and component state coherence. Critical for detecting programming errors.
+    /// Invariant validation for MemtableManager. Validates arena coordinator stability,
+    /// memory accounting consistency and component state coherence.
+    /// Critical for detecting programming errors.
     pub fn validate_invariants(self: *const MemtableManager) void {
         if (builtin.mode == .Debug) {
             self.validate_arena_coordinator_stability();
@@ -461,19 +457,15 @@ pub const MemtableManager = struct {
         }
     }
 
-    /// P0.6: Validate arena coordinator stability across all subsystems.
+    /// Validate arena coordinator stability across all subsystems.
     /// Ensures arena coordinators remain functional after struct operations.
     fn validate_arena_coordinator_stability(self: *const MemtableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 
-        // Validate BlockIndex arena coordinator stability
         self.block_index.validate_invariants();
 
-        // Validate GraphEdgeIndex has stable coordinator (if it uses one)
-        // The graph_index should have its own validation if it uses arena coordinator
         std.debug.assert(@intFromPtr(&self.graph_index) != 0);
 
-        // Validate backing allocator is still functional
         const test_alloc = self.backing_allocator.alloc(u8, 1) catch {
             if (!(false)) std.debug.panic("MemtableManager backing allocator non-functional - corruption detected", .{});
             return;
@@ -481,18 +473,15 @@ pub const MemtableManager = struct {
         defer self.backing_allocator.free(test_alloc);
     }
 
-    /// P0.7: Validate memory accounting consistency across subsystems.
+    /// Validate memory accounting consistency across subsystems.
     /// Ensures tracked memory usage matches actual subsystem usage.
     fn validate_memory_accounting_consistency(self: *const MemtableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 
-        // Validate BlockIndex memory accounting (delegated to BlockIndex.validate_invariants)
         const block_index_memory = self.block_index.memory_used;
         const total_memory = self.block_index.memory_used;
 
-        // MemtableManager memory should equal BlockIndex memory (main consumer)
         std.debug.assert(total_memory == block_index_memory);
-        // Validate memory usage is reasonable given block count
         const current_block_count = @as(u32, @intCast(self.block_index.blocks.count()));
         if (current_block_count > 0) {
             const avg_block_size = total_memory / current_block_count;
@@ -505,14 +494,12 @@ pub const MemtableManager = struct {
     fn validate_component_state_coherence(self: *const MemtableManager) void {
         std.debug.assert(builtin.mode == .Debug);
 
-        // Validate pointers are not corrupted
         if (!(@intFromPtr(&self.block_index) != 0)) std.debug.panic("BlockIndex pointer corruption in MemtableManager", .{});
         if (!(@intFromPtr(&self.graph_index) != 0)) std.debug.panic("GraphEdgeIndex pointer corruption in MemtableManager", .{});
         if (!(@intFromPtr(&self.wal) != 0)) std.debug.panic("WAL pointer corruption in MemtableManager", .{});
 
         // Configuration corruption could lead to OOM or pathological performance degradation
         std.debug.assert(self.memtable_max_size > 0 and self.memtable_max_size <= 10 * 1024 * 1024 * 1024);
-        // Validate current usage doesn't exceed configured maximum (with small buffer for overhead)
         const current_usage = self.block_index.memory_used;
         std.debug.assert(current_usage <= self.memtable_max_size * 2);
     }
@@ -548,32 +535,27 @@ pub const MemtableManager = struct {
 
         std.debug.assert(owned_blocks.items.len == initial_block_count);
 
-        // Get tombstones and edges before clearing memtable
         const tombstones = try self.block_index.collect_tombstones(self.backing_allocator);
         defer self.backing_allocator.free(tombstones);
 
         std.debug.assert(tombstones.len == initial_tombstone_count);
 
-        // Collect edges with multiple validation attempts to ensure they're not lost
         var edges: []const GraphEdge = undefined;
         var collection_attempts: u32 = 0;
         while (collection_attempts < 3) : (collection_attempts += 1) {
             const edge_count_before = graph_index.edge_count();
             edges = try graph_index.collect_edges(self.backing_allocator);
 
-            // Validate collection worked correctly
             if (edges.len == edge_count_before) {
-                break; // Success
+                break;
             } else {
-                // Collection failed, retry after a brief pause
                 log.warn(
                     "Edge collection attempt {} failed: expected {} edges, collected {}",
                     .{ collection_attempts + 1, edge_count_before, edges.len },
                 );
                 self.backing_allocator.free(edges);
                 if (collection_attempts < 2) {
-                    // Brief pause before retry (only for first two attempts)
-                    // Use a simple busy wait instead of sleep
+                    // Busy wait instead of sleep to avoid thread scheduling overhead
                     var i: u32 = 0;
                     while (i < 1000) : (i += 1) {
                         std.mem.doNotOptimizeAway(i);
@@ -583,7 +565,6 @@ pub const MemtableManager = struct {
         }
         defer self.backing_allocator.free(edges);
 
-        // Final validation
         const final_edge_count = graph_index.edge_count();
         std.debug.assert(edges.len == final_edge_count);
         std.debug.assert(edges.len < std.math.maxInt(u32));
@@ -592,12 +573,10 @@ pub const MemtableManager = struct {
         const max_items_per_sstable = std.math.maxInt(u16);
 
         if (tombstones.len > max_items_per_sstable or edges.len > max_items_per_sstable) {
-            // First SSTable: all blocks + as many tombstones/edges as fit
             const first_tombstones = tombstones[0..@min(tombstones.len, max_items_per_sstable)];
             const first_edges = edges[0..@min(edges.len, max_items_per_sstable)];
             try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, first_tombstones, first_edges);
 
-            // Additional SSTables for overflow tombstones/edges (no blocks)
             var tombstone_offset = first_tombstones.len;
             var edge_offset = first_edges.len;
 
@@ -615,20 +594,17 @@ pub const MemtableManager = struct {
                 else
                     &[_]context_block.GraphEdge{};
 
-                // Create overflow SSTable with no blocks
                 try sstable_manager.create_new_sstable_from_memtable(&[_]OwnedBlock{}, tombstone_slice, edge_slice);
 
                 tombstone_offset += tombstone_slice.len;
                 edge_offset += edge_slice.len;
             }
         } else {
-            // Normal case: everything fits in one SSTable
             try sstable_manager.create_new_sstable_from_memtable(owned_blocks.items, tombstones, edges);
         }
 
         self.clear();
 
-        // Clean up old WAL segments after successful SSTable creation
         try self.cleanup_old_wal_segments();
     }
 
@@ -696,7 +672,6 @@ test "MemtableManager basic lifecycle" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    // Hierarchical memory model: create arena for content, use backing for structure
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const coordinator = ArenaCoordinator.init(&arena);
@@ -715,7 +690,6 @@ test "MemtableManager with WAL operations" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    // Hierarchical memory model: create arena for content, use backing for structure
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const coordinator = ArenaCoordinator.init(&arena);
@@ -741,7 +715,6 @@ test "MemtableManager multiple blocks" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    // Hierarchical memory model: create arena for content, use backing for structure
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const coordinator = ArenaCoordinator.init(&arena);
@@ -769,7 +742,6 @@ test "MemtableManager edge operations" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    // Hierarchical memory model: create arena for content, use backing for structure
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const coordinator = ArenaCoordinator.init(&arena);
@@ -793,7 +765,6 @@ test "MemtableManager clear operation" {
     var sim_vfs = try SimulationVFS.init(allocator);
     defer sim_vfs.deinit();
 
-    // Hierarchical memory model: create arena for content, use backing for structure
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const coordinator = ArenaCoordinator.init(&arena);
@@ -808,7 +779,6 @@ test "MemtableManager clear operation" {
 
     try testing.expectEqual(@as(u32, 1), @as(u32, @intCast(manager.block_index.blocks.count())));
 
-    // O(1) arena cleanup
     manager.clear();
 
     try testing.expectEqual(@as(u32, 0), @as(u32, @intCast(manager.block_index.blocks.count())));

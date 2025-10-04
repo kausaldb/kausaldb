@@ -28,7 +28,6 @@ const ownership = @import("../core/ownership.zig");
 const tombstone = @import("tombstone.zig");
 const vfs = @import("../core/vfs.zig");
 
-// Import BlockIdContext for HashMap
 const block_index_mod = @import("block_index.zig");
 const BlockIdContext = block_index_mod.BlockIndex.BlockIdContext;
 
@@ -347,7 +346,6 @@ pub const SSTable = struct {
     ) SSTable {
         std.debug.assert(file_path.len > 0);
         std.debug.assert(file_path.len < 4096);
-        // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(file_path.ptr) != 0);
 
         return SSTable{
@@ -392,7 +390,6 @@ pub const SSTable = struct {
                     "'. Accepts []const ContextBlock, []ContextBlock, []const OwnedBlock, or []OwnedBlock only",
             );
         }
-        // Handle empty case - create empty SSTable with just tombstones if needed
         if (blocks.len == 0 and tombstones.len == 0) return;
         std.debug.assert(blocks.len <= MAX_BLOCKS_PER_SSTABLE);
         std.debug.assert(tombstones.len <= 65535);
@@ -400,7 +397,6 @@ pub const SSTable = struct {
         std.debug.assert(self.file_path.len > 0);
 
         self.index.clearAndFree(self.backing_allocator);
-        // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(blocks.ptr) != 0);
 
         for (blocks) |block_value| {
@@ -418,7 +414,6 @@ pub const SSTable = struct {
             std.debug.assert(block_data.source_uri.len > 0);
             std.debug.assert(block_data.content.len < 100 * 1024 * 1024);
         }
-        // Convert all blocks to ContextBlock for sorting (zero-cost for ContextBlock arrays)
         const context_blocks = try self.backing_allocator.alloc(ContextBlock, blocks.len);
         defer self.backing_allocator.free(context_blocks);
 
@@ -441,7 +436,6 @@ pub const SSTable = struct {
             }
         }.less_than);
 
-        // Copy tombstones and sort them
         const sorted_tombstones = try self.arena_coordinator.allocator().alloc(TombstoneRecord, tombstones.len);
         defer self.arena_coordinator.allocator().free(sorted_tombstones);
         @memcpy(sorted_tombstones, tombstones);
@@ -485,17 +479,14 @@ pub const SSTable = struct {
             try self.index.append(self.backing_allocator, IndexEntry{
                 .block_id = block.id,
                 .offset = current_offset,
-                // Safety: Block size is bounded by SSTable format limits and fits in u32
                 .size = @intCast(block_size),
             });
 
             current_offset += block_size;
         }
 
-        // Store tombstone offset before writing tombstones
         const tombstone_offset = current_offset;
 
-        // Write tombstones
         for (sorted_tombstones) |tombstone_record| {
             var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
             _ = try tombstone_record.serialize(&tombstone_buffer);
@@ -505,17 +496,15 @@ pub const SSTable = struct {
             try self.tombstone_index.append(self.backing_allocator, tombstone_record);
         }
 
-        // Copy edges and sort them for deterministic storage order
+        // Deterministic storage order
         const sorted_edges = try self.arena_coordinator.allocator().alloc(GraphEdge, edges.len);
         defer self.arena_coordinator.allocator().free(sorted_edges);
         @memcpy(sorted_edges, edges);
 
         std.mem.sort(GraphEdge, sorted_edges, {}, GraphEdge.less_than);
 
-        // Store edge offset before writing edges
         const edge_offset = current_offset;
 
-        // Write edges
         for (sorted_edges) |edge| {
             var edge_buffer: [EdgeIndexEntry.SERIALIZED_SIZE]u8 = undefined;
             const edge_entry = EdgeIndexEntry{
@@ -556,7 +545,6 @@ pub const SSTable = struct {
         _ = try file.write(bloom_buffer);
         current_offset += bloom_filter_size;
 
-        // Verify that current_offset matches what read_index will calculate
         const expected_offset = bloom_filter_offset + bloom_filter_size;
         if (current_offset != expected_offset) {
             @panic("Checksum offset mismatch in write");
@@ -597,23 +585,20 @@ pub const SSTable = struct {
 
         try file.flush();
 
-        // Safety: Block count bounded by storage format limits and fits in u32
         self.block_count = @intCast(context_blocks.len);
         self.tombstone_count = @intCast(sorted_tombstones.len);
         self.edge_count = @intCast(sorted_edges.len);
 
-        // Transfer ownership
         self.bloom_filter = new_bloom;
     }
 
     /// Load tombstones from SSTable file into memory index
     pub fn load_tombstones(self: *SSTable) !void {
-        if (self.tombstone_count == 0) return; // No tombstones to load
+        if (self.tombstone_count == 0) return;
 
         var file = try self.filesystem.open(self.file_path);
         defer file.close();
 
-        // Read header to get tombstone offset
         var header_buffer: [HEADER_SIZE]u8 = undefined;
         const bytes_read = try file.read(&header_buffer);
         if (bytes_read != HEADER_SIZE) return error.CorruptedEntry;
@@ -621,10 +606,8 @@ pub const SSTable = struct {
         const header = try Header.deserialize(&header_buffer);
         if (header.tombstone_count == 0) return;
 
-        // Seek to tombstone section
         _ = try file.seek(header.tombstone_offset, .start);
 
-        // Read all tombstones
         for (0..header.tombstone_count) |_| {
             var tombstone_buffer: [tombstone.TOMBSTONE_SIZE]u8 = undefined;
             const tombstone_bytes_read = try file.read(&tombstone_buffer);
@@ -697,7 +680,6 @@ pub const SSTable = struct {
             }
         }
 
-        // Safety: Index offset is validated during header parsing and fits in seek position
         _ = try file.seek(@intCast(header.index_offset), .start);
 
         try self.index.ensureTotalCapacity(self.backing_allocator, header.block_count);
@@ -720,7 +702,6 @@ pub const SSTable = struct {
         // and should only run during specific tests or startup validation
 
         if (header.bloom_filter_size > 0) {
-            // Safety: Bloom filter offset validated during header parsing
             _ = try file.seek(@intCast(header.bloom_filter_offset), .start);
 
             const bloom_buffer = try self.backing_allocator.alloc(u8, header.bloom_filter_size);
@@ -731,9 +712,7 @@ pub const SSTable = struct {
             self.bloom_filter = try BloomFilter.deserialize(self.arena_coordinator.allocator(), bloom_buffer);
         }
 
-        // Load tombstones if present
         if (header.tombstone_count > 0) {
-            // Safety: Tombstone offset validated during header parsing
             _ = try file.seek(@intCast(header.tombstone_offset), .start);
 
             self.tombstone_index.clearRetainingCapacity();
@@ -748,9 +727,7 @@ pub const SSTable = struct {
             }
         }
 
-        // Load edges if present
         if (header.edge_count > 0) {
-            // Safety: Edge offset validated during header parsing
             _ = try file.seek(header.edge_offset, .start);
 
             self.edge_index.clearRetainingCapacity();
@@ -825,7 +802,6 @@ pub const SSTable = struct {
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
-        // Safety: Entry offset comes from validated SSTable index
         _ = try file.seek(@intCast(found_entry.offset), .start);
 
         const buffer = try self.arena_coordinator.alloc(u8, found_entry.size);
@@ -896,7 +872,6 @@ pub const SSTable = struct {
         var file = try self.filesystem.open(self.file_path, .read);
         defer file.close();
 
-        // Safety: Entry offset comes from validated SSTable index
         _ = try file.seek(@intCast(found_entry.offset), .start);
 
         const buffer = try self.arena_coordinator.alloc(u8, found_entry.size);
@@ -985,7 +960,6 @@ pub const SSTableIterator = struct {
     /// Initialize a new iterator for the given SSTable.
     /// The SSTable must have a loaded index with at least one entry.
     pub fn init(sstable: *SSTable) SSTableIterator {
-        // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(sstable) != 0);
         std.debug.assert(sstable.index.items.len > 0);
 
@@ -996,6 +970,7 @@ pub const SSTableIterator = struct {
         };
     }
 
+    /// Closes file handle if open.
     pub fn deinit(self: *SSTableIterator) void {
         if (self.file) |*file| {
             file.close();
@@ -1004,7 +979,6 @@ pub const SSTableIterator = struct {
 
     /// Get next block from iterator, opening file if needed
     pub fn next(self: *SSTableIterator) !?ContextBlock {
-        // Safety: Converting pointer to integer for corruption detection
         std.debug.assert(@intFromPtr(self.sstable) != 0);
         std.debug.assert(self.current_index <= self.sstable.index.items.len);
 
@@ -1019,7 +993,6 @@ pub const SSTableIterator = struct {
         const entry = self.sstable.index.items[self.current_index];
         self.current_index += 1;
 
-        // Safety: Entry offset validated by SSTable index structure
         _ = try self.file.?.seek(@intCast(entry.offset), .start);
 
         const buffer = try self.sstable.arena_coordinator.alloc(u8, entry.size);
@@ -1080,7 +1053,6 @@ pub const Compactor = struct {
             const table = try self.backing_allocator.create(SSTable);
             table.* = SSTable.init(self.arena_coordinator, self.arena_coordinator.allocator(), self.filesystem, path_copy);
 
-            // If read_index fails, clean up this table and return error
             table.read_index() catch |err| {
                 table.deinit(); // This will free path_copy
                 self.backing_allocator.destroy(table);
@@ -1125,12 +1097,10 @@ pub const Compactor = struct {
                 try all_blocks.append(self.backing_allocator, block);
             }
 
-            // Collect tombstones from this table
             for (table.tombstone_index.items) |tombstone_record| {
                 try all_tombstones.append(self.backing_allocator, tombstone_record);
             }
 
-            // Collect edges from this table
             for (table.edge_index.items) |edge_entry| {
                 const edge = GraphEdge{
                     .source_id = edge_entry.source_id,
@@ -1155,7 +1125,6 @@ pub const Compactor = struct {
         defer self.backing_allocator.free(unique_blocks);
         defer self.backing_allocator.free(unique_tombstones);
         defer self.backing_allocator.free(unique_edges);
-        // Arena coordinator handles cleanup of cloned block strings automatically
 
         try output_table.write_blocks(unique_blocks, unique_tombstones, unique_edges);
 
@@ -1168,7 +1137,6 @@ pub const Compactor = struct {
 
     /// Remove duplicate blocks, keeping the one with highest sequence
     fn dedup_blocks(self: *Compactor, blocks: []ContextBlock) ![]ContextBlock {
-        // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(blocks.ptr) != 0 or blocks.len == 0);
         if (blocks.len == 0) return try self.backing_allocator.alloc(ContextBlock, 0);
 
@@ -1229,18 +1197,15 @@ pub const Compactor = struct {
         var unique = try std.ArrayList(TombstoneRecord).initCapacity(self.backing_allocator, sorted.len);
         defer unique.deinit(self.backing_allocator);
 
-        // Get current timestamp for garbage collection
         const current_timestamp = @as(u64, @intCast(std.time.microTimestamp()));
         const gc_grace_seconds = config_mod.DEFAULT_TOMBSTONE_GC_GRACE_SECONDS;
 
         var prev_id: ?BlockId = null;
         for (sorted) |tombstone_record| {
-            // Skip duplicates (keep only highest sequence per block_id)
             if (prev_id != null and tombstone_record.block_id.eql(prev_id.?)) {
                 continue;
             }
 
-            // Skip tombstones that can be garbage collected
             if (tombstone_record.can_garbage_collect(current_timestamp, gc_grace_seconds)) {
                 continue;
             }
@@ -1266,7 +1231,6 @@ pub const Compactor = struct {
         var highest_sequences = std.HashMap(BlockId, struct { sequence: u64, is_tombstone: bool }, BlockIdContext, std.hash_map.default_max_load_percentage).init(self.backing_allocator);
         defer highest_sequences.deinit();
 
-        // Check all blocks
         for (blocks) |block| {
             const existing = highest_sequences.get(block.id);
             if (existing == null or block.sequence > existing.?.sequence) {
@@ -1274,7 +1238,6 @@ pub const Compactor = struct {
             }
         }
 
-        // Check all tombstones
         for (tombstones) |tombstone_record| {
             const existing = highest_sequences.get(tombstone_record.block_id);
             if (existing == null or tombstone_record.sequence > existing.?.sequence) {
@@ -1282,7 +1245,6 @@ pub const Compactor = struct {
             }
         }
 
-        // Filter blocks and tombstones based on MVCC winners
         var filtered_blocks = try std.ArrayList(ContextBlock).initCapacity(self.backing_allocator, blocks.len);
         var filtered_tombstones = try std.ArrayList(TombstoneRecord).initCapacity(self.backing_allocator, tombstones.len);
 
