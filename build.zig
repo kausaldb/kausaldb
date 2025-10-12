@@ -310,7 +310,6 @@ const E2E_PORT: u16 = 3839;
 const E2E_DATA_DIR = ".kausaldb_data/e2e";
 const E2E_PID_FILE = ".kausaldb_data/e2e/server.pid";
 const E2E_TIMEOUT_MS: u32 = 10000;
-const E2E_STDOUT_PATH = 10000;
 
 const E2EServerStep = struct {
     step: std.Build.Step,
@@ -368,19 +367,22 @@ const E2EServerStep = struct {
             "--data-dir",
             E2E_DATA_DIR,
             "--log-level",
-            "warn",
+            "err",
         }, self.allocator);
 
+        // Inherit stderr to catch server errors (crashes, shutdown failures)
+        // but suppress normal server output.
         server_process.stdout_behavior = .Ignore;
-        server_process.stderr_behavior = .Ignore;
+        server_process.stderr_behavior = .Inherit;
         server_process.stdin_behavior = .Close;
 
         try server_process.spawn();
 
         // Write PID to file for cleanup
+        const server_pid = server_process.id;
         const pid_file = try std.fs.cwd().createFile(E2E_PID_FILE, .{});
         defer pid_file.close();
-        const pid_str = try std.fmt.allocPrint(self.allocator, "{}\n", .{server_process.id});
+        const pid_str = try std.fmt.allocPrint(self.allocator, "{}\n", .{server_pid});
         defer self.allocator.free(pid_str);
         try pid_file.writeAll(pid_str);
 
@@ -459,10 +461,7 @@ const E2ECleanupStep = struct {
     fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
         const self: *Self = @fieldParentPtr("step", step);
 
-        // Kill any process using the E2E port first
-        self.kill_port_processes(E2E_PORT) catch {};
-
-        // Kill server using PID file
+        // Read server PID from file
         const pid_file = std.fs.cwd().openFile(E2E_PID_FILE, .{}) catch return;
         defer pid_file.close();
 
@@ -471,12 +470,36 @@ const E2ECleanupStep = struct {
 
         const pid = std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, pid_str, " \n\r\t"), 10) catch return;
 
-        // Try graceful shutdown first, then force kill
+        // Send SIGTERM for graceful shutdown
         std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-        std.Thread.sleep(500 * std.time.ns_per_ms); // Give it time to shutdown
+
+        // Wait for graceful shutdown with timeout
+        const shutdown_timeout_ms: u64 = 5000;
+        const start_time = std.time.milliTimestamp();
+
+        while (std.time.milliTimestamp() - start_time < shutdown_timeout_ms) {
+            const wait_result = std.posix.waitpid(pid, std.posix.W.NOHANG);
+
+            if (wait_result.pid != 0) {
+                // Process exited - check exit status
+                const exit_status = std.posix.W.EXITSTATUS(wait_result.status);
+
+                if (exit_status != 0) {
+                    return error.ServerShutdownFailed;
+                }
+
+                std.fs.cwd().deleteFile(E2E_PID_FILE) catch {};
+                return;
+            }
+
+            std.Thread.sleep(50 * std.time.ns_per_ms);
+        }
+
         std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+        _ = std.posix.waitpid(pid, 0); // Clean up zombie
 
         std.fs.cwd().deleteFile(E2E_PID_FILE) catch {};
+        return error.ServerShutdownTimeout;
     }
 
     fn kill_port_processes(self: *Self, port: u16) !void {

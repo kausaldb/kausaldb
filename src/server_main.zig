@@ -233,6 +233,9 @@ fn parse_server_command(args: []const []const u8) !ServerCommand {
 fn start_server(allocator: std.mem.Allocator, cmd_args: []const []const u8) !ExitCode {
     const config = try config_mod.parse_server_args(allocator, cmd_args);
 
+    // Apply runtime log level from config
+    log_level_runtime = config.log_level;
+
     // Create operational directories
     try create_operational_directories(allocator, config);
 
