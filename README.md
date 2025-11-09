@@ -5,7 +5,6 @@
 
 > Code is a graph. Query it. Fast.
 
-
 Your codebase is a network of dependencies, not a flat directory of text files. Traditional tools like `grep` and semantic search find text, not causality.
 
 KausalDB is purpose-built graph database for fast and reliable context retrieval for LLMs and developers.
@@ -42,12 +41,11 @@ kausal show --relation callers --target helper_function --workspace myproject
 
 Built from scratch in Zig with zero-cost abstractions, no hidden allocations, O(1) memory cleanup and no data races by design.
 
-*   **LSM-Tree Storage:** Fast write-heavy codebase ingestion.
-*   **Single-Threaded Core:** No data races by design for stability and simplicity.
-*   **Zero-Cost Abstractions:** Enforce ownership and arena models at compile time.
-*   **Deterministic Testing:** Uses Virtual File System to enable reproducible, simulation-based testing of complex failure scenarios.
+- **LSM-Tree Storage:** Fast write-heavy codebase ingestion.
+- **Single-Threaded Core:** No data races by design for stability and simplicity.
+- **Zero-Cost Abstractions:** Enforce ownership and arena models at compile time.
+- **Deterministic Testing:** Uses Virtual File System to enable reproducible, simulation-based testing of complex failure scenarios.
 
-## Contributing
-To get started, please read our **[Contributing Guide](CONTRIBUTING.md)**.
+## Documentation
 
 See [`docs/`](docs/) for detailed design, development guide, and testing philosophy.
