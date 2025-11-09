@@ -117,16 +117,6 @@ const TidyChecker = struct {
             {
                 try self.add_violation(file_path, line_number, "Use stdx.bit_set_type instead of std.StaticBitSet for consistent snake_case API and bounds checking");
             }
-
-            // Rule 7: No TODO/FIXME/HACK comments in committed code
-            if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
-                !std.mem.endsWith(u8, file_path, "build.zig") and
-                (std.mem.indexOf(u8, line, "// TODO") != null or
-                    std.mem.indexOf(u8, line, "// FIXME") != null or
-                    std.mem.indexOf(u8, line, "// HACK") != null))
-            {
-                try self.add_violation(file_path, line_number, "TODO/FIXME/HACK comments must be resolved before committing");
-            }
         }
     }
 

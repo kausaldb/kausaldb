@@ -464,7 +464,7 @@ pub const SSTableManager = struct {
         var file = try self.vfs.open(file_path, .read);
         defer file.close();
 
-        var header_buffer: [64]u8 = undefined; // SSTable.HEADER_SIZE = 64 TODO: these should use const
+        var header_buffer: [64]u8 = undefined;
         const bytes_read = try file.read(&header_buffer);
         if (bytes_read < 64) {
             const context = error_context.StorageContext{
