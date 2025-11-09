@@ -723,7 +723,6 @@ test "BlockOwnership access validation" {
 
 test "OwnedBlock basic operations" {
     const block = ContextBlock{
-        // Safety: valid 32-char hex string
         .id = BlockId.from_hex("00112233445566778899AABBCCDDEEFF") catch unreachable,
         .sequence = 2, // Test sequence for ownership validation
         .source_uri = try std.testing.allocator.dupe(u8, "test://block"),
@@ -752,7 +751,6 @@ test "OwnedBlock basic operations" {
 
 test "OwnedBlock ownership transfer" {
     const block = ContextBlock{
-        // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("FFEEDDCCBBAA99887766554433221100") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://transfer"),
@@ -777,7 +775,6 @@ test "OwnedBlock ownership transfer" {
 
 test "OwnedBlock cloning with ownership" {
     const block = ContextBlock{
-        // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("1122334455667788AABBCCDDEEFF0099") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://clone"),
@@ -811,7 +808,6 @@ test "OwnedBlockCollection management" {
     defer collection.deinit(std.testing.allocator);
 
     const block1 = ContextBlock{
-        // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("1111111111111111AAAAAAAAAAAAAAAA") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://block1"),
@@ -825,7 +821,6 @@ test "OwnedBlockCollection management" {
     }
 
     const block2 = ContextBlock{
-        // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("2222222222222222BBBBBBBBBBBBBBBB") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://block2"),
@@ -861,7 +856,6 @@ test "OwnershipTracker functionality" {
     var tracker = OwnershipTracker.init(std.testing.allocator);
     defer tracker.deinit(std.testing.allocator);
 
-    // Safety: Valid hex string is statically verified
     const block_id = BlockId.from_hex("ABCDEF1234567890FEDCBA0987654321") catch unreachable;
 
     tracker.track_allocation(block_id, .memtable_manager);
@@ -902,7 +896,6 @@ test "ownership names are consistent" {
 }
 
 test "ownership transfer recording" {
-    // Safety: Valid hex string is statically verified
     const block_id = BlockId.from_hex("CAFEBABE12345678DEADBEEF87654321") catch unreachable;
     const transfer = OwnershipTransfer.record(.memtable_manager, .sstable_manager, block_id);
 
@@ -912,7 +905,6 @@ test "ownership transfer recording" {
 }
 
 test "zero-cost compile-time ownership system" {
-    // Safety: Valid hex string is statically verified
     const block_id = BlockId.from_hex("1234567890ABCDEF0987654321FEDCBA") catch unreachable;
     const test_block = ContextBlock{
         .id = block_id,
@@ -966,7 +958,6 @@ test "zero-cost compile-time ownership system" {
 
 test "moved-from state prevents use-after-transfer" {
     const block = ContextBlock{
-        // Safety: Valid hex string is statically verified
         .id = BlockId.from_hex("DEADBEEFCAFEBABE1234567890ABCDEF") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = try std.testing.allocator.dupe(u8, "test://move"),

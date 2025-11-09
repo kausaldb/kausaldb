@@ -105,7 +105,6 @@ pub const BloomFilter = struct {
         var i: u8 = 0;
         while (i < self.hash_count) : (i += 1) {
             const combined = h1 +% (@as(u64, i) *% h2);
-            // Safety: Hash result truncated to u32, then bounded by bit_count modulo
             const bit_index = @as(u32, @truncate(combined)) % self.bit_count;
             self.enable_bit(bit_index);
         }
@@ -122,7 +121,6 @@ pub const BloomFilter = struct {
         var i: u8 = 0;
         while (i < self.hash_count) : (i += 1) {
             const combined = h1 +% (@as(u64, i) *% h2);
-            // Safety: Hash result truncated to u32, then bounded by bit_count modulo
             const bit_index = @as(u32, @truncate(combined)) % self.bit_count;
             if (!self.test_bit(bit_index)) {
                 return false; // Definitely not in set
@@ -139,7 +137,6 @@ pub const BloomFilter = struct {
     /// Calculate serialized size needed for this filter
     pub fn serialized_size(self: *const BloomFilter) u32 {
         // 4 bytes bit_count + 1 byte hash_count + 3 bytes padding + bits
-        // Safety: Bits array length bounded by filter size limits and fits in u32
         return 8 + @as(u32, @intCast(self.bits.len));
     }
 

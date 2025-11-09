@@ -3,7 +3,6 @@
 //! Enforces only the critical architectural invariants that `zig fmt` cannot handle:
 //! - Function naming conventions (no get_/set_ prefixes)
 //! - Thread safety violations (disallowed threading outside stdx.zig)
-//! - Safety comment requirements for unsafe operations
 //!
 //! Deliberately simple using string matching rather than AST parsing.
 //! Philosophy: Delegate formatting to `zig fmt`, focus on architectural rules.
@@ -89,35 +88,7 @@ const TidyChecker = struct {
                 }
             }
 
-            // Rule 4: Safety comments required for unsafe operations (exclude tidy checker and security scanner)
-            // Safety: Operation guaranteed to succeed by preconditions
-            if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
-                !std.mem.endsWith(u8, file_path, "security_scanner.zig") and
-                !std.mem.startsWith(u8, file_path, "./src/bench/") and
-                !std.mem.startsWith(u8, file_path, "./src/fuzz/"))
-            {
-                if (std.mem.indexOf(u8, line, "catch unreachable") != null or
-                    std.mem.indexOf(u8, line, "@ptrCast") != null)
-                {
-                    // Look for "// Safety:" comment on this line or the line above
-                    const has_safety_comment = std.mem.indexOf(u8, line, "// Safety:") != null;
-                    if (!has_safety_comment and line_number > 1) {
-                        // Check previous line for safety comment
-                        const prev_line_start = find_previous_line_start(file_content, line);
-                        if (prev_line_start) |start| {
-                            const prev_line_end = std.mem.indexOf(u8, file_content[start..], "\n") orelse (file_content.len - start);
-                            const prev_line = file_content[start .. start + prev_line_end];
-                            if (std.mem.indexOf(u8, prev_line, "// Safety:") == null) {
-                                try self.add_violation(file_path, line_number, "Unsafe operations require '// Safety:' comment explaining why the operation is safe");
-                            }
-                        } else {
-                            try self.add_violation(file_path, line_number, "Unsafe operations require '// Safety:' comment explaining why the operation is safe");
-                        }
-                    }
-                }
-            }
-
-            // Rule 5: Use scoped logging pattern instead of global std.log
+            // Rule 4: Use scoped logging pattern instead of global std.log
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
                 !std.mem.endsWith(u8, file_path, "build.zig") and
                 std.mem.indexOf(u8, line, "std.log.") != null)
@@ -131,7 +102,7 @@ const TidyChecker = struct {
                 }
             }
 
-            // Rule 6: Use stdx memory operations instead of raw std.mem operations for safety
+            // Rule 5: Use stdx memory operations instead of raw std.mem operations for safety
             if (std.mem.indexOf(u8, line, "std.mem.copy") != null and
                 !std.mem.endsWith(u8, file_path, "stdx.zig") and
                 !std.mem.endsWith(u8, file_path, "tidy.zig"))
@@ -139,7 +110,7 @@ const TidyChecker = struct {
                 try self.add_violation(file_path, line_number, "Use stdx copy functions (copy_left, copy_right) instead of std.mem.copy for explicit overlap semantics");
             }
 
-            // Rule 7: Use stdx bit_set_type instead of std.StaticBitSet
+            // Rule 6: Use stdx bit_set_type instead of std.StaticBitSet
             if (std.mem.indexOf(u8, line, "std.StaticBitSet") != null and
                 !std.mem.endsWith(u8, file_path, "stdx.zig") and
                 !std.mem.endsWith(u8, file_path, "tidy.zig"))
@@ -147,7 +118,7 @@ const TidyChecker = struct {
                 try self.add_violation(file_path, line_number, "Use stdx.bit_set_type instead of std.StaticBitSet for consistent snake_case API and bounds checking");
             }
 
-            // Rule 8: No TODO/FIXME/HACK comments in committed code
+            // Rule 7: No TODO/FIXME/HACK comments in committed code
             if (!std.mem.endsWith(u8, file_path, "tidy.zig") and
                 !std.mem.endsWith(u8, file_path, "build.zig") and
                 (std.mem.indexOf(u8, line, "// TODO") != null or
@@ -163,12 +134,10 @@ const TidyChecker = struct {
         const current_line_ptr = current_line.ptr;
         const content_ptr = content.ptr;
 
-        // Safety: Converting pointers to integers for bounds checking validation
         if (@intFromPtr(current_line_ptr) < @intFromPtr(content_ptr) or @intFromPtr(current_line_ptr) >= @intFromPtr(content_ptr) + content.len) {
             return null;
         }
 
-        // Safety: Pointer arithmetic for calculating line offset within validated bounds
         const current_offset = @intFromPtr(current_line_ptr) - @intFromPtr(content_ptr);
         if (current_offset == 0) return null;
 
@@ -251,7 +220,6 @@ const TidyChecker = struct {
         const current_line_ptr = current_line.ptr;
         const file_ptr = file_content.ptr;
 
-        // Safety: Converting pointers to integers for bounds checking
         if (@intFromPtr(current_line_ptr) < @intFromPtr(file_ptr) or
             @intFromPtr(current_line_ptr) >= @intFromPtr(file_ptr) + file_content.len)
         {

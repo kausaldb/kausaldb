@@ -240,7 +240,7 @@ fn create_test_wal_entry(allocator: std.mem.Allocator, entry_type: u8, payload: 
 
 fn create_test_block() ContextBlock {
     return ContextBlock{
-        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
+        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://recovery.zig",
         .metadata_json = "{}",
@@ -270,7 +270,6 @@ const TestRecoveryContext = struct {
 };
 
 fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALError!void {
-    // Safety: Pointer cast with alignment validation
     const test_context: *TestRecoveryContext = @ptrCast(@alignCast(context));
 
     // TestRecoveryContext stores entries_recovered as ArrayList which needs allocator
@@ -289,7 +288,6 @@ fn test_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALErr
 
 fn error_recovery_callback(entry: entry_mod.WALEntry, context: *anyopaque) WALError!void {
     _ = entry;
-    // Safety: Pointer cast with alignment validation
     const test_context: *TestRecoveryContext = @ptrCast(@alignCast(context));
     test_context.callback_errors += 1;
     return WALError.CallbackFailed;

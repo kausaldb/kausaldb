@@ -225,7 +225,6 @@ fn handle_find_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         );
     }
 
-    // Safety: Payload size validated against FindRequest struct size above
     const request = @as(*const cli_protocol.FindRequest, @ptrCast(@alignCast(payload.ptr)));
     const query_text = request.query_text();
 
@@ -289,7 +288,6 @@ fn handle_show_callers_request(ctx: HandlerContext, payload: []const u8) ![]cons
         );
     }
 
-    // Safety: Payload size validated against ShowRequest struct size above
     const request = @as(*const cli_protocol.ShowRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const target_text = request.target_text();
 
@@ -343,7 +341,6 @@ fn handle_show_callees_request(ctx: HandlerContext, payload: []const u8) ![]cons
         );
     }
 
-    // Safety: Payload size validated against ShowRequest struct size above
     const request = @as(*const cli_protocol.ShowRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const source_text = request.target_text();
 
@@ -397,7 +394,6 @@ fn handle_trace_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         );
     }
 
-    // Safety: Payload size validated against TraceRequest struct size above
     const request = @as(*const cli_protocol.TraceRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const source_text = request.source_text();
     const target_text = request.target_text();
@@ -453,7 +449,6 @@ fn handle_link_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         );
     }
 
-    // Safety: Payload size validated against LinkRequest struct size above
     const request = @as(*const cli_protocol.LinkRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const path_text = request.path_text();
     const name_text = request.name_text();
@@ -483,7 +478,6 @@ fn handle_unlink_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         );
     }
 
-    // Safety: Payload size validated against SyncRequest struct size above
     const request = @as(*const cli_protocol.SyncRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const name_text = request.name_text();
 
@@ -508,7 +502,6 @@ fn handle_sync_request(ctx: HandlerContext, payload: []const u8) ![]const u8 {
         );
     }
 
-    // Safety: Payload size validated against SyncRequest struct size above
     const request = @as(*const cli_protocol.SyncRequest, @ptrCast(@alignCast(payload.ptr))).*;
     const name_text = request.name_text();
 
@@ -613,7 +606,6 @@ fn serialize_show_response(ctx: HandlerContext, blocks: []const ContextBlock, ed
     @memset(response_bytes[@sizeOf(cli_protocol.MessageHeader)..], 0);
 
     // 3. Cast to struct pointer and populate directly
-    // Safety: response_bytes is correctly sized and aligned for ShowResponse struct
     const response_ptr: *cli_protocol.ShowResponse = @ptrCast(@alignCast(&response_bytes[@sizeOf(cli_protocol.MessageHeader)]));
 
     // 4. Populate fields

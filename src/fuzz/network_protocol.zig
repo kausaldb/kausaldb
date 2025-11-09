@@ -71,7 +71,6 @@ fn fuzz_message_headers(allocator: std.mem.Allocator, input: []const u8) !void {
 
     // Extract potentially malicious header values from fuzz input
     var header: MessageHeader = undefined;
-    // Safety: MessageHeader is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&header))[0..16], input[0..16]);
 
     // Test with completely invalid values
@@ -86,7 +85,6 @@ fn fuzz_message_headers(allocator: std.mem.Allocator, input: []const u8) !void {
     const test_buffer = try allocator.alloc(u8, @sizeOf(MessageHeader) + @min(input.len, 4096));
     defer allocator.free(test_buffer);
 
-    // Safety: MessageHeader size is known at compile time and buffer is allocated with sufficient size
     @memcpy(test_buffer[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     if (input.len > 16) {
         const payload_size = @min(input.len - 16, test_buffer.len - @sizeOf(MessageHeader));
@@ -211,15 +209,12 @@ fn fuzz_truncated_messages(allocator: std.mem.Allocator, input: []const u8) !voi
         .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
-        // Safety: input.len is valid usize and fits within u32 range for protocol
-        // Safety: input.len is valid usize and fits within u32 range for protocol
         .payload_size = @intCast(input.len),
     };
 
     const full_message = try allocator.alloc(u8, @sizeOf(MessageHeader) + input.len);
     defer allocator.free(full_message);
 
-    // Safety: MessageHeader size is known at compile time and buffer is allocated with sufficient size
     @memcpy(full_message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     @memcpy(full_message[@sizeOf(MessageHeader)..], input);
 
@@ -256,7 +251,6 @@ fn fuzz_oversized_payloads(allocator: std.mem.Allocator, input: []const u8) !voi
         const message = try allocator.alloc(u8, @sizeOf(MessageHeader) + actual_payload.len);
         defer allocator.free(message);
 
-        // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
         @memcpy(message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
         @memcpy(message[@sizeOf(MessageHeader)..], actual_payload);
 
@@ -281,7 +275,6 @@ fn fuzz_message_injection(allocator: std.mem.Allocator, input: []const u8) !void
     const message_with_injection = try allocator.alloc(u8, @sizeOf(MessageHeader) + input.len);
     defer allocator.free(message_with_injection);
 
-    // Safety: MessageHeader size is known at compile time and buffer is allocated with sufficient size
     @memcpy(message_with_injection[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&primary_header))[0..@sizeOf(MessageHeader)]);
     @memcpy(message_with_injection[@sizeOf(MessageHeader)..], input);
 
@@ -296,7 +289,6 @@ fn fuzz_message_injection(allocator: std.mem.Allocator, input: []const u8) !void
 
         const offset = @sizeOf(MessageHeader) + 10;
         if (offset + @sizeOf(MessageHeader) <= message_with_injection.len) {
-            // Safety: MessageHeader size is known at compile time and offset bounds are validated above
             @memcpy(message_with_injection[offset .. offset + @sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&fake_header))[0..@sizeOf(MessageHeader)]);
         }
     }
@@ -323,7 +315,6 @@ fn fuzz_state_corruption(_: std.mem.Allocator, input: []const u8) !void {
             .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = msg_type,
-            // Safety: chunk.len is valid usize derived from input bounds and fits within u32 range
             .payload_size = @intCast(chunk.len),
         };
 
@@ -348,7 +339,6 @@ fn fuzz_concurrent_connections(_: std.mem.Allocator, input: []const u8) !void {
             .magic = PROTOCOL_MAGIC,
             .version = PROTOCOL_VERSION,
             .message_type = .find_request,
-            // Safety: conn_data.len is 50 bytes max and fits within u32 range
             .payload_size = @intCast(conn_data.len),
         };
 
@@ -361,7 +351,6 @@ fn fuzz_concurrent_connections(_: std.mem.Allocator, input: []const u8) !void {
 fn parse_message_header(buffer: []const u8) !MessageHeader {
     if (buffer.len < @sizeOf(MessageHeader)) return error.TruncatedHeader;
 
-    // Safety: buffer length is validated above to be at least MessageHeader size and ptr is properly aligned
     const header = @as(*const MessageHeader, @ptrCast(@alignCast(buffer.ptr))).*;
 
     // Validate magic number
@@ -381,12 +370,10 @@ fn create_negative_length_message(allocator: std.mem.Allocator, input: []const u
         .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
-        // Safety: Intentional bitcast of negative value to test protocol robustness
         .payload_size = @bitCast(@as(i64, -1)), // Negative length as u64
     };
 
     const message = try allocator.alloc(u8, @sizeOf(MessageHeader) + @min(input.len, 100));
-    // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
     @memcpy(message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     if (input.len > 0) {
         @memcpy(message[@sizeOf(MessageHeader)..], input[0..@min(input.len, 100)]);
@@ -403,7 +390,6 @@ fn create_huge_length_message(allocator: std.mem.Allocator, input: []const u8) !
     };
 
     const message = try allocator.alloc(u8, @sizeOf(MessageHeader) + @min(input.len, 100));
-    // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
     @memcpy(message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     if (input.len > 0) {
         @memcpy(message[@sizeOf(MessageHeader)..], input[0..@min(input.len, 100)]);
@@ -422,11 +408,9 @@ fn create_misaligned_message(allocator: std.mem.Allocator, input: []const u8) ![
         .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
-        // Safety: Value is bounded by min(input.len, 100) so fits within u32 range
         .payload_size = @intCast(@min(input.len, 100)),
     };
 
-    // Safety: MessageHeader size is known at compile time and offset bounds are validated above
     @memcpy(message[offset .. offset + @sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     if (input.len > 0) {
         const payload_start = offset + @sizeOf(MessageHeader);
@@ -446,7 +430,6 @@ fn create_invalid_utf8_message(allocator: std.mem.Allocator, input: []const u8) 
     };
 
     const message = try allocator.alloc(u8, @sizeOf(MessageHeader) + input.len);
-    // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
     @memcpy(message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
 
     // Copy input which may contain invalid UTF-8
@@ -461,14 +444,11 @@ fn create_recursive_message(allocator: std.mem.Allocator, input: []const u8) ![]
         .magic = PROTOCOL_MAGIC,
         .version = PROTOCOL_VERSION,
         .message_type = .find_request,
-        // Safety: MessageHeader size plus input.len fits within u32 range for typical inputs
         .payload_size = @intCast(@sizeOf(MessageHeader) + input.len),
     };
 
     const message = try allocator.alloc(u8, @sizeOf(MessageHeader) * 2 + input.len);
-    // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
     @memcpy(message[0..@sizeOf(MessageHeader)], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
-    // Safety: MessageHeader size is known at compile time and message buffer is allocated with sufficient size
     @memcpy(message[@sizeOf(MessageHeader) .. @sizeOf(MessageHeader) * 2], @as([*]const u8, @ptrCast(&header))[0..@sizeOf(MessageHeader)]);
     if (input.len > 0) {
         @memcpy(message[@sizeOf(MessageHeader) * 2 ..], input);

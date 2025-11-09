@@ -116,20 +116,17 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
                 error.WriteStalled,
                 error.WriteBlocked,
                 => {},
-                // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
                 else => try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err),
             }
         };
 
         apply_operation_to_model(&model, &op) catch |err| {
-            // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
             try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err);
         };
 
         // Periodically verify properties
         if (fuzzer.stats.iterations_executed % 100 == 0) {
             verify_storage_properties(&storage, &model) catch |err| {
-                // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
                 try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err);
             };
         }
@@ -372,7 +369,6 @@ fn verify_storage_properties(storage: *StorageEngine, model: *ModelState) !void 
 
 fn inject_storage_fault(sim_vfs: *SimulationVFS) !void {
     // Randomly inject I/O errors or corruptions
-    // Safety: timestamp() returns a valid i64 that can be safely cast to u64 for PRNG seed
     var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
     const fault_type = prng.random().uintLessThan(u8, 4);
 

@@ -81,7 +81,6 @@ pub const QueryContext = struct {
     pub fn create(query_id: u64) QueryContext {
         return QueryContext{
             .query_id = query_id,
-            // Safety: Timestamp always fits in i64 range
             .start_time_ns = @intCast(std.time.nanoTimestamp()),
             .metrics = .{},
         };
@@ -90,7 +89,6 @@ pub const QueryContext = struct {
     /// Calculate execution duration in nanoseconds
     pub fn execution_duration_ns(self: *const QueryContext) u64 {
         const current_time = std.time.nanoTimestamp();
-        // Safety: Time difference is always non-negative and fits in u64
         return @as(u64, @intCast(current_time - self.start_time_ns));
     }
 };

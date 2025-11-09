@@ -606,7 +606,7 @@ pub const WAL = struct {
 
 fn create_test_block() ContextBlock {
     return ContextBlock{
-        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
+        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://wal_core.zig",
         .metadata_json = "{}",
@@ -615,8 +615,8 @@ fn create_test_block() ContextBlock {
 }
 
 fn create_test_edge() GraphEdge {
-    const from_id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable; // Safety: hardcoded valid hex
-    const to_id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable; // Safety: hardcoded valid hex
+    const from_id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable;
+    const to_id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable;
 
     return GraphEdge{
         .source_id = from_id,

@@ -692,7 +692,6 @@ pub fn BoundedGraphBuilderType(comptime max_nodes: usize, comptime max_edges: us
 
         /// Query graph statistics for resource monitoring
         pub fn query_stats(self: *const Self) GraphStats {
-            // Safety: Graph sizes bounded by BoundedHashMap limits and fit in u32
             const node_count = @as(u32, @intCast(self.nodes.length()));
             const edge_count = @as(u32, @intCast(self.edges.length()));
 

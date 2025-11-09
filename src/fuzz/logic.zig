@@ -95,7 +95,6 @@ pub fn run_durability_testing(fuzzer: *main.Fuzzer) !void {
 
             const block = ContextBlock{
                 .id = BlockId.generate(),
-                // Safety: Loop index i + 1 is guaranteed to fit in sequence field type
                 .sequence = @intCast(i + 1),
                 .source_uri = "test://durability",
                 .metadata_json = "{}",
@@ -135,7 +134,6 @@ pub fn run_durability_testing(fuzzer: *main.Fuzzer) !void {
             const found_opt = storage2.find_block(expected_block.id, BlockOwnership.temporary) catch |err| {
                 std.debug.print("Durability violation: block {} lost after crash\n", .{expected_block.id});
                 stats.violations_found += 1;
-                // Safety: ContextBlock is a well-defined struct with known memory layout
                 try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&expected_block)), err);
                 continue;
             };
@@ -209,7 +207,6 @@ pub fn run_consistency_testing(fuzzer: *main.Fuzzer) !void {
                     error.BlockNotFound,
                     error.WriteStalled,
                     => {}, // Expected errors
-                    // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
                     else => try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err),
                 }
             };
@@ -343,7 +340,6 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
                     error.WriteStalled,
                     error.WriteBlocked,
                     => {}, // Expected
-                    // Safety: FuzzOperation struct has a well-defined memory layout for crash reporting
                     else => try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err),
                 }
             };
@@ -351,7 +347,6 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
             // Periodically check properties
             if (fuzzer.stats.iterations_executed % 100 == 0) {
                 PropertyChecker.check_data_consistency(&model, &storage) catch |err| {
-                    // Safety: Operation struct has a well-defined memory layout for crash reporting
                     try fuzzer.handle_crash(@ptrCast(std.mem.asBytes(&op)), err);
                 };
             }

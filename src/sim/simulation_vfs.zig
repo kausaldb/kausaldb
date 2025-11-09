@@ -266,7 +266,6 @@ pub const SimulationVFS = struct {
                     const bits_to_flip = self.prng.random().uintLessThan(u32, self.read_corruption_config.max_bits_per_corruption) + 1;
                     for (0..bits_to_flip) |_| {
                         const byte_index = self.prng.random().uintLessThan(usize, buffer.len);
-                        // Safety: Random value bounded by 8, fits in u3 range
                         const bit_index = @as(u3, @intCast(self.prng.random().uintLessThan(u4, 8)));
                         buffer[byte_index] ^= (@as(u8, 1) << bit_index);
                     }
@@ -510,7 +509,6 @@ pub const SimulationVFS = struct {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
         std.debug.assert(handle_id.is_valid());
 
-        // Safety: Pointer cast with alignment validation
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
 
         // Get FileStorage with state validation
@@ -528,7 +526,6 @@ pub const SimulationVFS = struct {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
         std.debug.assert(handle_id.is_valid());
 
-        // Safety: Pointer cast with alignment validation
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
 
         // Get FileStorage with state validation
@@ -545,7 +542,6 @@ pub const SimulationVFS = struct {
     fn current_time_fn(vfs_ptr: *anyopaque) i64 {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
 
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
         return self.current_time_ns;
     }
@@ -554,7 +550,6 @@ pub const SimulationVFS = struct {
     fn allocator_fn(vfs_ptr: *anyopaque) std.mem.Allocator {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
 
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
         return self.file_arena.allocator();
     }
@@ -564,7 +559,6 @@ pub const SimulationVFS = struct {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
         if (buffer.len == 0) return;
 
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
         self.fault_injection.apply_read_corruption(buffer);
     }
@@ -576,13 +570,11 @@ pub const SimulationVFS = struct {
         std.debug.assert(write_size > 0);
         std.debug.assert(write_size <= MAX_REASONABLE_FILE_SIZE);
 
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
 
         // Conservative disk space check - may reject writes that would fit due to overwrites
         // but prevents violations by always assuming additional space usage
         // Skip disk space limits for non-fault testing (when limit is set to DEFAULT_MAX_DISK_SPACE)
-
         if (self.fault_injection.max_disk_space < DEFAULT_MAX_DISK_SPACE and
             self.fault_injection.used_disk_space + write_size > self.fault_injection.max_disk_space)
         {
@@ -600,10 +592,7 @@ pub const SimulationVFS = struct {
     /// Update disk usage tracking for file size changes
     fn disk_usage_update_fn(vfs_ptr: *anyopaque, old_size: usize, new_size: usize) void {
         std.debug.assert(@intFromPtr(vfs_ptr) >= 0x1000);
-
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *SimulationVFS = @ptrCast(@alignCast(vfs_ptr));
-
         self.fault_injection.update_disk_usage(old_size, new_size);
     }
 
@@ -769,7 +758,6 @@ pub const SimulationVFS = struct {
     };
 
     fn open(ptr: *anyopaque, path: []const u8, mode: VFS.OpenMode) VFSError!VFile {
-        // Safety: Pointer guaranteed by caller interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -802,7 +790,6 @@ pub const SimulationVFS = struct {
     }
 
     fn create(ptr: *anyopaque, path: []const u8) VFSError!VFile {
-        // Safety: Pointer guaranteed by caller interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -854,7 +841,6 @@ pub const SimulationVFS = struct {
     }
 
     fn remove(ptr: *anyopaque, path: []const u8) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -879,7 +865,6 @@ pub const SimulationVFS = struct {
     }
 
     fn exists(ptr: *anyopaque, path: []const u8) bool {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
         const file_exists = self.files.contains(path);
@@ -888,7 +873,6 @@ pub const SimulationVFS = struct {
     }
 
     fn mkdir(ptr: *anyopaque, path: []const u8) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -918,7 +902,6 @@ pub const SimulationVFS = struct {
     }
 
     fn mkdir_all(ptr: *anyopaque, path: []const u8) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -956,7 +939,6 @@ pub const SimulationVFS = struct {
     }
 
     fn rmdir(ptr: *anyopaque, path: []const u8) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -988,7 +970,6 @@ pub const SimulationVFS = struct {
     /// All entry names and metadata are allocated in the provided arena,
     /// enabling O(1) cleanup when the arena is reset or destroyed.
     fn iterate_directory(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) VFSError!DirectoryIterator {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -1044,7 +1025,6 @@ pub const SimulationVFS = struct {
     }
 
     fn rename(ptr: *anyopaque, old_path: []const u8, new_path: []const u8) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(old_path.len > 0 and old_path.len < MAX_PATH_LENGTH);
         std.debug.assert(new_path.len > 0 and new_path.len < MAX_PATH_LENGTH);
@@ -1065,7 +1045,6 @@ pub const SimulationVFS = struct {
     }
 
     fn stat(ptr: *anyopaque, path: []const u8) VFSError!VFS.FileStat {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         std.debug.assert(path.len > 0 and path.len < MAX_PATH_LENGTH);
 
@@ -1081,7 +1060,6 @@ pub const SimulationVFS = struct {
     }
 
     fn sync(ptr: *anyopaque) VFSError!void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
 
         if (self.fault_injection.should_fail_operation(.{ .sync = true })) {
@@ -1090,7 +1068,6 @@ pub const SimulationVFS = struct {
     }
 
     fn deinit_vfs(ptr: *anyopaque, allocator: std.mem.Allocator) void {
-        // Safety: VFS pointer guaranteed by interface contract
         const self: *Self = @ptrCast(@alignCast(ptr));
         _ = allocator;
         _ = self;

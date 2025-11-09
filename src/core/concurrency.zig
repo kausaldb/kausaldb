@@ -88,7 +88,6 @@ pub const SingleThreadedAllocator = struct {
         ptr_align: std.mem.Alignment,
         ret_addr: usize,
     ) ?[*]u8 {
-        // Safety: Context guaranteed to be SingleThreadedAllocator by allocator interface
         const self: *SingleThreadedAllocator = @ptrCast(@alignCast(ctx));
         assert_main_thread();
         return self.base_allocator.vtable.alloc(
@@ -106,7 +105,6 @@ pub const SingleThreadedAllocator = struct {
         new_len: usize,
         ret_addr: usize,
     ) bool {
-        // Safety: Context guaranteed to be SingleThreadedAllocator by allocator interface
         const self: *SingleThreadedAllocator = @ptrCast(@alignCast(ctx));
         assert_main_thread();
         return self.base_allocator.vtable.resize(
@@ -119,7 +117,6 @@ pub const SingleThreadedAllocator = struct {
     }
 
     fn free_impl(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-        // Safety: Context guaranteed to be SingleThreadedAllocator by allocator interface
         const self: *SingleThreadedAllocator = @ptrCast(@alignCast(ctx));
         assert_main_thread();
         self.base_allocator.vtable.free(self.base_allocator.ptr, buf, buf_align, ret_addr);
@@ -132,7 +129,6 @@ pub const SingleThreadedAllocator = struct {
         new_len: usize,
         ret_addr: usize,
     ) ?[*]u8 {
-        // Safety: Context guaranteed to be SingleThreadedAllocator by allocator interface
         const self: *SingleThreadedAllocator = @ptrCast(@alignCast(ctx));
         assert_main_thread();
         return self.base_allocator.vtable.remap(

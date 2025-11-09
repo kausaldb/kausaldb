@@ -423,7 +423,6 @@ pub const ProductionVFS = struct {
         _ = allocator;
 
         // Clean up arena allocator - this handles all VFile instances automatically
-        // Safety: Pointer guaranteed to be ProductionVFS by VFS interface
         const self: *ProductionVFS = @ptrCast(@alignCast(ptr));
         self.arena.deinit();
     }

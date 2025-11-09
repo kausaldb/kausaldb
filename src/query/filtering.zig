@@ -124,13 +124,11 @@ pub const FilterCondition = struct {
             .source_uri => block.source_uri,
             .sequence => blk: {
                 var stack_buffer: [32]u8 = undefined;
-                // Safety: u32 max value is 4,294,967,295 (10 digits), buffer is 32 bytes - guaranteed fit
                 const written_slice = std.fmt.bufPrint(&stack_buffer, "{d}", .{block.sequence}) catch unreachable;
                 break :blk try allocator.dupe(u8, written_slice);
             },
             .content_length => blk: {
                 var stack_buffer: [16]u8 = undefined;
-                // Safety: Content length fits in 16 bytes - max usize is at most 20 digits on 64-bit
                 const written_slice = std.fmt.bufPrint(&stack_buffer, "{d}", .{block.content.len}) catch unreachable;
                 break :blk try allocator.dupe(u8, written_slice);
             },
@@ -413,7 +411,7 @@ test "filter condition - content contains" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
         .metadata_json = "{}",
@@ -431,7 +429,6 @@ test "filter condition - metadata field extraction" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
@@ -450,7 +447,6 @@ test "filter expression - logical AND" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "main.zig",
@@ -489,7 +485,7 @@ test "filter operators - comparison operations" {
     const allocator = testing.allocator;
 
     const block_v1 = ContextBlock{
-        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 1, // Test sequence for comparison operations
         .source_uri = "test_v1.zig",
         .metadata_json = "{}",
@@ -497,7 +493,7 @@ test "filter operators - comparison operations" {
     };
 
     const block_v2 = ContextBlock{
-        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable,
         .sequence = 2, // Test sequence for comparison operations
         .source_uri = "test_v2.zig",
         .metadata_json = "{}",
@@ -521,7 +517,6 @@ test "filter operators - string operations" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "hello_world.zig",
@@ -552,7 +547,7 @@ test "filter expression - logical OR operation" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "main.zig",
         .metadata_json = "{}",
@@ -590,7 +585,7 @@ test "filter expression - logical NOT operation" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test.zig",
         .metadata_json = "{}",
@@ -624,7 +619,6 @@ test "filter target - content length filtering" {
     const allocator = testing.allocator;
 
     const short_block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "short.zig",
@@ -633,7 +627,7 @@ test "filter target - content length filtering" {
     };
 
     const long_block = ContextBlock{
-        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "long.zig",
         .metadata_json = "{}",
@@ -653,7 +647,6 @@ test "complex nested filter expressions" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "complex.zig",
@@ -719,7 +712,7 @@ test "metadata field extraction edge cases" {
     const allocator = testing.allocator;
 
     const malformed_block = ContextBlock{
-        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "malformed.zig",
         .metadata_json = "{\"incomplete\":", // Invalid JSON
@@ -730,7 +723,7 @@ test "metadata field extraction edge cases" {
     try testing.expect(!try condition.matches(malformed_block, allocator));
 
     const empty_block = ContextBlock{
-        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "empty.zig",
         .metadata_json = "{}",
@@ -741,7 +734,7 @@ test "metadata field extraction edge cases" {
     try testing.expect(!try empty_condition.matches(empty_block, allocator));
 
     const nested_block = ContextBlock{
-        .id = BlockId.from_hex("33333333333333333333333333333333") catch unreachable, // Safety: hardcoded valid hex string
+        .id = BlockId.from_hex("33333333333333333333333333333333") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "nested.zig",
         .metadata_json = "{\"config\": {\"debug\": \"true\"}, \"level\": \"info\"}",
@@ -756,7 +749,6 @@ test "numeric comparison edge cases" {
     const allocator = testing.allocator;
 
     const block = ContextBlock{
-        // Safety: Hardcoded hex string is guaranteed to be valid 32-character hex
         .id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable,
         .sequence = 42, // Test sequence for numeric comparison
         .source_uri = "numeric.zig",

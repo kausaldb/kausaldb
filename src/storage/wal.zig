@@ -49,7 +49,7 @@ test "WAL entry serialization roundtrip" {
     const allocator = testing.allocator;
 
     const test_block = ContextBlock{
-        .id = BlockId.from_hex("0123456789abcdeffedcba9876543210") catch unreachable, // Safety: hardcoded valid hex
+        .id = BlockId.from_hex("0123456789abcdeffedcba9876543210") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://example",
         .metadata_json = "{}",
@@ -89,7 +89,7 @@ test "WAL basic write and recovery" {
     try wal.startup();
 
     const test_block = ContextBlock{
-        .id = BlockId.from_hex("1234567890abcdef1234567890abcdef") catch unreachable, // Safety: hardcoded valid hex
+        .id = BlockId.from_hex("1234567890abcdef1234567890abcdef") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://source",
         .metadata_json = "{}",
@@ -113,7 +113,6 @@ test "WAL basic write and recovery" {
     const callback = struct {
         fn recover(recovered_entry: WALEntry, ctx: *anyopaque) WALError!void {
             _ = recovered_entry; // Consumed by the callback, cleaned up by recovery system
-            // Safety: Context guaranteed to be *RecoveryContext by recovery system
             const context: *RecoveryContext = @ptrCast(@alignCast(ctx));
             context.entries_recovered += 1;
         }

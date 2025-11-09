@@ -362,7 +362,6 @@ pub const TieredCompactionManager = struct {
         var input_paths = std.ArrayList([]const u8){};
 
         for (self.tiers[0].sstables.items) |info| {
-            // Safety: Paths are stable owned copies from TierState
             input_paths.append(self.backing_allocator, info.path) catch unreachable;
         }
 
@@ -382,7 +381,7 @@ pub const TieredCompactionManager = struct {
 
         for (tier.sstables.items, 0..) |info, i| {
             _ = info;
-            candidates.append(self.backing_allocator, i) catch unreachable; // Safety: capacity ensured above
+            candidates.append(self.backing_allocator, i) catch unreachable;
             if (candidates.items.len >= self.config.max_sstables_per_tier) break;
         }
 
@@ -391,8 +390,6 @@ pub const TieredCompactionManager = struct {
 
         for (candidates.items) |idx| {
             const info = tier.sstables.items[idx];
-
-            // Safety: Capacity ensured above via ensureTotalCapacity call
             input_paths.append(self.backing_allocator, info.path) catch unreachable;
             total_size += info.size;
         }

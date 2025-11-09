@@ -156,7 +156,6 @@ pub const ArenaCoordinator = struct {
     /// Zero runtime overhead in release builds through comptime evaluation.
     pub fn validate_coordinator(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
-            // Safety: Converting pointer to integer for null pointer validation
             if (@intFromPtr(self.arena) == 0)
                 std.debug.panic(
                     "ArenaCoordinator arena pointer is null - coordinator corruption",
@@ -170,7 +169,6 @@ pub const ArenaCoordinator = struct {
     pub fn debug_info(self: *const ArenaCoordinator) ArenaCoordinatorDebugInfo {
         if (comptime builtin.mode == .Debug) {
             return ArenaCoordinatorDebugInfo{
-                // Safety: Converting pointers to integers for debug information display
                 .arena_address = @intFromPtr(self.arena),
                 .coordinator_address = @intFromPtr(self),
                 .is_valid = @intFromPtr(self.arena) != 0,
@@ -193,7 +191,6 @@ pub const ArenaCoordinator = struct {
     pub fn validate_arena_lifetime(self: *const ArenaCoordinator) void {
         if (comptime builtin.mode == .Debug) {
             // Basic pointer validation
-            // Safety: Converting pointers to integers for null pointer validation
             if (@intFromPtr(self) == 0) std.debug.panic("ArenaCoordinator self pointer is null", .{});
             if (@intFromPtr(self.arena) == 0) std.debug.panic("ArenaCoordinator arena pointer is null", .{});
 

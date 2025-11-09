@@ -164,7 +164,6 @@ pub fn ProtectedType(comptime T: type) type {
 /// before source, preventing corruption during the copy operation.
 pub fn copy_left(comptime T: type, dest: []T, source: []const T) void {
     std.debug.assert(dest.len >= source.len);
-    // Safety: Converting pointers to integers to detect overlapping memory regions
     std.debug.assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
     std.mem.copyForwards(T, dest, source);
 }
@@ -181,7 +180,6 @@ pub fn copy_left(comptime T: type, dest: []T, source: []const T) void {
 /// after source, preventing corruption during the copy operation.
 pub fn copy_right(comptime T: type, dest: []T, source: []const T) void {
     std.debug.assert(dest.len >= source.len);
-    // Safety: Converting pointers to integers to detect overlapping memory regions
     std.debug.assert(@intFromPtr(dest.ptr) != @intFromPtr(source.ptr) or dest.len == 0);
 
     std.mem.copyBackwards(T, dest, source);

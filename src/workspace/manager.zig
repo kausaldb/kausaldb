@@ -352,7 +352,6 @@ pub const WorkspaceManager = struct {
         const root = parsed.value.object;
 
         // Parse version (validate compatibility)
-        // Safety: JSON parsing guarantees integer fits in u32 range for version field
         const version = @as(u32, @intCast(root.get("version").?.integer));
         if (version != WorkspaceConfig.WORKSPACE_CONFIG_VERSION) {
             std.debug.panic("Unsupported workspace config version", .{});
@@ -368,7 +367,6 @@ pub const WorkspaceManager = struct {
                 .path = try self.coordinator.allocator().dupe(u8, codebase_obj.get("path").?.string),
                 .linked_timestamp = codebase_obj.get("linked_timestamp").?.integer,
                 .last_sync_timestamp = codebase_obj.get("last_sync_timestamp").?.integer,
-                // Safety: JSON parsing ensures counts fit in u32 range for database metrics
                 .block_count = @as(u32, @intCast(codebase_obj.get("block_count").?.integer)),
                 .edge_count = @as(u32, @intCast(codebase_obj.get("edge_count").?.integer)),
             };

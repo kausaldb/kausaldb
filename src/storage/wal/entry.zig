@@ -173,7 +173,6 @@ pub const WALEntry = struct {
         const entry = WALEntry{
             .checksum = checksum,
             .entry_type = .put_block,
-            // Safety: Payload size bounded by WAL entry limits and fits in u32
             .payload_size = @intCast(payload_size),
             .payload = payload,
         };
@@ -227,7 +226,6 @@ pub const WALEntry = struct {
         return WALEntry{
             .checksum = checksum,
             .entry_type = .put_edge,
-            // Safety: Payload length bounded by serialization limits and fits in u32
             .payload_size = @intCast(payload.len),
             .payload = payload,
         };
@@ -306,7 +304,7 @@ const testing = std.testing;
 
 fn create_test_block() ContextBlock {
     return ContextBlock{
-        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable, // Safety: hardcoded valid hex
+        .id = BlockId.from_hex("0123456789abcdef0123456789abcdef") catch unreachable,
         .sequence = 0, // Storage engine will assign the actual global sequence
         .source_uri = "test://wal_entry.zig",
         .metadata_json = "{}",
@@ -315,8 +313,8 @@ fn create_test_block() ContextBlock {
 }
 
 fn create_test_edge() GraphEdge {
-    const from_id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable; // Safety: hardcoded valid hex
-    const to_id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable; // Safety: hardcoded valid hex
+    const from_id = BlockId.from_hex("11111111111111111111111111111111") catch unreachable;
+    const to_id = BlockId.from_hex("22222222222222222222222222222222") catch unreachable;
 
     return GraphEdge{
         .source_id = from_id,
@@ -449,7 +447,7 @@ test "WALEntry create_put_block" {
 test "WALEntry create_tombstone_block" {
     const allocator = testing.allocator;
 
-    const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
+    const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable;
     const tombstone_record = tombstone.TombstoneRecord{
         .block_id = test_id,
         .sequence = 0, // Storage engine will assign the actual global sequence
@@ -609,7 +607,7 @@ test "WALEntry extract_block success" {
 test "WALEntry extract_block invalid entry type" {
     const allocator = testing.allocator;
 
-    const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable; // Safety: hardcoded valid hex
+    const test_id = BlockId.from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") catch unreachable;
     const tombstone_record = tombstone.TombstoneRecord{
         .block_id = test_id,
         .sequence = 0, // Storage engine will assign the actual global sequence

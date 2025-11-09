@@ -134,7 +134,6 @@ fn fuzz_traversal_query_parsing(engine: *QueryEngine, input: []const u8) !void {
 
     // Parse block ID from input
     var block_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&block_id))[0..16], input[0..16]);
 
     // Parse traversal parameters
@@ -202,15 +201,11 @@ fn fuzz_invalid_block_ids(engine: *QueryEngine, input: []const u8) !void {
     // Create various invalid patterns
     const pattern = input[0] % 4;
     switch (pattern) {
-        // Safety: BlockId is 16 bytes, memset with known size is safe
         0 => @memset(@as([*]u8, @ptrCast(&invalid_id))[0..16], 0), // All zeros
-        // Safety: BlockId is 16 bytes, memset with known size is safe
         1 => @memset(@as([*]u8, @ptrCast(&invalid_id))[0..16], 0xFF), // All ones
-        // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
         2 => @memcpy(@as([*]u8, @ptrCast(&invalid_id))[0..16], input[0..16]), // Random
         3 => { // Pattern
             for (0..16) |i| {
-                // Safety: Loop index i is bounded by 16 and fits in u8 range
                 @as([*]u8, @ptrCast(&invalid_id))[i] = @intCast(i);
             }
         },
@@ -263,7 +258,6 @@ fn fuzz_deep_recursion(engine: *QueryEngine, input: []const u8) !void {
 
     // Test with extremely deep traversals
     var block_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&block_id))[0..16], input[0..16]);
 
     const depths = [_]u32{ 100, 1000, 10000, 100000 };
@@ -387,7 +381,6 @@ fn generate_test_graph(allocator: std.mem.Allocator, storage: *StorageEngine, mo
     for (0..num_blocks) |i| {
         const block = ContextBlock{
             .id = BlockId.generate(),
-            // Safety: Loop index i + 1 is guaranteed to fit in sequence field type
             .sequence = @intCast(i + 1),
             .source_uri = "test://graph",
             .metadata_json = try std.fmt.allocPrint(

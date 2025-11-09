@@ -103,7 +103,6 @@ fn fuzz_infinite_loops(allocator: std.mem.Allocator, input: []const u8) !void {
 
     // Test traversal with infinite loops - should terminate gracefully
     var source_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&source_id))[0..16], input[0..16]);
 
     const loop_query = TraversalQuery{
@@ -153,7 +152,6 @@ fn fuzz_deep_recursion(allocator: std.mem.Allocator, input: []const u8) !void {
         if (offset + 16 > input.len) break;
 
         var block_id: BlockId = undefined;
-        // Safety: BlockId is 16 bytes and slice is guaranteed to be 16 bytes
         @memcpy(@as([*]u8, @ptrCast(&block_id))[0..16], input[offset .. offset + 16]);
 
         // Create block
@@ -190,7 +188,6 @@ fn fuzz_deep_recursion(allocator: std.mem.Allocator, input: []const u8) !void {
     // Test deep traversal - should not stack overflow
     if (chain_length > 0) {
         var first_id: BlockId = undefined;
-        // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
         @memcpy(@as([*]u8, @ptrCast(&first_id))[0..16], input[0..16]);
 
         const deep_query = TraversalQuery{
@@ -231,7 +228,6 @@ fn fuzz_cycle_detection(allocator: std.mem.Allocator, input: []const u8) !void {
 
     // Test that cycle detection works correctly
     var test_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&test_id))[0..16], input[0..16]);
 
     const algorithms = [_]TraversalAlgorithm{ .breadth_first, .depth_first };
@@ -283,7 +279,6 @@ fn fuzz_memory_exhaustion(allocator: std.mem.Allocator, input: []const u8) !void
 
     // Test traversal that could exhaust memory
     var source_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&source_id))[0..16], input[0..16]);
 
     const memory_test_query = TraversalQuery{
@@ -326,9 +321,7 @@ fn fuzz_malformed_graph_structures(allocator: std.mem.Allocator, input: []const 
     // Create edges that point to non-existent blocks
     var source_id: BlockId = undefined;
     var target_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input slices are guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&source_id))[0..16], input[0..16]);
-    // Safety: BlockId is 16 bytes and input slices are guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&target_id))[0..16], input[16..32]);
 
     // Skip if the IDs are identical to avoid self-referential edges
@@ -391,7 +384,6 @@ fn fuzz_concurrent_modifications(allocator: std.mem.Allocator, input: []const u8
 
     // Simulate concurrent modifications during traversal
     var source_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&source_id))[0..16], input[0..16]);
 
     const concurrent_query = TraversalQuery{
@@ -433,7 +425,6 @@ fn fuzz_extreme_fanout(allocator: std.mem.Allocator, input: []const u8) !void {
 
     // Create node with extreme fanout
     var hub_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and input[0..16] is guaranteed to be 16 bytes
     @memcpy(@as([*]u8, @ptrCast(&hub_id))[0..16], input[0..16]);
 
     const hub_block = ContextBlock{
@@ -496,7 +487,6 @@ fn fuzz_extreme_fanout(allocator: std.mem.Allocator, input: []const u8) !void {
 
 fn create_self_referencing_node(storage_engine: *StorageEngine, id_bytes: []const u8) !void {
     var block_id: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and id_bytes is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_id))[0..16], id_bytes);
 
     const block = ContextBlock{
@@ -515,9 +505,7 @@ fn create_self_referencing_node(storage_engine: *StorageEngine, id_bytes: []cons
 fn create_two_node_cycle(storage_engine: *StorageEngine, id1_bytes: []const u8, id2_bytes: []const u8) !void {
     var block_a: BlockId = undefined;
     var block_b: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and id1_bytes is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_a))[0..16], id1_bytes);
-    // Safety: BlockId is 16 bytes and id2_bytes is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_b))[0..16], id2_bytes);
 
     // Skip if the IDs are identical to avoid self-referential edges
@@ -554,11 +542,8 @@ fn create_triangle_cycle(storage_engine: *StorageEngine, id1: []const u8, id2: [
     var block_a: BlockId = undefined;
     var block_b: BlockId = undefined;
     var block_c: BlockId = undefined;
-    // Safety: BlockId is 16 bytes and id1 is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_a))[0..16], id1);
-    // Safety: BlockId is 16 bytes and id2 is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_b))[0..16], id2);
-    // Safety: BlockId is 16 bytes and id3 is guaranteed to be 16 bytes by caller
     @memcpy(@as([*]u8, @ptrCast(&block_c))[0..16], id3);
 
     // Skip if any IDs are identical to avoid self-referential edges

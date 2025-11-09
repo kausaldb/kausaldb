@@ -315,7 +315,6 @@ pub const ContextBlock = struct {
             .flags = 0,
             .id = self.id.bytes,
             .block_sequence = self.sequence,
-            // Safety: String lengths are bounded by memory limits and fit in u32
             .source_uri_len = @intCast(self.source_uri.len),
             .metadata_json_len = @intCast(self.metadata_json.len),
             .content_len = self.content.len,
@@ -391,14 +390,12 @@ pub const ContextBlock = struct {
     /// Validate ContextBlock structural integrity and field constraints.
     /// Checks memory pointers, size limits, and UTF-8 encoding compliance.
     pub fn validate(self: *const ContextBlock, allocator: std.mem.Allocator) !void {
-        // Safety: Converting allocator pointer to integer for null check validation
         std.debug.assert(@intFromPtr(allocator.ptr) != 0);
 
         // Size validation - return errors instead of asserting
         if (self.metadata_json.len >= 10 * 1024 * 1024) {
             return error.MetadataJsonTooLarge;
         }
-        // Safety: Converting pointer to integer for null pointer detection
         if (self.metadata_json.len > 0 and @intFromPtr(self.metadata_json.ptr) == 0) {
             return error.MetadataJsonNullPointer;
         }
@@ -406,7 +403,6 @@ pub const ContextBlock = struct {
         if (self.source_uri.len >= 1024 * 1024) {
             return error.SourceUriTooLarge;
         }
-        // Safety: Converting pointer to integer for null pointer detection
         if (self.source_uri.len > 0 and @intFromPtr(self.source_uri.ptr) == 0) {
             return error.SourceUriNullPointer;
         }
@@ -414,7 +410,6 @@ pub const ContextBlock = struct {
         if (self.content.len >= 100 * 1024 * 1024) {
             return error.ContentTooLarge;
         }
-        // Safety: Converting pointer to integer for null pointer detection
         if (self.content.len > 0 and @intFromPtr(self.content.ptr) == 0) {
             return error.ContentNullPointer;
         }

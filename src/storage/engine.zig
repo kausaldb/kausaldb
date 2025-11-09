@@ -248,7 +248,6 @@ pub const StorageEngine = struct {
         storage_config: Config,
     ) !StorageEngine {
         std.debug.assert(data_dir.len > 0);
-        // Safety: Converting pointer to integer for null pointer validation
         std.debug.assert(@intFromPtr(data_dir.ptr) != 0);
 
         storage_config.validate() catch |err| {
@@ -348,7 +347,6 @@ pub const StorageEngine = struct {
         if (comptime builtin.mode == .Debug) {
             self.arena_coordinator.validate_coordinator();
 
-            // Safety: Converting pointers to integers for arena reference validation
             if (@intFromPtr(self.arena_coordinator.arena) != @intFromPtr(self.storage_arena))
                 std.debug.panic(
                     "ArenaCoordinator does not reference StorageEngine arena - coordinator corruption",
@@ -401,7 +399,6 @@ pub const StorageEngine = struct {
     /// Must be called to prevent memory leaks and ensure proper cleanup.
     pub fn deinit(self: *StorageEngine) void {
         concurrency.assert_main_thread();
-        // Safety: Converting pointer to integer for memory corruption detection
         if (@intFromPtr(self) == 0)
             std.debug.panic("StorageEngine self pointer is null - memory corruption detected", .{});
 
@@ -447,7 +444,6 @@ pub const StorageEngine = struct {
     /// Coordinate memtable flush operation without containing business logic.
     /// Pure delegation to subsystems for flush orchestration.
     fn coordinate_memtable_flush(self: *StorageEngine) !void {
-        // Safety: Converting pointer to integer for subsystem corruption detection
         std.debug.assert(@intFromPtr(&self.sstable_manager) != 0);
 
         const command = FlushMemtableCommand{ .storage_engine = self };
@@ -487,7 +483,6 @@ pub const StorageEngine = struct {
 
         // System clock can go backwards due to NTP adjustments or high-frequency operations.
         // In such cases, record a minimal duration (1ns) to maintain metric consistency.
-        // Safety: Time difference is always non-negative and fits in u64 range
         const write_duration: u64 = if (end_time >= start_time)
             @as(u64, @intCast(end_time - start_time))
         else
