@@ -22,7 +22,6 @@ comptime {
     _ = @import("cli/client.zig");
     _ = @import("cli/parser.zig");
     _ = @import("cli/protocol.zig");
-    _ = @import("dev/debug_allocator.zig");
     _ = @import("dev/hooks.zig");
     _ = @import("dev/tidy.zig");
     _ = @import("ingestion/ingest_file.zig");
