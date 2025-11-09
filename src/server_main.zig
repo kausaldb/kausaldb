@@ -7,8 +7,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 
-const stdx = @import("core/stdx.zig");
+const log = std.log.scoped(.kausaldb_server);
 
+const stdx = @import("core/stdx.zig");
 const concurrency = @import("core/concurrency.zig");
 const error_context = @import("core/error_context.zig");
 const daemon = @import("server/daemon.zig");
@@ -19,13 +20,6 @@ const network_server_mod = @import("server/network_server.zig");
 const ServerConfig = config_mod.ServerConfig;
 const ServerCoordinator = coordinator_mod.ServerCoordinator;
 const NetworkServer = network_server_mod.NetworkServer;
-
-pub const std_options: std.Options = .{
-    // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
-    // The runtime filtering is handled by log_level_runtime.
-    .log_level = .debug,
-    .logFn = log_runtime,
-};
 
 /// The runtime maximum log level.
 /// One of: .err, .warn, .info, .debug
@@ -42,7 +36,12 @@ pub fn log_runtime(
     }
 }
 
-const log = std.log.scoped(.kausaldb_server);
+pub const std_options: std.Options = .{
+    // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
+    // The runtime filtering is handled by log_level_runtime.
+    .log_level = .debug,
+    .logFn = log_runtime,
+};
 
 /// Check if a string matches any in a list of alternatives
 inline fn matches(str: []const u8, alternatives: []const []const u8) bool {

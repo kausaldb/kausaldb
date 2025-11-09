@@ -18,7 +18,6 @@ pub fn log_runtime(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    // A microbenchmark places the cost of this if at somewhere around 1600us for 10 million calls.
     if (@intFromEnum(message_level) <= @intFromEnum(log_level_runtime)) {
         stdx.log_with_timestamp(message_level, scope, format, args);
     }
