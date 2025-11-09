@@ -31,10 +31,6 @@ const EdgeType = types.EdgeType;
 const GraphEdge = types.GraphEdge;
 const StorageEngine = storage_engine_mod.StorageEngine;
 
-// ====================================================================
-// Basic Storage Operations
-// ====================================================================
-
 test "scenario: basic put-find-delete operations maintain consistency" {
     const allocator = testing.allocator;
 
@@ -115,10 +111,6 @@ test "scenario: read-heavy workload with cache behavior" {
     try runner.run(450);
 }
 
-// ====================================================================
-// Memtable Flush Scenarios
-// ====================================================================
-
 test "scenario: memtable flush at size threshold preserves data" {
     const allocator = testing.allocator;
 
@@ -175,10 +167,6 @@ test "scenario: concurrent operations during flush cycle" {
     // Operations interleaved with flush cycles
     try runner.run(400);
 }
-
-// ====================================================================
-// WAL Recovery Scenarios
-// ====================================================================
 
 test "scenario: WAL recovery after clean shutdown" {
     const allocator = testing.allocator;
@@ -278,10 +266,6 @@ test "scenario: partial WAL write during crash" {
     try runner.verify_consistency();
 }
 
-// ====================================================================
-// Compaction Scenarios
-// ====================================================================
-
 test "scenario: tiered compaction under write pressure" {
     const allocator = testing.allocator;
 
@@ -343,10 +327,6 @@ test "scenario: read performance during compaction" {
     try runner.run(500);
 }
 
-// ====================================================================
-// Graph Edge Scenarios
-// ====================================================================
-
 test "scenario: graph edge consistency with block operations" {
     const allocator = testing.allocator;
 
@@ -399,10 +379,6 @@ test "scenario: graph traversal under concurrent modifications" {
     // Heavy traversal with concurrent modifications
     try runner.run(400);
 }
-
-// ====================================================================
-// Memory Pressure Scenarios
-// ====================================================================
 
 test "scenario: memory pressure triggers appropriate backpressure" {
     const allocator = testing.allocator;
@@ -467,10 +443,6 @@ test "scenario: arena memory cleanup after flush cycles" {
     try testing.expect(final_memory.arena_bytes <= initial_memory.arena_bytes * 2);
 }
 
-// ====================================================================
-// Error Injection Scenarios
-// ====================================================================
-
 test "scenario: I/O errors during write operations" {
     const allocator = testing.allocator;
 
@@ -532,10 +504,6 @@ test "scenario: checksum failures during read operations" {
     // Corrupted data should be detected and handled
     try runner.verify_consistency();
 }
-
-// ====================================================================
-// Complex Multi-Phase Scenarios
-// ====================================================================
 
 test "scenario: full lifecycle - write, flush, compact, crash, recover" {
     const allocator = testing.allocator;
@@ -610,10 +578,6 @@ test "scenario: sustained mixed workload for 10K operations" {
     // Final consistency check
     try runner.verify_consistency();
 }
-
-// ====================================================================
-// Regression Tests for Specific Issues
-// ====================================================================
 
 test "scenario: regression - block iterator memory leak" {
     const allocator = testing.allocator;

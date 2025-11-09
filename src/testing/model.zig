@@ -404,10 +404,6 @@ pub const ModelState = struct {
         self.update_memory_tracking();
     }
 
-    // ========================================================================
-    // Mathematical Validation and Forensic Methods
-    // ========================================================================
-
     /// Update memory usage tracking with mathematical precision
     fn update_memory_tracking(self: *Self) void {
         const current_usage = self.model_arena.queryCapacity();
@@ -815,13 +811,6 @@ pub const ModelState = struct {
             );
         }
     }
-
-    // ========================================================================
-    // Mathematical Query Interface
-    //
-    // These methods provide mathematically precise access to model state
-    // with comprehensive validation and forensic tracking capabilities.
-    // ========================================================================
 
     /// Count active (non-deleted) blocks with mathematical precision
     pub fn active_block_count(self: *Self) !u32 {

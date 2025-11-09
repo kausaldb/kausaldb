@@ -1168,10 +1168,6 @@ pub const SimulationRunner = struct {
     }
 };
 
-// =============================================================================
-// Test Utilities (moved from test_utils.zig)
-// =============================================================================
-
 /// Create deterministic block ID from seed for reproducible tests
 pub fn create_deterministic_block_id(seed: u32) BlockId {
     // Generate two u64 values to fill all 16 bytes of BlockId

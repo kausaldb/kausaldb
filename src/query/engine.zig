@@ -533,8 +533,6 @@ pub const QueryEngine = struct {
         self.total_query_time_ns.add(duration);
     }
 
-    // === Workspace-Scoped Semantic Query API ===
-
     /// Find entities of a specific type by name within a linked codebase
     pub fn find_by_name(
         self: *QueryEngine,

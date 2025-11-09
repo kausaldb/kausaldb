@@ -75,14 +75,14 @@ const FuzzStats = struct {
     timeout_crashes: u64 = 0,
 
     fn print(self: FuzzStats) void {
-        std.debug.print("\n=== Fuzzing Report ===\n", .{});
+        std.debug.print("\nFuzzing Report \n", .{});
         std.debug.print("Total iterations: {}\n", .{self.iterations_executed});
         std.debug.print("Execution rate: {d:.1} ops/sec\n", .{self.executions_per_second});
         std.debug.print("Coverage edges: {}\n", .{self.coverage_edges});
         std.debug.print("Peak memory: {} MB\n", .{self.peak_memory_bytes / (1024 * 1024)});
         std.debug.print("\n", .{});
 
-        std.debug.print("=== Crashes Found ===\n", .{});
+        std.debug.print("Crashes Found \n", .{});
         std.debug.print("Total crashes: {}\n", .{self.total_crashes});
         std.debug.print("Unique crashes: {}\n", .{self.unique_crashes});
         if (self.total_crashes > 0) {
@@ -611,19 +611,19 @@ fn run_target(fuzzer: *Fuzzer, target: Target) !void {
             try props.run_linearizability_testing(fuzzer);
         },
         .all_parse => {
-            std.debug.print("=== Parse Fuzzing ===\n", .{});
+            std.debug.print("Parse Fuzzing \n", .{});
             try run_target(fuzzer, .storage_parse);
             try run_target(fuzzer, .network_parse);
             try run_target(fuzzer, .cli_parse);
         },
         .all_logic => {
-            std.debug.print("=== Logic Fuzzing ===\n", .{});
+            std.debug.print("Logic Fuzzing \n", .{});
             try run_target(fuzzer, .storage_logic);
             try run_target(fuzzer, .query_logic);
             try run_target(fuzzer, .graph_logic);
         },
         .all_properties => {
-            std.debug.print("=== Property Testing ===\n", .{});
+            std.debug.print("Property Testing \n", .{});
             try run_target(fuzzer, .durability);
             try run_target(fuzzer, .consistency);
             try run_target(fuzzer, .linearizability);
@@ -637,7 +637,6 @@ fn run_target(fuzzer: *Fuzzer, target: Target) !void {
 }
 
 pub fn main() !void {
-    // Use GeneralPurposeAllocator with safety for memory error detection
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .safety = true,
         .retain_metadata = true,
@@ -660,10 +659,6 @@ pub fn main() !void {
     };
 
     std.debug.print(
-        \\╔═══════════════════════════════════════╗
-        \\║     KausalDB Fuzzing Framework        ║
-        \\╚═══════════════════════════════════════╝
-        \\
         \\Target: {s}
         \\Iterations: {}
         \\Seed: 0x{X:0>16}

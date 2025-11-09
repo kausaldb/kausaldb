@@ -31,10 +31,6 @@ const GraphEdge = types.GraphEdge;
 const QueryEngine = query_engine_mod.QueryEngine;
 const TraversalQuery = query_engine_mod.TraversalQuery;
 
-// ====================================================================
-// Graph Traversal Scenarios
-// ====================================================================
-
 test "scenario: single-hop traversal consistency" {
     const allocator = testing.allocator;
 
@@ -127,10 +123,6 @@ test "scenario: bidirectional traversal consistency" {
     // - Edge directions are preserved correctly
 }
 
-// ====================================================================
-// Query Filtering Scenarios
-// ====================================================================
-
 test "scenario: edge type filtering accuracy" {
     const allocator = testing.allocator;
 
@@ -186,10 +178,6 @@ test "scenario: metadata filtering with complex predicates" {
     // Verify metadata predicates filter correctly
     try runner.verify_consistency();
 }
-
-// ====================================================================
-// Query Performance Scenarios
-// ====================================================================
 
 test "scenario: query caching effectiveness" {
     const allocator = testing.allocator;
@@ -262,10 +250,6 @@ test "scenario: large graph traversal scalability" {
     try testing.expect(stats_after.blocks_read >= stats_before.blocks_read);
 }
 
-// ====================================================================
-// Concurrent Modification Scenarios
-// ====================================================================
-
 test "scenario: queries during active writes" {
     const allocator = testing.allocator;
 
@@ -318,10 +302,6 @@ test "scenario: traversal during graph mutations" {
     try runner.verify_edge_consistency();
 }
 
-// ====================================================================
-// Error Handling Scenarios
-// ====================================================================
-
 test "scenario: query handling of missing blocks" {
     const allocator = testing.allocator;
 
@@ -371,10 +351,6 @@ test "scenario: traversal with dangling edges" {
     // System should handle dangling edges correctly
     try runner.verify_edge_consistency();
 }
-
-// ====================================================================
-// Complex Query Patterns
-// ====================================================================
 
 test "scenario: fan-out graph traversal patterns" {
     const allocator = testing.allocator;
@@ -434,10 +410,6 @@ test "scenario: cyclic graph traversal termination" {
     try runner.verify_traversal_termination();
 }
 
-// ====================================================================
-// Query Optimization Scenarios
-// ====================================================================
-
 test "scenario: query plan optimization effectiveness" {
     const allocator = testing.allocator;
 
@@ -494,10 +466,6 @@ test "scenario: index usage for filtered queries" {
     // Verify consistency with index usage
     try runner.verify_consistency();
 }
-
-// ====================================================================
-// Regression Tests
-// ====================================================================
 
 test "scenario: regression - infinite traversal loop prevention" {
     const allocator = testing.allocator;

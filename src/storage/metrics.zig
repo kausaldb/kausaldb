@@ -183,7 +183,7 @@ pub const StorageMetrics = struct {
     /// Format metrics as human-readable text for operational dashboards.
     /// Provides key performance indicators in an easily scannable format.
     pub fn format_human_readable(self: *const StorageMetrics, writer: anytype) !void {
-        try writer.writeAll("=== Storage Metrics ===\n");
+        try writer.writeAll("Storage Metrics \n");
         try writer.print("Blocks: {} written, {} read, {} deleted\n", .{
             self.blocks_written.load(),
             self.blocks_read.load(),

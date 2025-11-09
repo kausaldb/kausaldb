@@ -143,10 +143,6 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
     try verify_storage_properties(&storage, &model);
 }
 
-// ============================================================================
-// Parse Fuzzing Functions
-// ============================================================================
-
 fn fuzz_sstable_header_parsing(allocator: std.mem.Allocator, input: []const u8) !void {
     // SSTable header is 64 bytes aligned, test malformed headers
     if (input.len < 64) return;
@@ -277,10 +273,6 @@ fn fuzz_metadata_parsing(allocator: std.mem.Allocator, input: []const u8) !void 
     };
     defer parsed.deinit();
 }
-
-// ============================================================================
-// Logic Fuzzing Functions
-// ============================================================================
 
 fn apply_operation_to_storage(storage: *StorageEngine, op: *const Operation) !void {
     switch (op.op_type) {

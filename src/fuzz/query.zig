@@ -125,10 +125,6 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
     }
 }
 
-// ============================================================================
-// Parse Fuzzing Functions
-// ============================================================================
-
 fn fuzz_traversal_query_parsing(engine: *QueryEngine, input: []const u8) !void {
     if (input.len < 17) return;
 
@@ -364,10 +360,6 @@ fn fuzz_concurrent_query_patterns(engine: *QueryEngine, input: []const u8) !void
         }
     }
 }
-
-// ============================================================================
-// Logic Fuzzing Functions
-// ============================================================================
 
 fn generate_test_graph(allocator: std.mem.Allocator, storage: *StorageEngine, model: *ModelState, seed: u64) !void {
     var prng = std.Random.DefaultPrng.init(seed);

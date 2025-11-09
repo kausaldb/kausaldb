@@ -78,10 +78,8 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          echo "========================================="
           echo "Testing on ${{ matrix.os }} with seed: ${{ matrix.seed }}"
           echo "Reproduce failures with: ./zig/zig build test-unit -Dseed=${{ matrix.seed }}"
-          echo "========================================="
           ./zig/zig build test-unit -Dseed=${{ matrix.seed }} -Dtest-iterations=3
 
       - name: Run Integration Tests

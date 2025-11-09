@@ -29,10 +29,6 @@ const ContextBlock = types.ContextBlock;
 const EdgeType = types.EdgeType;
 const GraphEdge = types.GraphEdge;
 
-// ====================================================================
-// Single Language Ingestion Scenarios
-// ====================================================================
-
 test "scenario: zig file ingestion with function relationships" {
     const allocator = testing.allocator;
 
@@ -160,10 +156,6 @@ test "scenario: typescript file ingestion with type definitions" {
     try runner.verify_type_relationships();
 }
 
-// ====================================================================
-// Multi-Language Project Scenarios
-// ====================================================================
-
 test "scenario: mixed language project ingestion" {
     const allocator = testing.allocator;
 
@@ -231,10 +223,6 @@ test "scenario: incremental project updates" {
     try runner.verify_incremental_consistency();
 }
 
-// ====================================================================
-// Error Handling Scenarios
-// ====================================================================
-
 test "scenario: malformed file handling" {
     const allocator = testing.allocator;
 
@@ -300,10 +288,6 @@ test "scenario: partial file ingestion recovery" {
     try runner.verify_partial_ingestion_recovery();
 }
 
-// ====================================================================
-// Performance and Scale Scenarios
-// ====================================================================
-
 test "scenario: large file ingestion performance" {
     const allocator = testing.allocator;
 
@@ -364,10 +348,6 @@ test "scenario: bulk project ingestion" {
     try runner.verify_bulk_ingestion_performance();
 }
 
-// ====================================================================
-// Context Extraction Scenarios
-// ====================================================================
-
 test "scenario: function context extraction accuracy" {
     const allocator = testing.allocator;
 
@@ -427,10 +407,6 @@ test "scenario: documentation block linking" {
     try runner.verify_doc_linking();
 }
 
-// ====================================================================
-// Graph Building Scenarios
-// ====================================================================
-
 test "scenario: import dependency graph construction" {
     const allocator = testing.allocator;
 
@@ -488,10 +464,6 @@ test "scenario: call graph construction" {
     // Verify call graph accuracy
     try runner.verify_call_graph();
 }
-
-// ====================================================================
-// Metadata Extraction Scenarios
-// ====================================================================
 
 test "scenario: rich metadata extraction" {
     const allocator = testing.allocator;
@@ -551,10 +523,6 @@ test "scenario: sequence tracking during updates" {
     // Verify sequence history is maintained
     try runner.verify_sequence_tracking();
 }
-
-// ====================================================================
-// Regression Tests
-// ====================================================================
 
 test "scenario: regression - Unicode handling in source files" {
     const allocator = testing.allocator;

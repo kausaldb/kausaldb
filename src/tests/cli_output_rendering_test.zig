@@ -82,7 +82,7 @@ test "cli status output exact snapshot" {
         \\
     ;
 
-    errdefer std.debug.print("=== EXPECTED OUTPUT ===\n", .{});
+    errdefer std.debug.print("EXPECTED OUTPUT: \n", .{});
     errdefer std.debug.print("{s}", .{expected_output});
 
     // Render the status to temp file
@@ -96,7 +96,7 @@ test "cli status output exact snapshot" {
     defer testing.allocator.free(actual_output);
     _ = try temp_file.readAll(actual_output);
 
-    errdefer std.debug.print("=== ACTUAL OUTPUT ===\n", .{});
+    errdefer std.debug.print("ACTUAL OUTPUT: \n", .{});
     errdefer std.debug.print("{s}", .{actual_output});
 
     // Compare with expected output

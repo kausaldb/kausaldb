@@ -189,8 +189,6 @@ fn consume_flag_value(args: []const []const u8, i: *usize, flag_name: []const u8
     return args[i.*];
 }
 
-// === Tests ===
-
 const testing = std.testing;
 
 test "ServerConfig default values are valid" {

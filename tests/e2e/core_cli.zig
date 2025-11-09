@@ -83,8 +83,6 @@ test "help with specific topic works" {
         result.contains_output("Commands"));
 }
 
-// === Flag Tests ===
-
 test "standard help flags are supported" {
     var test_harness = try harness.E2EHarness.init(testing.allocator, "help_flags");
     defer test_harness.deinit();

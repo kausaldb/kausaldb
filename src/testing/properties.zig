@@ -464,14 +464,6 @@ pub const PropertyChecker = struct {
         }
     }
 
-    // ========================================================================
-    // Mathematical Property Validation Helpers
-    //
-    // These functions implement the mathematical foundations for property
-    // verification. Each helper represents a specific aspect of system
-    // correctness that can be formally verified.
-    // ========================================================================
-
     /// Model-Based K-Hop Collection: Breadth-First Traversal Through Model State
     /// Implements the mathematical definition of k-hop reachability using model edges
     fn collect_k_hop_neighbors_model(model: *ModelState, source: BlockId, k: u32, neighbors: *std.AutoHashMap(BlockId, void)) !void {
@@ -586,14 +578,6 @@ fn can_reach_block(system: *StorageEngine, source: BlockId, target: BlockId, edg
 
     return false;
 }
-
-// ============================================================================
-// Property Validation System Verification
-//
-// These tests validate that the property system itself maintains the same
-// mathematical rigor it enforces. Each test represents a meta-property
-// about the validation system's correctness.
-// ============================================================================
 
 test "mathematical invariant completeness" {
     // INVARIANT: All critical database properties have corresponding validation functions

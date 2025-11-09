@@ -42,7 +42,7 @@ const PropertyStats = struct {
     recoveries_tested: u64 = 0,
 
     fn print(self: PropertyStats) void {
-        std.debug.print("\n=== Property Test Results ===\n", .{});
+        std.debug.print("\nProperty Test Results: \n", .{});
         std.debug.print("Operations: {}\n", .{self.operations_executed});
         std.debug.print("Properties checked: {}\n", .{self.properties_checked});
         std.debug.print("Violations: {}\n", .{self.violations_found});
@@ -360,10 +360,6 @@ pub fn run_logic_fuzzing(fuzzer: *main.Fuzzer) !void {
         fuzzer.record_iteration();
     }
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 fn apply_to_model(model: *ModelState, op: *const Operation) !void {
     switch (op.op_type) {

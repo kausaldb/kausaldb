@@ -94,7 +94,7 @@ pub fn print_benchmark_header(allocator: std.mem.Allocator, name: []const u8) vo
         return;
     }
 
-    print_status(allocator, "=== KausalDB {s} Benchmark ===\n\n", .{name});
+    print_status(allocator, "KausalDB {s} Benchmark: \n\n", .{name});
 }
 
 /// Print benchmark configuration details
@@ -159,7 +159,7 @@ pub fn print_results_header() void {
         return;
     }
 
-    write_benchmark_results("\n=== Benchmark Results ===\n\n");
+    write_benchmark_results("\nBenchmark Results: \n\n");
 }
 
 /// Print individual benchmark result

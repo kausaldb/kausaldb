@@ -109,8 +109,6 @@ pub fn main() !void {
 }
 
 fn print_usage() !void {
-    std.debug.print("KausalDB Git Hooks Manager\n", .{});
-    std.debug.print("===========================\n", .{});
     std.debug.print("Usage: hooks <command>\n", .{});
     std.debug.print("Commands:\n", .{});
     std.debug.print("  install - Install all git hooks\n", .{});
@@ -173,8 +171,6 @@ fn show_hook_status(allocator: Allocator) !void {
     defer hooks_dir.close();
 
     std.debug.print("Git Hook Status:\n", .{});
-    std.debug.print("================\n", .{});
-
     const hooks = [_]Hook{ .pre_commit, .pre_push };
 
     for (hooks) |hook| {

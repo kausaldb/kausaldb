@@ -147,8 +147,6 @@ pub const MessageHeader = struct {
     }
 };
 
-// === Unit Tests ===
-
 const testing = @import("std").testing;
 
 test "WorkspaceInfo basic operations without corruption" {
@@ -296,8 +294,6 @@ test "StatusResponse manages workspace count correctly" {
 
     try testing.expectEqual(MAX_WORKSPACES_PER_STATUS, status.workspace_count);
 }
-
-// === Request Structures ===
 
 /// Request to find blocks by query
 pub const FindRequest = struct {

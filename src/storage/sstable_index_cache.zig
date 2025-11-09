@@ -312,10 +312,6 @@ pub const CacheStatistics = struct {
     }
 };
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 
 test "SSTableId creation and equality" {

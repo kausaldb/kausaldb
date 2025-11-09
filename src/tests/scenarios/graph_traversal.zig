@@ -339,16 +339,6 @@ test "scenario: repeated traversal queries maintain consistency" {
     try runner.verify_consistency();
 }
 
-// ============================================================================
-// Edge Case Tests: Pathological Graph Structures
-// ============================================================================
-//
-// These tests explicitly construct and verify traversal behavior on edge cases
-// that could expose off-by-one errors, infinite loops, or stack overflows.
-//
-// Note: Self-loops (A -> A) are rejected by design at the storage layer
-// (see storage/engine.zig:1025), so we test 2-node cycles as the minimal cycle.
-
 const storage_mod = @import("../../storage/engine.zig");
 const query_mod = @import("../../query/engine.zig");
 const simulation_vfs = @import("../../sim/simulation_vfs.zig");

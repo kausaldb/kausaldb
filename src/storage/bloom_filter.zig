@@ -208,8 +208,6 @@ pub const BloomFilter = struct {
     }
 };
 
-// ===== TESTS =====
-
 test "Bloom filter basic operations" {
     const allocator = std.testing.allocator;
 
